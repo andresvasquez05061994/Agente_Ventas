@@ -1,0 +1,34 @@
+Coloca aquí los logos de IAC para la plataforma.
+
+RUTA EN TU PROYECTO:
+  Agente_Ventas/assets/logos/
+
+ARCHIVOS ACEPTADOS (usa uno de estos pares):
+
+  Opción A (recomendada):
+    logo-light.png   →  modo claro
+    logo-dark.png    →  modo oscuro
+
+  Opción B (archivos actuales IAC):
+    logo-iac.png         →  modo claro
+    logo-iac-white.png   →  modo oscuro
+
+CUÁNDO USAR CADA UNO:
+  logo-light  →  Modo CLARO (fondo blanco del header)
+  logo-dark   →  Modo OSCURO (fondo oscuro del header)
+
+RECOMENDACIONES:
+  - Formato preferido: SVG (nítido en cualquier tamaño)
+  - Altura recomendada: 28–36 px
+  - logo-light: versión oscura/coloreada del logo (visible sobre blanco)
+  - logo-dark: versión clara/blanca del logo (visible sobre fondo oscuro)
+  - Fondo transparente en ambos archivos
+
+EJEMPLO DE ESTRUCTURA:
+  assets/
+    logos/
+      logo-iac.png
+      logo-iac-white.png
+
+Tras copiar los archivos, recarga la app en el navegador.
+El botón "Oscuro" / "Claro" en la barra superior alterna el tema automáticamente.

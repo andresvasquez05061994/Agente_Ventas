@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --navy: #003366;
+  --bg: #ffffff;
+  --text: #3d4f63;
+}
+
+.dark {
+  --navy: #4a8fd4;
+  --bg: #0f1419;
+  --text: #b8c5d3;
+}
+
+body {
+  font-family: var(--font-jakarta), system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.input-field {
+  @apply w-full rounded border border-[#C8D0D8] bg-white px-3 py-2 text-sm text-[#1A2332] outline-none focus:border-[#003366] focus:ring-2 focus:ring-[#E8EEF4] dark:border-[#3D4D61] dark:bg-[#0F1419] dark:text-[#E8EEF4] dark:focus:border-[#4A8FD4] dark:focus:ring-[#1E3A5F];
+}
+
+.btn-primary {
+  @apply rounded bg-[#003366] px-4 py-2 text-sm font-semibold text-white hover:bg-[#002244] disabled:opacity-50 dark:bg-[#4A8FD4] dark:hover:bg-[#6BA8E8];
+}

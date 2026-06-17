@@ -1,0 +1,11 @@
+.env
+.env.local
+data/
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
+.venv/
+venv/
+web/node_modules/
+web/.next/
+web/.env.local

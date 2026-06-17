@@ -1,0 +1,8 @@
+# ── Fase 1: Plataforma de Leads ──────────────────────────────────────────
+streamlit>=1.32.0
+pandas>=2.0.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# ── Fase 3: Agente WhatsApp + Mistral (descomentar al activar Fase 3) ─────
+# mistralai[agents]>=1.5.0
