@@ -5,8 +5,8 @@ const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
 const BULK_MATCH_URL = `${BASE_URL}/people/bulk_match`;
 const BULK_BATCH = 10;
-const PHONE_POLL_MS = 2000;
-const PHONE_POLL_MAX_MS = 40000;
+const PHONE_POLL_MS = 1500;
+const PHONE_POLL_MAX_MS = 6000;
 
 function apiHeaders() {
   const key = process.env.APOLLO_API_KEY;
@@ -97,28 +97,17 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function bulkMatch(
-  ids: string[],
-  options: { revealPhone: boolean }
-): Promise<Map<string, Record<string, unknown>>> {
+async function bulkMatch(ids: string[]): Promise<Map<string, Record<string, unknown>>> {
   const map = new Map<string, Record<string, unknown>>();
   if (!ids.length) return map;
 
   const url = new URL(BULK_MATCH_URL);
   url.searchParams.set("reveal_personal_emails", "false");
 
-  if (options.revealPhone) {
-    const base = webhookBaseUrl();
-    if (!base) {
-      throw new Error(
-        "No se puede revelar teléfono móvil sin URL pública del webhook (VERCEL_URL)."
-      );
-    }
+  const base = webhookBaseUrl();
+  if (base) {
     url.searchParams.set("reveal_phone_number", "true");
-    url.searchParams.set(
-      "webhook_url",
-      `${base}/api/apollo/phone-webhook`
-    );
+    url.searchParams.set("webhook_url", `${base}/api/apollo/phone-webhook`);
   } else {
     url.searchParams.set("reveal_phone_number", "false");
   }
@@ -126,9 +115,7 @@ async function bulkMatch(
   const res = await fetch(url.toString(), {
     method: "POST",
     headers: apiHeaders(),
-    body: JSON.stringify({
-      details: ids.map((id) => ({ id })),
-    }),
+    body: JSON.stringify({ details: ids.map((id) => ({ id })) }),
   });
 
   if (!res.ok) {
@@ -137,7 +124,6 @@ async function bulkMatch(
 
   const data = await res.json();
   const matches = (data.matches ?? data.people ?? []) as Record<string, unknown>[];
-
   for (const match of matches) {
     const id = String(match.id ?? "");
     if (id) map.set(id, match);
@@ -167,15 +153,12 @@ export async function enrichPeopleWithContacts(
   rawPeople: Record<string, unknown>[]
 ): Promise<ApolloPerson[]> {
   const candidates = rawPeople.filter(isContactableInSearch);
-  const ids = candidates
-    .map((p) => String(p.id ?? ""))
-    .filter(Boolean);
-
+  const ids = candidates.map((p) => String(p.id ?? "")).filter(Boolean);
   const enrichedMap = new Map<string, Record<string, unknown>>();
 
   for (const batch of chunk(ids, BULK_BATCH)) {
-    const sync = await bulkMatch(batch, { revealPhone: false });
-    for (const [id, person] of sync) enrichedMap.set(id, person);
+    const matched = await bulkMatch(batch);
+    for (const [id, person] of matched) enrichedMap.set(id, person);
   }
 
   const missingPhone = ids.filter((id) => {
@@ -184,9 +167,6 @@ export async function enrichPeopleWithContacts(
   });
 
   if (missingPhone.length) {
-    for (const batch of chunk(missingPhone, BULK_BATCH)) {
-      await bulkMatch(batch, { revealPhone: true });
-    }
     const polled = await pollPhones(missingPhone);
     for (const [id, phone] of polled) {
       const person = enrichedMap.get(id) ?? { id };
@@ -207,8 +187,9 @@ export async function enrichPeopleWithContacts(
   return results;
 }
 
-/** Parsea payload del webhook de teléfonos Apollo. */
-export function parsePhoneWebhookPayload(body: unknown): Array<{ apollo_id: string; telefono: string }> {
+export function parsePhoneWebhookPayload(
+  body: unknown
+): Array<{ apollo_id: string; telefono: string }> {
   const out: Array<{ apollo_id: string; telefono: string }> = [];
   if (!body || typeof body !== "object") return out;
 

@@ -8,7 +8,8 @@ import {
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
 const SEARCH_URL = `${BASE_URL}/mixed_people/api_search`;
-const MAX_SEARCH_PAGES = 5;
+const MAX_SEARCH_PAGES = 3;
+const TIME_BUDGET_MS = 50000;
 
 function headers() {
   const key = process.env.APOLLO_API_KEY;
@@ -78,12 +79,14 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
   let totalEntries = 0;
   let lastPage = input.page;
   let scanned = 0;
+  const started = Date.now();
 
   for (
     let page = input.page;
     page < input.page + MAX_SEARCH_PAGES && collected.length < target;
     page++
   ) {
+    if (Date.now() - started > TIME_BUDGET_MS) break;
     const data = await fetchSearchPage(input, page);
     const raw = (data.people ?? data.contacts ?? []) as Record<string, unknown>[];
     totalEntries = data.total_entries ?? data.pagination?.total_entries ?? totalEntries;
