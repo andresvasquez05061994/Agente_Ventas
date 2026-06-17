@@ -1,5 +1,6 @@
 import type { ApolloPerson } from "./types";
 import type { ValidatedSearchRequest } from "./apollo-filters";
+import { getIndustrySearchStrategies } from "./apollo-filters";
 import {
   enrichPeopleWithContacts,
   normalizePerson,
@@ -22,34 +23,46 @@ function headers() {
   };
 }
 
-function buildSearchPayload(input: ValidatedSearchRequest, page: number) {
+function buildSearchPayload(
+  input: ValidatedSearchRequest,
+  page: number,
+  industryOverride?: Record<string, unknown>
+) {
   const payload: Record<string, unknown> = {
     page,
     per_page: input.per_page,
     contact_email_status: ["verified", "likely to engage"],
+    person_locations: input.person_locations,
+    person_titles: input.person_titles,
   };
 
-  if (input.person_locations.length) {
-    payload.person_locations = input.person_locations;
-  }
-  if (input.person_titles.length) {
-    payload.person_titles = input.person_titles;
-  }
   if (input.person_seniorities.length) {
     payload.person_seniorities = input.person_seniorities;
   }
-  if (input.q_keywords) {
+
+  if (industryOverride) {
+    Object.assign(payload, industryOverride);
+  } else if (input.q_keywords) {
     payload.q_keywords = input.q_keywords;
   }
 
   return payload;
 }
 
-async function fetchSearchPage(input: ValidatedSearchRequest, page: number) {
+function totalFromData(data: Record<string, unknown>) {
+  const pagination = data.pagination as { total_entries?: number } | undefined;
+  return (
+    (data.total_entries as number | undefined) ??
+    pagination?.total_entries ??
+    0
+  );
+}
+
+async function postSearch(payload: Record<string, unknown>) {
   const res = await fetch(SEARCH_URL, {
     method: "POST",
     headers: headers(),
-    body: JSON.stringify(buildSearchPayload(input, page)),
+    body: JSON.stringify(payload),
   });
 
   if (res.status === 429) {
@@ -70,7 +83,40 @@ async function fetchSearchPage(input: ValidatedSearchRequest, page: number) {
     throw new ApolloApiError(`Apollo ${res.status}: ${text}`, res.status);
   }
 
-  return res.json();
+  return res.json() as Promise<Record<string, unknown>>;
+}
+
+async function fetchSearchPage(
+  input: ValidatedSearchRequest,
+  page: number
+): Promise<{ data: Record<string, unknown>; industry_relaxed: boolean }> {
+  const strategies = input.q_keywords
+    ? [
+        buildSearchPayload(input, page),
+        ...getIndustrySearchStrategies(input.q_keywords).map((override) =>
+          buildSearchPayload(input, page, override)
+        ),
+      ]
+    : [buildSearchPayload(input, page)];
+
+  const seen = new Set<string>();
+  let lastData: Record<string, unknown> = { people: [], total_entries: 0 };
+
+  for (const payload of strategies) {
+    const key = JSON.stringify(payload);
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const data = await postSearch(payload);
+    lastData = data;
+    if (totalFromData(data) > 0) {
+      const usedDefault =
+        JSON.stringify(payload) === JSON.stringify(buildSearchPayload(input, page));
+      return { data, industry_relaxed: !usedDefault && Boolean(input.q_keywords) };
+    }
+  }
+
+  return { data: lastData, industry_relaxed: false };
 }
 
 export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
@@ -80,6 +126,7 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
   let totalEntries = 0;
   let lastPage = input.page;
   let scanned = 0;
+  let industryRelaxed = false;
   const started = Date.now();
   let enrichStats = {
     candidates: 0,
@@ -96,9 +143,12 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
     page++
   ) {
     if (Date.now() - started > TIME_BUDGET_MS) break;
-    const data = await fetchSearchPage(input, page);
+
+    const { data, industry_relaxed } = await fetchSearchPage(input, page);
+    if (industry_relaxed) industryRelaxed = true;
+
     const raw = (data.people ?? data.contacts ?? []) as Record<string, unknown>[];
-    totalEntries = data.total_entries ?? data.pagination?.total_entries ?? totalEntries;
+    totalEntries = totalFromData(data) || totalEntries;
     lastPage = page;
     scanned += raw.length;
 
@@ -122,15 +172,21 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       collected.push(person);
     }
 
-    const totalPages = data.pagination?.total_pages ?? Math.ceil(totalEntries / input.per_page);
+    const totalPages =
+      (data.pagination as { total_pages?: number } | undefined)?.total_pages ??
+      Math.ceil(totalEntries / input.per_page);
     if (page >= totalPages) break;
   }
 
-  await recordProspeccionCredits(
-    enrichStats.credits_consumed,
-    collected.length,
-    "search"
-  );
+  if (enrichStats.credits_consumed > 0) {
+    await recordProspeccionCredits(
+      enrichStats.credits_consumed,
+      collected.length,
+      "search"
+    );
+  } else if (scanned > 0) {
+    await recordProspeccionCredits(0, collected.length, "search");
+  }
 
   return {
     results: collected,
@@ -143,6 +199,8 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       with_contact_data: collected.length,
       enrich_stats: enrichStats,
       credits_consumed: enrichStats.credits_consumed,
+      industry_relaxed: industryRelaxed,
+      apollo_zero_results: totalEntries === 0 && scanned === 0,
     },
   };
 }
@@ -157,5 +215,4 @@ export class ApolloApiError extends Error {
   }
 }
 
-// Re-export for tests
 export { normalizePerson };

@@ -191,18 +191,34 @@ export default function ProspeccionPage() {
 
       if (list.length === 0) {
         setStatus("empty");
-        setMessage(
-          `No se encontraron contactos con email y teléfono para estos filtros. ` +
-            `Perfiles revisados: ${data.meta?.scanned_profiles ?? 0}. ` +
-            "Prueba más cargos, otra industria o quita el filtro de seniority."
-        );
+        const scanned = data.meta?.scanned_profiles ?? 0;
+        const total = data.meta?.total_entries ?? 0;
+        if (data.meta?.apollo_zero_results) {
+          setMessage(
+            `Apollo no tiene perfiles para esta combinación (país + cargos + industria). ` +
+              `Prueba «Todas las industrias» u otra como Software o Salud.`
+          );
+        } else if (scanned > 0) {
+          setMessage(
+            `Se revisaron ${scanned} perfiles en Apollo (${total} coincidencias) pero ninguno ` +
+              `quedó con email y teléfono enriquecidos. Prueba más cargos o quita seniority.`
+          );
+        } else {
+          setMessage(
+            "No se encontraron contactos con email y teléfono. Ajusta los filtros e intenta de nuevo."
+          );
+        }
       } else {
         setStatus("success");
         const credits = data.meta?.credits_consumed ?? 0;
+        const relaxed = data.meta?.industry_relaxed
+          ? " · Industria ampliada (término alternativo en Apollo)"
+          : "";
         setMessage(
           `${list.length} contacto(s) con email y teléfono · ` +
             `${data.meta?.total_entries ?? 0} coincidencias en Apollo` +
-            (credits > 0 ? ` · ${credits} crédito(s) consumidos en esta búsqueda` : "")
+            (credits > 0 ? ` · ${credits} crédito(s) en esta búsqueda` : "") +
+            relaxed
         );
       }
     } catch (e) {

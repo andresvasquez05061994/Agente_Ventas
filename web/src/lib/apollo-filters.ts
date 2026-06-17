@@ -29,17 +29,17 @@ export const APOLLO_JOB_TITLES = [
 ] as const;
 
 export const APOLLO_KEYWORDS = [
-  { label: "Todas las industrias", value: "" },
-  { label: "Construcción", value: "construction" },
-  { label: "Software / Tecnología", value: "software" },
-  { label: "Manufactura", value: "manufacturing" },
-  { label: "Servicios financieros", value: "financial services" },
-  { label: "Salud", value: "healthcare" },
-  { label: "Retail / Comercio", value: "retail" },
-  { label: "Logística", value: "logistics" },
-  { label: "Telecomunicaciones", value: "telecommunications" },
-  { label: "Energía", value: "energy" },
-  { label: "Educación", value: "education" },
+  { label: "Todas las industrias", value: "", searchTerms: [] as string[] },
+  { label: "Construcción", value: "construction", searchTerms: ["construction", "building materials"] },
+  { label: "Software / Tecnología", value: "software", searchTerms: ["software", "technology", "saas"] },
+  { label: "Manufactura", value: "manufacturing", searchTerms: ["manufacturing", "industrial", "machinery", "manufacturer"] },
+  { label: "Servicios financieros", value: "financial services", searchTerms: ["financial services", "banking", "fintech"] },
+  { label: "Salud", value: "healthcare", searchTerms: ["healthcare", "hospital", "medical"] },
+  { label: "Retail / Comercio", value: "retail", searchTerms: ["retail", "commerce", "consumer goods"] },
+  { label: "Logística", value: "logistics", searchTerms: ["logistics", "transportation", "supply chain"] },
+  { label: "Telecomunicaciones", value: "telecommunications", searchTerms: ["telecommunications", "telecom"] },
+  { label: "Energía", value: "energy", searchTerms: ["energy", "oil", "utilities"] },
+  { label: "Educación", value: "education", searchTerms: ["education", "university", "edtech"] },
 ] as const;
 
 export const APOLLO_SENIORITIES = [
@@ -122,4 +122,34 @@ export function validateSearchRequest(body: Record<string, unknown>): ValidatedS
     page,
     per_page: perPage,
   };
+}
+
+/** Estrategias de industria para cuando q_keywords no devuelve resultados en Apollo. */
+export function getIndustrySearchStrategies(
+  keyword: string
+): Array<Record<string, unknown>> {
+  if (!keyword) return [{}];
+
+  const item = APOLLO_KEYWORDS.find((k) => k.value === keyword);
+  const terms = item?.searchTerms?.length ? [...item.searchTerms] : [keyword];
+
+  const strategies: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+
+  for (const term of terms) {
+    const kw = { q_keywords: term };
+    const tag = { q_organization_keyword_tags: [term] };
+    const kwKey = JSON.stringify(kw);
+    const tagKey = JSON.stringify(tag);
+    if (!seen.has(kwKey)) {
+      seen.add(kwKey);
+      strategies.push(kw);
+    }
+    if (!seen.has(tagKey)) {
+      seen.add(tagKey);
+      strategies.push(tag);
+    }
+  }
+
+  return strategies.slice(0, 6);
 }
