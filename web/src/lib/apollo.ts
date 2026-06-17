@@ -4,6 +4,7 @@ import {
   enrichPeopleWithContacts,
   normalizePerson,
 } from "./apollo-enrich";
+import { recordProspeccionCredits } from "./db";
 
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
@@ -86,6 +87,7 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
     with_email: 0,
     with_phone: 0,
     with_both: 0,
+    credits_consumed: 0,
   };
 
   for (
@@ -109,6 +111,8 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       with_email: enrichStats.with_email + enriched.stats.with_email,
       with_phone: enrichStats.with_phone + enriched.stats.with_phone,
       with_both: enrichStats.with_both + enriched.stats.with_both,
+      credits_consumed:
+        enrichStats.credits_consumed + enriched.stats.credits_consumed,
     };
     for (const person of enriched.results) {
       if (collected.length >= target) break;
@@ -122,6 +126,12 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
     if (page >= totalPages) break;
   }
 
+  await recordProspeccionCredits(
+    enrichStats.credits_consumed,
+    collected.length,
+    "search"
+  );
+
   return {
     results: collected,
     meta: {
@@ -132,6 +142,7 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       scanned_profiles: scanned,
       with_contact_data: collected.length,
       enrich_stats: enrichStats,
+      credits_consumed: enrichStats.credits_consumed,
     },
   };
 }

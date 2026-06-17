@@ -35,6 +35,15 @@ export async function initDb() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS apollo_prospeccion_credits (
+      id SERIAL PRIMARY KEY,
+      credits INTEGER NOT NULL DEFAULT 0,
+      contactos_enriquecidos INTEGER NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'search',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
 }
 
 export async function getLeads(filters?: {
@@ -116,6 +125,44 @@ export async function getStats() {
     approved: (approved as { c: number })?.c ?? 0,
     with_phone: (withPhone as { c: number })?.c ?? 0,
     with_email: (withEmail as { c: number })?.c ?? 0,
+  };
+}
+
+export async function recordProspeccionCredits(
+  credits: number,
+  contactos: number,
+  source: "search" | "phone_webhook" = "search"
+) {
+  const sql = getSql();
+  await sql`
+    INSERT INTO apollo_prospeccion_credits (credits, contactos_enriquecidos, source)
+    VALUES (${Math.max(0, credits)}, ${Math.max(0, contactos)}, ${source})
+  `;
+}
+
+export async function getApolloProspeccionCredits() {
+  const sql = getSql();
+  const [totals] = await sql`
+    SELECT
+      COALESCE(SUM(credits), 0)::int AS total_credits,
+      COUNT(*) FILTER (WHERE source = 'search')::int AS total_searches,
+      COALESCE(SUM(credits) FILTER (
+        WHERE created_at >= date_trunc('month', NOW() AT TIME ZONE 'UTC')
+      ), 0)::int AS credits_this_month,
+      COUNT(*) FILTER (WHERE source = 'search' AND created_at >= date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int AS searches_this_month
+    FROM apollo_prospeccion_credits
+  `;
+  const row = totals as {
+    total_credits: number;
+    total_searches: number;
+    credits_this_month: number;
+    searches_this_month: number;
+  };
+  return {
+    total_credits: row?.total_credits ?? 0,
+    total_searches: row?.total_searches ?? 0,
+    credits_this_month: row?.credits_this_month ?? 0,
+    searches_this_month: row?.searches_this_month ?? 0,
   };
 }
 

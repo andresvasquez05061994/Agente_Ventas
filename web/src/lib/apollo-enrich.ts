@@ -92,6 +92,7 @@ export interface EnrichStats {
   with_email: number;
   with_phone: number;
   with_both: number;
+  credits_consumed: number;
 }
 
 function sleep(ms: number) {
@@ -101,14 +102,14 @@ function sleep(ms: number) {
 async function matchPerson(
   id: string,
   options: { revealPhone: boolean }
-): Promise<Record<string, unknown> | null> {
+): Promise<{ person: Record<string, unknown> | null; credits: number }> {
   const url = new URL(MATCH_URL);
   url.searchParams.set("id", id);
   url.searchParams.set("reveal_personal_emails", "true");
 
   if (options.revealPhone) {
     const base = webhookBaseUrl();
-    if (!base) return null;
+    if (!base) return { person: null, credits: 0 };
     url.searchParams.set("reveal_phone_number", "true");
     url.searchParams.set("webhook_url", `${base}/api/apollo/phone-webhook`);
   } else {
@@ -120,10 +121,11 @@ async function matchPerson(
     headers: apiHeaders(),
   });
 
-  if (!res.ok) return null;
+  if (!res.ok) return { person: null, credits: 0 };
   const data = await res.json();
   const person = data.person as Record<string, unknown> | undefined;
-  return person ?? null;
+  const credits = Number(data.credits_consumed ?? 0);
+  return { person: person ?? null, credits: Number.isFinite(credits) ? credits : 0 };
 }
 
 async function pollPhones(ids: string[]): Promise<Map<string, string>> {
@@ -149,16 +151,18 @@ export async function enrichPeopleWithContacts(
   const candidates = rawPeople.filter(isContactableInSearch);
   const ids = candidates.map((p) => String(p.id ?? "")).filter(Boolean);
   const enrichedMap = new Map<string, Record<string, unknown>>();
+  let creditsConsumed = 0;
 
   const usePhoneReveal = Boolean(webhookBaseUrl());
   const matched: Array<{ id: string; person: Record<string, unknown> | null }> = [];
   for (let i = 0; i < ids.length; i += MATCH_CONCURRENCY) {
     const batch = ids.slice(i, i + MATCH_CONCURRENCY);
     const batchResults = await Promise.all(
-      batch.map(async (id) => ({
-        id,
-        person: await matchPerson(id, { revealPhone: usePhoneReveal }),
-      }))
+      batch.map(async (id) => {
+        const { person, credits } = await matchPerson(id, { revealPhone: usePhoneReveal });
+        creditsConsumed += credits;
+        return { id, person };
+      })
     );
     matched.push(...batchResults);
   }
@@ -175,7 +179,12 @@ export async function enrichPeopleWithContacts(
   if (missingPhone.length && webhookBaseUrl()) {
     for (let i = 0; i < missingPhone.length; i += MATCH_CONCURRENCY) {
       const batch = missingPhone.slice(i, i + MATCH_CONCURRENCY);
-      await Promise.all(batch.map((id) => matchPerson(id, { revealPhone: true })));
+      await Promise.all(
+        batch.map(async (id) => {
+          const { credits } = await matchPerson(id, { revealPhone: true });
+          creditsConsumed += credits;
+        })
+      );
     }
     const polled = await pollPhones(missingPhone);
     for (const [id, phone] of polled) {
@@ -207,6 +216,7 @@ export async function enrichPeopleWithContacts(
       with_email: withEmail,
       with_phone: withPhone,
       with_both: results.length,
+      credits_consumed: creditsConsumed,
     },
   };
 }
@@ -228,10 +238,19 @@ export function parsePhoneWebhookPayload(
   return out;
 }
 
+export function extractWebhookCredits(body: unknown): number {
+  if (!body || typeof body !== "object") return 0;
+  const credits = Number((body as { credits_consumed?: number }).credits_consumed ?? 0);
+  return Number.isFinite(credits) ? Math.max(0, credits) : 0;
+}
+
 export async function persistPhoneWebhook(body: unknown) {
   const rows = parsePhoneWebhookPayload(body);
   for (const row of rows) {
     await savePhoneCache(row.apollo_id, row.telefono);
   }
-  return rows.length;
+  return {
+    phones_saved: rows.length,
+    credits_consumed: extractWebhookCredits(body),
+  };
 }

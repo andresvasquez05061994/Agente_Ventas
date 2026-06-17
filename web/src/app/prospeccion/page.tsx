@@ -198,9 +198,11 @@ export default function ProspeccionPage() {
         );
       } else {
         setStatus("success");
+        const credits = data.meta?.credits_consumed ?? 0;
         setMessage(
           `${list.length} contacto(s) con email y teléfono · ` +
-            `${data.meta?.total_entries ?? 0} coincidencias en Apollo.`
+            `${data.meta?.total_entries ?? 0} coincidencias en Apollo` +
+            (credits > 0 ? ` · ${credits} crédito(s) consumidos en esta búsqueda` : "")
         );
       }
     } catch (e) {

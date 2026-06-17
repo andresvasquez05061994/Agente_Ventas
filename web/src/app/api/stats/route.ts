@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { getStats, initDb } from "@/lib/db";
+import { getApolloProspeccionCredits, getStats, initDb } from "@/lib/db";
 
 export async function GET() {
   try {
     await initDb();
-    const stats = await getStats();
-    return NextResponse.json(stats);
+    const [stats, apollo] = await Promise.all([
+      getStats(),
+      getApolloProspeccionCredits(),
+    ]);
+    return NextResponse.json({ ...stats, apollo });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error de estadísticas";
     return NextResponse.json({ error: msg }, { status: 500 });
