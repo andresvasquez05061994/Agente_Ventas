@@ -3,10 +3,10 @@ import { getPhoneCache, savePhoneCache } from "./db";
 
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
-const BULK_MATCH_URL = `${BASE_URL}/people/bulk_match`;
-const BULK_BATCH = 10;
+const MATCH_URL = `${BASE_URL}/people/match`;
 const PHONE_POLL_MS = 1500;
-const PHONE_POLL_MAX_MS = 6000;
+const PHONE_POLL_MAX_MS = 8000;
+const MATCH_CONCURRENCY = 5;
 
 function apiHeaders() {
   const key = process.env.APOLLO_API_KEY;
@@ -49,6 +49,14 @@ export function extractPhone(raw: Record<string, unknown>): string | null {
   if (typeof sanitized === "string" && sanitized.trim()) return sanitized.trim();
   const phone = raw.phone;
   if (typeof phone === "string" && phone.trim()) return phone.trim();
+
+  const org = raw.organization as Record<string, unknown> | undefined;
+  if (org) {
+    for (const key of ["phone", "sanitized_phone", "primary_phone"]) {
+      const value = org[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  }
   return null;
 }
 
@@ -85,27 +93,21 @@ export function isContactableInSearch(raw: Record<string, unknown>): boolean {
   return false;
 }
 
-function chunk<T>(items: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    out.push(items.slice(i, i + size));
-  }
-  return out;
-}
-
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function bulkMatch(ids: string[]): Promise<Map<string, Record<string, unknown>>> {
-  const map = new Map<string, Record<string, unknown>>();
-  if (!ids.length) return map;
-
-  const url = new URL(BULK_MATCH_URL);
+async function matchPerson(
+  id: string,
+  options: { revealPhone: boolean }
+): Promise<Record<string, unknown> | null> {
+  const url = new URL(MATCH_URL);
+  url.searchParams.set("id", id);
   url.searchParams.set("reveal_personal_emails", "false");
 
-  const base = webhookBaseUrl();
-  if (base) {
+  if (options.revealPhone) {
+    const base = webhookBaseUrl();
+    if (!base) return null;
     url.searchParams.set("reveal_phone_number", "true");
     url.searchParams.set("webhook_url", `${base}/api/apollo/phone-webhook`);
   } else {
@@ -115,21 +117,12 @@ async function bulkMatch(ids: string[]): Promise<Map<string, Record<string, unkn
   const res = await fetch(url.toString(), {
     method: "POST",
     headers: apiHeaders(),
-    body: JSON.stringify({ details: ids.map((id) => ({ id })) }),
   });
 
-  if (!res.ok) {
-    throw new Error(`Apollo enrichment ${res.status}: ${await res.text()}`);
-  }
-
+  if (!res.ok) return null;
   const data = await res.json();
-  const matches = (data.matches ?? data.people ?? []) as Record<string, unknown>[];
-  for (const match of matches) {
-    const id = String(match.id ?? "");
-    if (id) map.set(id, match);
-  }
-
-  return map;
+  const person = data.person as Record<string, unknown> | undefined;
+  return person ?? null;
 }
 
 async function pollPhones(ids: string[]): Promise<Map<string, string>> {
@@ -156,9 +149,21 @@ export async function enrichPeopleWithContacts(
   const ids = candidates.map((p) => String(p.id ?? "")).filter(Boolean);
   const enrichedMap = new Map<string, Record<string, unknown>>();
 
-  for (const batch of chunk(ids, BULK_BATCH)) {
-    const matched = await bulkMatch(batch);
-    for (const [id, person] of matched) enrichedMap.set(id, person);
+  const usePhoneReveal = Boolean(webhookBaseUrl());
+  const matched: Array<{ id: string; person: Record<string, unknown> | null }> = [];
+  for (let i = 0; i < ids.length; i += MATCH_CONCURRENCY) {
+    const batch = ids.slice(i, i + MATCH_CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map(async (id) => ({
+        id,
+        person: await matchPerson(id, { revealPhone: usePhoneReveal }),
+      }))
+    );
+    matched.push(...batchResults);
+  }
+
+  for (const { id, person } of matched) {
+    if (person) enrichedMap.set(id, person);
   }
 
   const missingPhone = ids.filter((id) => {
@@ -166,7 +171,11 @@ export async function enrichPeopleWithContacts(
     return person && !extractPhone(person);
   });
 
-  if (missingPhone.length) {
+  if (missingPhone.length && webhookBaseUrl()) {
+    for (let i = 0; i < missingPhone.length; i += MATCH_CONCURRENCY) {
+      const batch = missingPhone.slice(i, i + MATCH_CONCURRENCY);
+      await Promise.all(batch.map((id) => matchPerson(id, { revealPhone: true })));
+    }
     const polled = await pollPhones(missingPhone);
     for (const [id, phone] of polled) {
       const person = enrichedMap.get(id) ?? { id };
