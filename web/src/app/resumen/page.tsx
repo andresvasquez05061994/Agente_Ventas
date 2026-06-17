@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { EmptyState, MetricCard, SectionLabel } from "@/components/ui";
+import { EmptyState, MetricCard, PageSubtitle, PageTitle, SectionLabel } from "@/components/ui";
 
 type Stats = {
   total: number;
@@ -31,49 +31,34 @@ export default function ResumenPage() {
 
   return (
     <main className="flex-1 p-6 lg:p-8">
-      <h1 className="border-b-2 border-[#003366] pb-2 text-xl font-bold text-[#1A2332] dark:text-[#E8EEF4]">
-        Resumen
-      </h1>
-      <p className="mt-2 max-w-2xl text-sm text-[#6B7C93]">
-        Vista ejecutiva del pipeline de prospección y consumo de créditos Apollo en esta
-        plataforma.
-      </p>
+      <div className="page-header">
+        <PageTitle>Resumen</PageTitle>
+      </div>
+      <PageSubtitle>
+        Vista ejecutiva del pipeline de prospección y consumo de créditos Apollo en esta plataforma.
+      </PageSubtitle>
 
       {error && (
-        <div className="mt-4 rounded border-l-4 border-amber-500 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+        <div className="mt-4 rounded border-l-4 border-amber-500 bg-amber-50 p-3 text-caption text-amber-800 dark:bg-amber-950 dark:text-amber-200">
           {error}
         </div>
       )}
 
-      {!stats && !error && (
-        <p className="mt-8 text-sm text-[#6B7C93]">Cargando...</p>
-      )}
+      {!stats && !error && <p className="text-body mt-8">Cargando...</p>}
 
       {stats && (
         <>
           <div className="mt-8">
             <SectionLabel>Consumo Apollo (prospección)</SectionLabel>
-            <p className="mb-4 text-xs text-[#6B7C93]">
-              Solo créditos usados al buscar y enriquecer contactos desde esta plataforma.
-              La búsqueda API no consume créditos; el enriquecimiento (email/teléfono) sí.
+            <p className="text-caption mb-4">
+              Solo créditos usados al buscar y enriquecer contactos desde esta plataforma. La búsqueda
+              API no consume créditos; el enriquecimiento (email/teléfono) sí.
             </p>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <MetricCard
-                label="Créditos consumidos (total)"
-                value={apollo?.total_credits ?? 0}
-              />
-              <MetricCard
-                label="Créditos este mes"
-                value={apollo?.credits_this_month ?? 0}
-              />
-              <MetricCard
-                label="Búsquedas realizadas"
-                value={apollo?.total_searches ?? 0}
-              />
-              <MetricCard
-                label="Búsquedas este mes"
-                value={apollo?.searches_this_month ?? 0}
-              />
+              <MetricCard label="Créditos consumidos (total)" value={apollo?.total_credits ?? 0} />
+              <MetricCard label="Créditos este mes" value={apollo?.credits_this_month ?? 0} />
+              <MetricCard label="Búsquedas realizadas" value={apollo?.total_searches ?? 0} />
+              <MetricCard label="Búsquedas este mes" value={apollo?.searches_this_month ?? 0} />
             </div>
           </div>
 

@@ -10,7 +10,7 @@ import {
   APOLLO_SENIORITIES,
   DEFAULT_SEARCH,
 } from "@/lib/apollo-filters";
-import { SectionLabel } from "@/components/ui";
+import { FieldLabel, SectionLabel } from "@/components/ui";
 
 type SearchStatus = "idle" | "loading" | "success" | "empty" | "error";
 
@@ -44,13 +44,11 @@ function SearchFilters({
   return (
     <>
       <SectionLabel>Filtros Apollo</SectionLabel>
-      <p className="mb-3 text-[11px] leading-relaxed text-[#6B7C93]">
+      <p className="text-caption mb-3">
         Solo listas validadas. Cada contacto incluye email y teléfono enriquecidos.
       </p>
 
-      <label className="mb-1 block text-xs font-semibold text-[#1A2332] dark:text-[#E8EEF4]">
-        País
-      </label>
+      <FieldLabel>País</FieldLabel>
       <select
         className="input-field mb-3"
         value={country}
@@ -63,12 +61,12 @@ function SearchFilters({
         ))}
       </select>
 
-      <label className="mb-1 block text-xs font-semibold">Cargos</label>
+      <FieldLabel>Cargos</FieldLabel>
       <div className="mb-3 max-h-44 space-y-1.5 overflow-y-auto rounded border border-[#E2E6EA] bg-white p-2 dark:border-[#2A3544] dark:bg-[#1A222D]">
         {APOLLO_JOB_TITLES.map((t) => (
           <label
             key={t.value}
-            className="flex cursor-pointer items-start gap-2 text-xs text-[#3D4F63] dark:text-[#B8C5D3]"
+            className="flex cursor-pointer items-start gap-2 text-[12px] text-[#6B7C93] dark:text-[#B8C5D3]"
           >
             <input
               type="checkbox"
@@ -81,7 +79,7 @@ function SearchFilters({
         ))}
       </div>
 
-      <label className="mb-1 block text-xs font-semibold">Industria</label>
+      <FieldLabel>Industria</FieldLabel>
       <select
         className="input-field mb-3"
         value={keyword}
@@ -94,7 +92,7 @@ function SearchFilters({
         ))}
       </select>
 
-      <label className="mb-1 block text-xs font-semibold">Seniority</label>
+      <FieldLabel>Seniority</FieldLabel>
       <select
         className="input-field mb-3"
         value={seniority}
@@ -306,9 +304,9 @@ export default function ProspeccionPage() {
       </aside>
 
       <main className="flex-1 p-6 lg:p-8">
-        <h1 className="border-b-2 border-[#003366] pb-2 text-xl font-bold text-[#1A2332] dark:text-[#E8EEF4]">
-          Prospección
-        </h1>
+        <div className="page-header">
+          <h1 className="page-title">Prospección</h1>
+        </div>
 
         <div className="mt-4 lg:hidden">
           <SearchFilters
@@ -327,25 +325,23 @@ export default function ProspeccionPage() {
           />
         </div>
 
-        {message && <p className={`mt-4 text-sm font-medium ${messageClass}`}>{message}</p>}
+        {message && <p className={`text-caption mt-4 font-medium ${messageClass}`}>{message}</p>}
 
         {status === "loading" && (
           <div className="mt-12 flex flex-col items-center gap-3 text-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#003366] border-t-transparent dark:border-[#4A8FD4] dark:border-t-transparent" />
-            <p className="text-sm text-[#6B7C93]">
+            <div className="h-7 w-7 animate-spin rounded-full border-2 border-[#003A70] border-t-transparent dark:border-[#4A8FD4] dark:border-t-transparent" />
+            <p className="text-caption">
               Buscando en Apollo y enriqueciendo email/teléfono…
               <br />
-              <span className="text-xs">Puede tardar hasta 1 minuto.</span>
+              <span className="text-micro">Puede tardar hasta 1 minuto.</span>
             </p>
           </div>
         )}
 
         {status === "idle" && (
           <div className="mt-12 flex min-h-[280px] flex-col items-center justify-center text-center">
-            <p className="mb-2 text-sm font-medium text-[#1A2332] dark:text-[#E8EEF4]">
-              Listo para buscar
-            </p>
-            <p className="max-w-md text-sm text-[#6B7C93]">
+            <p className="text-body-strong mb-2">Listo para buscar</p>
+            <p className="text-caption max-w-md">
               Por defecto: Colombia + Director de TI. Solo verás contactos con email y teléfono
               confirmados por Apollo.
             </p>
@@ -354,50 +350,41 @@ export default function ProspeccionPage() {
 
         {results.length > 0 && status !== "loading" && (
           <>
-            <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-[#6B7C93]">
+            <div className="text-body mt-4 flex flex-wrap items-center gap-3">
               <span>{meta?.total_entries ?? results.length} en Apollo</span>
               <span>·</span>
               <span>{selected.size} seleccionados</span>
-              <button
-                type="button"
-                onClick={selectAll}
-                className="text-xs font-semibold text-[#003366] underline dark:text-[#6BA3F7]"
-              >
+              <button type="button" onClick={selectAll} className="btn-link">
                 Seleccionar todos
               </button>
             </div>
             <div className="mt-4 overflow-x-auto rounded border border-[#E2E6EA] dark:border-[#2A3544]">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-[#F4F6F8] text-[11px] font-bold uppercase tracking-wider text-[#8A97A8] dark:bg-[#1A222D]">
+              <table className="data-table">
+                <thead>
                   <tr>
-                    <th className="p-2">Sel.</th>
-                    <th className="p-2">Nombre</th>
-                    <th className="p-2">Cargo</th>
-                    <th className="p-2">Empresa</th>
-                    <th className="p-2">Email</th>
-                    <th className="p-2">Teléfono</th>
+                    <th>Sel.</th>
+                    <th>Nombre</th>
+                    <th>Cargo</th>
+                    <th>Empresa</th>
+                    <th>Email</th>
+                    <th>Teléfono</th>
                   </tr>
                 </thead>
                 <tbody>
                   {results.map((r) => (
-                    <tr
-                      key={r.apollo_id}
-                      className="border-t border-[#E2E6EA] dark:border-[#2A3544]"
-                    >
-                      <td className="p-2">
+                    <tr key={r.apollo_id}>
+                      <td>
                         <input
                           type="checkbox"
                           checked={selected.has(r.apollo_id)}
                           onChange={() => toggle(r.apollo_id)}
                         />
                       </td>
-                      <td className="p-2 font-medium text-[#1A2332] dark:text-[#E8EEF4]">
-                        {r.nombre}
-                      </td>
-                      <td className="p-2">{r.cargo ?? "—"}</td>
-                      <td className="p-2">{r.empresa ?? "—"}</td>
-                      <td className="p-2">{r.email}</td>
-                      <td className="p-2">{r.telefono}</td>
+                      <td className="cell-strong">{r.nombre}</td>
+                      <td>{r.cargo ?? "—"}</td>
+                      <td>{r.empresa ?? "—"}</td>
+                      <td>{r.email}</td>
+                      <td>{r.telefono}</td>
                     </tr>
                   ))}
                 </tbody>

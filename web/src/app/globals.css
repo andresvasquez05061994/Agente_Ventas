@@ -2,28 +2,186 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@theme {
+  --font-sans: var(--font-poppins), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
 :root {
+  --iac-text: #051c2c;
+  --iac-text-muted: #6b7c93;
+  --iac-text-faint: #8a97a8;
+  --iac-accent: #003a70;
   --navy: #003366;
   --bg: #ffffff;
-  --text: #3d4f63;
+  --text: #6b7c93;
 }
 
 .dark {
+  --iac-text: #e8eef4;
+  --iac-text-muted: #b8c5d3;
+  --iac-text-faint: #6e7f94;
+  --iac-accent: #4a8fd4;
   --navy: #4a8fd4;
   --bg: #0f1419;
   --text: #b8c5d3;
 }
 
 body {
-  font-family: var(--font-jakarta), system-ui, sans-serif;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.45;
   background: var(--bg);
   color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+input,
+select,
+textarea,
+button {
+  font: inherit;
+}
+
+/* ── Jerarquía tipográfica (alineada con evaluador IAC) ── */
+
+.page-header {
+  border-bottom: 2px solid var(--iac-accent);
+  padding-bottom: 8px;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  color: var(--iac-text);
+}
+
+.page-subtitle {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--iac-text-muted);
+  max-width: 42rem;
+}
+
+.section-label {
+  margin-bottom: 12px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--iac-text-faint);
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--iac-text-faint);
+}
+
+.text-caption {
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--iac-text-muted);
+}
+
+.text-body {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--iac-text-muted);
+}
+
+.text-body-strong {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--iac-text);
+}
+
+.text-micro {
+  font-size: 9px;
+  line-height: 1.4;
+  color: var(--iac-text-faint);
+}
+
+/* ── Formularios y botones ── */
+
 .input-field {
-  @apply w-full rounded border border-[#C8D0D8] bg-white px-3 py-2 text-sm text-[#1A2332] outline-none focus:border-[#003366] focus:ring-2 focus:ring-[#E8EEF4] dark:border-[#3D4D61] dark:bg-[#0F1419] dark:text-[#E8EEF4] dark:focus:border-[#4A8FD4] dark:focus:ring-[#1E3A5F];
+  @apply w-full rounded border border-[#C8D0D8] bg-white px-3 py-2 text-[12px] text-[#051C2C] outline-none focus:border-[#003A70] focus:ring-2 focus:ring-[#E8EEF4] dark:border-[#3D4D61] dark:bg-[#0F1419] dark:text-[#E8EEF4] dark:focus:border-[#4A8FD4] dark:focus:ring-[#1E3A5F];
 }
 
 .btn-primary {
-  @apply rounded bg-[#003366] px-4 py-2 text-sm font-semibold text-white hover:bg-[#002244] disabled:opacity-50 dark:bg-[#4A8FD4] dark:hover:bg-[#6BA8E8];
+  @apply rounded bg-[#003A70] px-4 py-2 text-[11px] font-semibold text-white hover:bg-[#002244] disabled:opacity-50 dark:bg-[#4A8FD4] dark:hover:bg-[#6BA8E8];
+}
+
+.btn-secondary {
+  @apply rounded border border-[#C8D0D8] px-3 py-1.5 text-[11px] font-semibold text-[#051C2C] hover:bg-[#F4F6F8] disabled:opacity-50 dark:border-[#3D4D61] dark:text-[#E8EEF4] dark:hover:bg-[#1A222D];
+}
+
+.btn-danger {
+  @apply rounded border border-red-300 px-3 py-1.5 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950;
+}
+
+.btn-link {
+  @apply text-[11px] font-semibold text-[#003A70] underline hover:no-underline dark:text-[#6BA3F7];
+}
+
+.btn-link-danger {
+  @apply text-[11px] font-semibold text-red-600 hover:underline disabled:opacity-50 dark:text-red-400;
+}
+
+/* ── Tablas ── */
+
+.data-table {
+  @apply w-full text-left text-[12px];
+}
+
+.data-table thead {
+  @apply bg-[#F4F6F8] text-[9px] font-semibold uppercase tracking-[0.1em] text-[#8A97A8] dark:bg-[#1A222D];
+}
+
+.data-table th,
+.data-table td {
+  @apply p-2;
+}
+
+.data-table tbody tr {
+  @apply border-t border-[#E2E6EA] dark:border-[#2A3544];
+}
+
+.data-table .cell-strong {
+  @apply font-semibold text-[#051C2C] dark:text-[#E8EEF4];
+}
+
+.data-table a {
+  @apply text-[#003A70] hover:underline dark:text-[#6BA3F7];
+}
+
+/* ── Tarjetas métricas ── */
+
+.metric-card {
+  @apply rounded border border-[#E2E6EA] bg-white p-4 dark:border-[#2A3544] dark:bg-[#1A222D];
+}
+
+.metric-card__label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--iac-text-faint);
+}
+
+.metric-card__value {
+  margin-top: 4px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--iac-text);
 }
