@@ -170,6 +170,35 @@ export interface SearchEmptyMeta {
   };
 }
 
+function humanizeApolloError(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.includes("insufficient credits")) {
+    return "Sin créditos Apollo disponibles. Recarga tu plan en app.apollo.io → Settings → Plans y vuelve a buscar.";
+  }
+  if (lower.includes("master")) {
+    return "La API key debe ser Master en Apollo → Settings → API.";
+  }
+  if (lower.includes("429") || lower.includes("rate limit")) {
+    return "Límite de solicitudes Apollo alcanzado. Espera un minuto e intenta de nuevo.";
+  }
+  try {
+    const jsonStart = raw.indexOf("{");
+    if (jsonStart >= 0) {
+      const parsed = JSON.parse(raw.slice(jsonStart)) as { error?: string };
+      if (parsed.error) {
+        const clean = parsed.error.replace(/<[^>]*>/g, "").trim();
+        if (clean.toLowerCase().includes("insufficient credits")) {
+          return "Sin créditos Apollo disponibles. Recarga tu plan en app.apollo.io → Settings → Plans y vuelve a buscar.";
+        }
+        return clean;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return raw.replace(/^Apollo bulk_match \d+: /, "").slice(0, 280);
+}
+
 /** Mensaje contextual cuando la búsqueda no devuelve contactos completos. */
 export function explainEmptySearchMessage(
   meta: SearchEmptyMeta | null | undefined,
@@ -185,7 +214,7 @@ export function explainEmptySearchMessage(
   const apolloError = meta.match_errors?.[0];
 
   if (apolloError) {
-    return apolloError;
+    return humanizeApolloError(apolloError);
   }
 
   if (meta.apollo_zero_results) {
