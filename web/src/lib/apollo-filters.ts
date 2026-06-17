@@ -159,12 +159,14 @@ export interface SearchEmptyMeta {
   total_entries?: number;
   apollo_zero_results?: boolean;
   webhook_configured?: boolean;
+  match_errors?: string[];
   enrich_stats?: {
     candidates?: number;
     matched?: number;
     with_email?: number;
     with_phone?: number;
     with_both?: number;
+    credits_consumed?: number;
   };
 }
 
@@ -180,6 +182,11 @@ export function explainEmptySearchMessage(
   const scanned = meta.scanned_profiles ?? 0;
   const total = meta.total_entries ?? 0;
   const stats = meta.enrich_stats;
+  const apolloError = meta.match_errors?.[0];
+
+  if (apolloError) {
+    return apolloError;
+  }
 
   if (meta.apollo_zero_results) {
     return (
@@ -194,7 +201,7 @@ export function explainEmptySearchMessage(
 
   if (stats && stats.candidates === 0) {
     return (
-      `Apollo devolvió ${scanned} perfiles (${total} coincidencias) pero ninguno era enriquecible. ` +
+      `Apollo devolvió ${scanned} perfiles (${total} coincidencias) pero ninguno indicaba email disponible. ` +
       "Prueba más cargos o cambia la industria."
     );
   }
@@ -202,22 +209,26 @@ export function explainEmptySearchMessage(
   if (stats && (stats.with_email ?? 0) > 0 && (stats.with_both ?? 0) === 0) {
     if (!meta.webhook_configured) {
       return (
-        `Se obtuvo email en ${stats.with_email} perfil(es) revisados, pero no teléfono: ` +
-        "falta APOLLO_WEBHOOK_BASE_URL en el servidor para revelar móviles."
+        `Se obtuvo email en ${stats.with_email} perfil(es), pero no teléfono: ` +
+        "configura APOLLO_WEBHOOK_BASE_URL=https://agente-ventas-three.vercel.app en Vercel."
       );
     }
     return (
-      `Se enriquecieron ${stats.candidates ?? scanned} perfiles: ${stats.with_email} con email ` +
-      `pero ninguno con teléfono a tiempo. Prueba «Todas las industrias», más cargos` +
-      (hasSeniorityFilter ? " o quita seniority" : "") +
-      "."
+      `${stats.with_email} perfil(es) con email pero ninguno con teléfono en el tiempo de espera. ` +
+      "Prueba de nuevo o selecciona cargos con mayor cobertura móvil en Apollo."
     );
   }
 
   if (stats && (stats.candidates ?? 0) > 0 && (stats.matched ?? 0) === 0) {
+    if ((stats.credits_consumed ?? 0) === 0) {
+      return (
+        `Apollo no enriqueció ${stats.candidates} candidatos (0 créditos usados). ` +
+        "Verifica que la API key sea Master y que tengas créditos en Apollo."
+      );
+    }
     return (
-      `Se intentó enriquecer ${stats.candidates} perfiles sin respuesta de Apollo. ` +
-      "Verifica créditos disponibles y que la API key sea Master."
+      `Apollo procesó ${stats.candidates} candidatos pero ninguno devolvió datos completos. ` +
+      "Prueba más cargos o «Todas las industrias»."
     );
   }
 

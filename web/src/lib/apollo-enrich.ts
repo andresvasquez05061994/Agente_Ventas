@@ -3,10 +3,10 @@ import { getPhoneCache, savePhoneCache } from "./db";
 
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
-const MATCH_URL = `${BASE_URL}/people/match`;
+const BULK_MATCH_URL = `${BASE_URL}/people/bulk_match`;
 const PHONE_POLL_MS = 1500;
-const PHONE_POLL_MAX_MS = 18000;
-const MATCH_CONCURRENCY = 5;
+const PHONE_POLL_MAX_MS = 20000;
+const BATCH_SIZE = 10;
 
 function apiHeaders() {
   const key = process.env.APOLLO_API_KEY;
@@ -14,6 +14,7 @@ function apiHeaders() {
   return {
     "Content-Type": "application/json",
     "Cache-Control": "no-cache",
+    accept: "application/json",
     "x-api-key": key,
   };
 }
@@ -24,6 +25,40 @@ function webhookBaseUrl(): string | null {
   const vercel = process.env.VERCEL_URL;
   if (vercel) return `https://${vercel}`;
   return null;
+}
+
+/** Apollo documenta person_id en api_search; people/match acepta id o person_id. */
+export function resolveApolloPersonId(raw: Record<string, unknown>): string {
+  const id = raw.person_id ?? raw.id;
+  return id ? String(id) : "";
+}
+
+export function buildMatchDetail(raw: Record<string, unknown>): Record<string, unknown> | null {
+  const id = resolveApolloPersonId(raw);
+  if (!id) return null;
+
+  const org = raw.organization as Record<string, unknown> | undefined;
+  const detail: Record<string, unknown> = { id };
+
+  if (raw.first_name) detail.first_name = raw.first_name;
+  const last = raw.last_name ?? raw.last_name_obfuscated;
+  if (last) detail.last_name = last;
+
+  const name = buildDisplayName(raw);
+  if (name && name !== "Sin nombre") detail.name = name;
+  if (raw.title) detail.title = raw.title;
+  if (org?.name) detail.organization_name = org.name;
+  if (raw.linkedin_url) detail.linkedin_url = raw.linkedin_url;
+
+  return detail;
+}
+
+function candidateScore(raw: Record<string, unknown>): number {
+  let score = 0;
+  if (raw.has_email === true) score += 100;
+  else if (raw.has_email !== false) score += 25;
+  if (raw.has_direct_phone === "Yes" || raw.has_direct_phone === true) score += 50;
+  return score;
 }
 
 export function extractEmail(raw: Record<string, unknown>): string | null {
@@ -71,7 +106,7 @@ export function buildDisplayName(raw: Record<string, unknown>): string {
 export function normalizePerson(raw: Record<string, unknown>): ApolloPerson {
   const org = (raw.organization as Record<string, string>) ?? {};
   return {
-    apollo_id: String(raw.id ?? raw.person_id ?? ""),
+    apollo_id: resolveApolloPersonId(raw),
     nombre: buildDisplayName(raw),
     cargo: (raw.title as string) ?? (raw.headline as string) ?? null,
     empresa: org.name ?? null,
@@ -83,10 +118,9 @@ export function normalizePerson(raw: Record<string, unknown>): ApolloPerson {
 }
 
 export function isContactableInSearch(raw: Record<string, unknown>): boolean {
-  const id = String(raw.id ?? raw.person_id ?? "");
-  if (!id) return false;
-  // api_search suele omitir has_email; people/match puede revelar el contacto igualmente.
-  if (raw.has_email === false && raw.has_direct_phone === false) return false;
+  if (!resolveApolloPersonId(raw)) return false;
+  // Apollo marca has_email=false cuando no hay email que revelar.
+  if (raw.has_email === false) return false;
   return true;
 }
 
@@ -101,39 +135,89 @@ export interface EnrichStats {
   with_phone: number;
   with_both: number;
   credits_consumed: number;
+  match_errors: string[];
 }
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function matchPerson(
-  id: string,
-  options: { revealPhone: boolean }
-): Promise<{ person: Record<string, unknown> | null; credits: number }> {
-  const url = new URL(MATCH_URL);
-  url.searchParams.set("id", id);
-  url.searchParams.set("reveal_personal_emails", "true");
+async function bulkMatchPeople(
+  details: Record<string, unknown>[],
+  options: { revealEmail: boolean; revealPhone: boolean },
+  retry = 0
+): Promise<{
+  byId: Map<string, Record<string, unknown>>;
+  credits: number;
+  error?: string;
+}> {
+  if (!details.length) return { byId: new Map(), credits: 0 };
+
+  const url = new URL(BULK_MATCH_URL);
+  url.searchParams.set("reveal_personal_emails", options.revealEmail ? "true" : "false");
+  url.searchParams.set("reveal_phone_number", options.revealPhone ? "true" : "false");
 
   if (options.revealPhone) {
     const base = webhookBaseUrl();
-    if (!base) return { person: null, credits: 0 };
-    url.searchParams.set("reveal_phone_number", "true");
+    if (!base) {
+      return { byId: new Map(), credits: 0, error: "Webhook no configurado (APOLLO_WEBHOOK_BASE_URL)" };
+    }
     url.searchParams.set("webhook_url", `${base}/api/apollo/phone-webhook`);
-  } else {
-    url.searchParams.set("reveal_phone_number", "false");
   }
 
-  const res = await fetch(url.toString(), {
-    method: "POST",
-    headers: apiHeaders(),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), {
+      method: "POST",
+      headers: apiHeaders(),
+      body: JSON.stringify({ details: details.slice(0, BATCH_SIZE) }),
+    });
+  } catch (e) {
+    return {
+      byId: new Map(),
+      credits: 0,
+      error: `Error de red al enriquecer: ${e instanceof Error ? e.message : "desconocido"}`,
+    };
+  }
 
-  if (!res.ok) return { person: null, credits: 0 };
-  const data = await res.json();
-  const person = data.person as Record<string, unknown> | undefined;
+  if (res.status === 429 && retry < 2) {
+    await sleep(1500 * (retry + 1));
+    return bulkMatchPeople(details, options, retry + 1);
+  }
+
+  const text = await res.text();
+  if (!res.ok) {
+    if (res.status === 403 && text.toLowerCase().includes("master")) {
+      return {
+        byId: new Map(),
+        credits: 0,
+        error: "API key debe ser Master en Apollo → Settings → API",
+      };
+    }
+    return {
+      byId: new Map(),
+      credits: 0,
+      error: `Apollo bulk_match ${res.status}: ${text.slice(0, 280)}`,
+    };
+  }
+
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return { byId: new Map(), credits: 0, error: "Respuesta inválida de Apollo bulk_match" };
+  }
+
   const credits = Number(data.credits_consumed ?? 0);
-  return { person: person ?? null, credits: Number.isFinite(credits) ? credits : 0 };
+  const byId = new Map<string, Record<string, unknown>>();
+  const matches = (data.matches ?? []) as Record<string, unknown>[];
+
+  for (const person of matches) {
+    const pid = resolveApolloPersonId(person);
+    if (pid) byId.set(pid, person);
+  }
+
+  return { byId, credits: Number.isFinite(credits) ? credits : 0 };
 }
 
 async function pollPhones(ids: string[]): Promise<Map<string, string>> {
@@ -156,54 +240,74 @@ async function pollPhones(ids: string[]): Promise<Map<string, string>> {
 export async function enrichPeopleWithContacts(
   rawPeople: Record<string, unknown>[]
 ): Promise<{ results: ApolloPerson[]; stats: EnrichStats }> {
-  const candidates = rawPeople.filter(isContactableInSearch);
-  const ids = candidates.map((p) => String(p.id ?? "")).filter(Boolean);
-  const enrichedMap = new Map<string, Record<string, unknown>>();
-  let creditsConsumed = 0;
+  const candidates = rawPeople
+    .filter(isContactableInSearch)
+    .sort((a, b) => candidateScore(b) - candidateScore(a));
 
+  const enrichedMap = new Map<string, Record<string, unknown>>();
+  const rawById = new Map<string, Record<string, unknown>>();
+  let creditsConsumed = 0;
+  let apiMatched = 0;
+  const matchErrors: string[] = [];
+
+  for (const raw of candidates) {
+    const id = resolveApolloPersonId(raw);
+    if (id) rawById.set(id, raw);
+  }
+
+  const ids = [...rawById.keys()];
   const cachedPhones = await getPhoneCache(ids);
   for (const [id, phone] of cachedPhones) {
-    enrichedMap.set(id, { id, sanitized_phone: phone });
+    enrichedMap.set(id, { ...(rawById.get(id) ?? { id }), id, sanitized_phone: phone });
   }
 
-  const usePhoneReveal = Boolean(webhookBaseUrl());
-  const matched: Array<{ id: string; person: Record<string, unknown> | null }> = [];
-  for (let i = 0; i < ids.length; i += MATCH_CONCURRENCY) {
-    const batch = ids.slice(i, i + MATCH_CONCURRENCY);
-    const batchResults = await Promise.all(
-      batch.map(async (id) => {
-        const { person, credits } = await matchPerson(id, { revealPhone: usePhoneReveal });
-        creditsConsumed += credits;
-        return { id, person };
-      })
-    );
-    matched.push(...batchResults);
+  const details = candidates
+    .map(buildMatchDetail)
+    .filter((d): d is Record<string, unknown> => d !== null);
+
+  // Fase 1: email (sin teléfono — más fiable y rápido)
+  for (let i = 0; i < details.length; i += BATCH_SIZE) {
+    const batch = details.slice(i, i + BATCH_SIZE);
+    const { byId, credits, error } = await bulkMatchPeople(batch, {
+      revealEmail: true,
+      revealPhone: false,
+    });
+    creditsConsumed += credits;
+    if (error) matchErrors.push(error);
+    for (const [id, person] of byId) {
+      enrichedMap.set(id, { ...(rawById.get(id) ?? {}), ...person });
+      apiMatched++;
+    }
   }
 
-  for (const { id, person } of matched) {
-    if (person) enrichedMap.set(id, person);
-  }
-
-  const missingPhone = ids.filter((id) => {
-    const person = enrichedMap.get(id);
-    return person && !extractPhone(person);
+  // Fase 2: teléfono solo para quienes ya tienen email
+  const needPhone = ids.filter((id) => {
+    const merged = enrichedMap.get(id) ?? rawById.get(id);
+    return merged && extractEmail(merged) && !extractPhone(merged);
   });
 
-  if (missingPhone.length && webhookBaseUrl()) {
-    for (let i = 0; i < missingPhone.length; i += MATCH_CONCURRENCY) {
-      const batch = missingPhone.slice(i, i + MATCH_CONCURRENCY);
-      await Promise.all(
-        batch.map(async (id) => {
-          const { credits } = await matchPerson(id, { revealPhone: true });
-          creditsConsumed += credits;
-        })
-      );
+  if (needPhone.length && webhookBaseUrl()) {
+    const phoneDetails = needPhone
+      .map((id) => buildMatchDetail(enrichedMap.get(id) ?? rawById.get(id)!))
+      .filter((d): d is Record<string, unknown> => d !== null);
+
+    for (let i = 0; i < phoneDetails.length; i += BATCH_SIZE) {
+      const batch = phoneDetails.slice(i, i + BATCH_SIZE);
+      const { credits, error } = await bulkMatchPeople(batch, {
+        revealEmail: false,
+        revealPhone: true,
+      });
+      creditsConsumed += credits;
+      if (error) matchErrors.push(error);
     }
-    const polled = await pollPhones(missingPhone);
+
+    const polled = await pollPhones(needPhone);
     for (const [id, phone] of polled) {
-      const person = enrichedMap.get(id) ?? { id };
+      const person = enrichedMap.get(id) ?? rawById.get(id) ?? { id };
       enrichedMap.set(id, { ...person, sanitized_phone: phone });
     }
+  } else if (needPhone.length && !webhookBaseUrl()) {
+    matchErrors.push("Webhook no configurado para revelar teléfonos móviles");
   }
 
   const results: ApolloPerson[] = [];
@@ -211,25 +315,24 @@ export async function enrichPeopleWithContacts(
   let withPhone = 0;
 
   for (const raw of candidates) {
-    const id = String(raw.id ?? "");
+    const id = resolveApolloPersonId(raw);
     const merged = enrichedMap.get(id) ?? raw;
     const person = normalizePerson(merged);
     if (person.email) withEmail++;
     if (person.telefono) withPhone++;
-    if (person.email && person.telefono) {
-      results.push(person);
-    }
+    if (person.email && person.telefono) results.push(person);
   }
 
   return {
     results,
     stats: {
       candidates: candidates.length,
-      matched: enrichedMap.size,
+      matched: apiMatched,
       with_email: withEmail,
       with_phone: withPhone,
       with_both: results.length,
       credits_consumed: creditsConsumed,
+      match_errors: [...new Set(matchErrors)],
     },
   };
 }
@@ -243,7 +346,7 @@ export function parsePhoneWebhookPayload(
   const people = (body as { people?: unknown[] }).people ?? [];
   for (const entry of people) {
     if (!entry || typeof entry !== "object") continue;
-    const id = String((entry as { id?: string }).id ?? "");
+    const id = resolveApolloPersonId(entry as Record<string, unknown>);
     if (!id) continue;
     const phone = extractPhone(entry as Record<string, unknown>);
     if (phone) out.push({ apollo_id: id, telefono: phone });

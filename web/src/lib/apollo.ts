@@ -11,8 +11,11 @@ import { recordProspeccionCredits } from "./db";
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
 const SEARCH_URL = `${BASE_URL}/mixed_people/api_search`;
-const MAX_SCANNED_PROFILES = 100;
 const TIME_BUDGET_MS = 55000;
+
+function maxProfilesToScan(target: number) {
+  return Math.min(50, Math.max(target * 5, 20));
+}
 
 function headers() {
   const key = process.env.APOLLO_API_KEY;
@@ -136,11 +139,14 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
     with_phone: 0,
     with_both: 0,
     credits_consumed: 0,
+    match_errors: [] as string[],
   };
+
+  const maxScan = maxProfilesToScan(target);
 
   for (
     let page = input.page;
-    page < input.page + 20 && collected.length < target && scanned < MAX_SCANNED_PROFILES;
+    page < input.page + 10 && collected.length < target && scanned < maxScan;
     page++
   ) {
     if (Date.now() - started > TIME_BUDGET_MS) break;
@@ -164,6 +170,9 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       with_both: enrichStats.with_both + enriched.stats.with_both,
       credits_consumed:
         enrichStats.credits_consumed + enriched.stats.credits_consumed,
+      match_errors: [
+        ...new Set([...enrichStats.match_errors, ...enriched.stats.match_errors]),
+      ],
     };
     for (const person of enriched.results) {
       if (collected.length >= target) break;
@@ -203,6 +212,7 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       industry_relaxed: industryRelaxed,
       apollo_zero_results: totalEntries === 0 && scanned === 0,
       webhook_configured: isApolloWebhookConfigured(),
+      match_errors: enrichStats.match_errors,
     },
   };
 }
