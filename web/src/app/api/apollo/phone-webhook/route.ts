@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { initDb, recordProspeccionCredits } from "@/lib/db";
+import { ensureDb, recordProspeccionCredits } from "@/lib/db";
 import { persistPhoneWebhook } from "@/lib/apollo-enrich";
 
 export async function POST(req: NextRequest) {
   try {
-    await initDb();
+    await ensureDb();
     const body = await req.json();
     const result = await persistPhoneWebhook(body);
     if (result.credits_consumed > 0) {

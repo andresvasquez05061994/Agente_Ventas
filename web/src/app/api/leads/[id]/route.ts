@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteLead, initDb, updateLeadNotes, updateLeadStatus } from "@/lib/db";
+import { deleteLead, ensureDb, updateLeadNotes, updateLeadStatus } from "@/lib/db";
 import type { LeadStatus } from "@/lib/types";
 
 export async function PATCH(
@@ -7,7 +7,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await initDb();
+    await ensureDb();
     const { id } = await params;
     const body = await req.json();
     if (body.lead_status) await updateLeadStatus(Number(id), body.lead_status as LeadStatus);
@@ -24,7 +24,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await initDb();
+    await ensureDb();
     const { id } = await params;
     await deleteLead(Number(id));
     return NextResponse.json({ ok: true });

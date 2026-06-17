@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
-import { initDb } from "@/lib/db";
+import { ensureDb } from "@/lib/db";
 
 export async function GET() {
   const checks = {
@@ -11,7 +11,7 @@ export async function GET() {
 
   if (checks.database_url) {
     try {
-      await initDb();
+      await ensureDb();
       const sql = neon(process.env.DATABASE_URL!);
       await sql`SELECT 1`;
       checks.database = true;

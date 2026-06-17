@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { getApolloProspeccionCredits, getStats, initDb } from "@/lib/db";
+import { getApolloProspeccionCredits, ensureDb, getStats } from "@/lib/db";
 
 export async function GET() {
   try {
-    await initDb();
+    await ensureDb();
     const [stats, apollo] = await Promise.all([
       getStats(),
       getApolloProspeccionCredits(),

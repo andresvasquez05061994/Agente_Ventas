@@ -1,10 +1,25 @@
 import { neon } from "@neondatabase/serverless";
 import type { Lead, LeadStatus } from "./types";
 
+const LEADS_LIMIT = 500;
+
+let dbReady: Promise<void> | null = null;
+
 function getSql() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL no configurada");
   return neon(url);
+}
+
+/** Inicializa tablas una sola vez por instancia serverless (evita 3 CREATE en cada request). */
+export function ensureDb(): Promise<void> {
+  if (!dbReady) {
+    dbReady = initDb().catch((err) => {
+      dbReady = null;
+      throw err;
+    });
+  }
+  return dbReady;
 }
 
 export async function initDb() {
@@ -44,6 +59,10 @@ export async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_leads_status_created
+    ON leads (lead_status, created_at DESC)
+  `;
 }
 
 export async function getLeads(filters?: {
@@ -52,22 +71,58 @@ export async function getLeads(filters?: {
   contact?: string;
 }): Promise<Lead[]> {
   const sql = getSql();
-  const rows = (await sql`SELECT * FROM leads ORDER BY created_at DESC`) as Lead[];
+  const status =
+    filters?.status && filters.status !== "Todos" ? filters.status : null;
+  const term = filters?.search?.trim() || null;
+  const pattern = term ? `%${term}%` : null;
+
+  if (status && pattern) {
+    return (await sql`
+      SELECT * FROM leads
+      WHERE lead_status = ${status}
+        AND (
+          nombre ILIKE ${pattern}
+          OR empresa ILIKE ${pattern}
+          OR cargo ILIKE ${pattern}
+        )
+      ORDER BY created_at DESC
+      LIMIT ${LEADS_LIMIT}
+    `) as Lead[];
+  }
+
+  if (status) {
+    return (await sql`
+      SELECT * FROM leads
+      WHERE lead_status = ${status}
+      ORDER BY created_at DESC
+      LIMIT ${LEADS_LIMIT}
+    `) as Lead[];
+  }
+
+  if (pattern) {
+    return (await sql`
+      SELECT * FROM leads
+      WHERE nombre ILIKE ${pattern}
+         OR empresa ILIKE ${pattern}
+         OR cargo ILIKE ${pattern}
+      ORDER BY created_at DESC
+      LIMIT ${LEADS_LIMIT}
+    `) as Lead[];
+  }
+
+  const rows = (await sql`
+    SELECT * FROM leads
+    ORDER BY created_at DESC
+    LIMIT ${LEADS_LIMIT}
+  `) as Lead[];
+
+  if (!filters?.contact) return rows;
 
   return rows.filter((lead) => {
-    if (filters?.status && filters.status !== "Todos" && lead.lead_status !== filters.status)
-      return false;
-    if (filters?.search) {
-      const q = filters.search.toLowerCase();
-      const hay = [lead.nombre, lead.empresa, lead.cargo]
-        .filter(Boolean)
-        .some((v) => v!.toLowerCase().includes(q));
-      if (!hay) return false;
-    }
-    if (filters?.contact === "Con teléfono" && !lead.telefono) return false;
-    if (filters?.contact === "Sin teléfono" && lead.telefono) return false;
-    if (filters?.contact === "Con email" && !lead.email) return false;
-    if (filters?.contact === "Sin email" && lead.email) return false;
+    if (filters.contact === "Con teléfono" && !lead.telefono) return false;
+    if (filters.contact === "Sin teléfono" && lead.telefono) return false;
+    if (filters.contact === "Con email" && !lead.email) return false;
+    if (filters.contact === "Sin email" && lead.email) return false;
     return true;
   });
 }
@@ -132,21 +187,25 @@ export async function saveLeads(
 
 export async function getStats() {
   const sql = getSql();
-  const [total] = await sql`SELECT COUNT(*)::int AS c FROM leads`;
-  const [approved] = await sql`
-    SELECT COUNT(*)::int AS c FROM leads WHERE lead_status = 'Aprobado para contacto'
+  const [row] = await sql`
+    SELECT
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE lead_status = 'Aprobado para contacto')::int AS approved,
+      COUNT(*) FILTER (WHERE telefono IS NOT NULL AND telefono != '')::int AS with_phone,
+      COUNT(*) FILTER (WHERE email IS NOT NULL AND email != '')::int AS with_email
+    FROM leads
   `;
-  const [withPhone] = await sql`
-    SELECT COUNT(*)::int AS c FROM leads WHERE telefono IS NOT NULL AND telefono != ''
-  `;
-  const [withEmail] = await sql`
-    SELECT COUNT(*)::int AS c FROM leads WHERE email IS NOT NULL AND email != ''
-  `;
+  const r = row as {
+    total: number;
+    approved: number;
+    with_phone: number;
+    with_email: number;
+  };
   return {
-    total: (total as { c: number })?.c ?? 0,
-    approved: (approved as { c: number })?.c ?? 0,
-    with_phone: (withPhone as { c: number })?.c ?? 0,
-    with_email: (withEmail as { c: number })?.c ?? 0,
+    total: r?.total ?? 0,
+    approved: r?.approved ?? 0,
+    with_phone: r?.with_phone ?? 0,
+    with_email: r?.with_email ?? 0,
   };
 }
 
@@ -201,6 +260,12 @@ export async function updateLeadNotes(id: number, notas: string) {
 export async function deleteLead(id: number) {
   const sql = getSql();
   await sql`DELETE FROM leads WHERE id = ${id}`;
+}
+
+export async function clearAllLeads(): Promise<number> {
+  const sql = getSql();
+  const rows = await sql`DELETE FROM leads RETURNING id`;
+  return rows.length;
 }
 
 export async function savePhoneCache(apolloId: string, telefono: string) {

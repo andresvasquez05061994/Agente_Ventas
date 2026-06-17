@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Lead, LeadStatus } from "@/lib/types";
 import { EmptyState, SectionLabel } from "@/components/ui";
+import { useDebounce } from "@/hooks/use-debounce";
 
 const STATUSES: LeadStatus[] = ["Nuevo", "En revisión", "Aprobado para contacto", "Descartado"];
 
@@ -10,32 +11,79 @@ export default function PortafolioPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [status, setStatus] = useState("Todos");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 300);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [clearing, setClearing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setMessage("");
     const q = new URLSearchParams();
     if (status !== "Todos") q.set("status", status);
-    if (search) q.set("search", search);
-    const res = await fetch(`/api/leads?${q}`);
-    const data = await res.json();
-    if (data.error) setMessage(data.error);
-    else setLeads(data.leads);
-    setLoading(false);
-  }, [status, search]);
+    if (debouncedSearch) q.set("search", debouncedSearch);
+    try {
+      const res = await fetch(`/api/leads?${q}`);
+      const data = await res.json();
+      if (data.error) setMessage(data.error);
+      else setLeads(data.leads);
+    } catch {
+      setMessage("No se pudo cargar el portafolio.");
+    } finally {
+      setLoading(false);
+    }
+  }, [status, debouncedSearch]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   async function updateStatus(id: number, lead_status: LeadStatus) {
-    await fetch(`/api/leads/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lead_status }),
-    });
-    load();
+    const prev = leads;
+    setLeads((list) => list.map((l) => (l.id === id ? { ...l, lead_status } : l)));
+    try {
+      const res = await fetch(`/api/leads/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lead_status }),
+      });
+      if (!res.ok) {
+        setLeads(prev);
+        const data = await res.json();
+        setMessage(data.error ?? "Error al actualizar estado");
+      } else if (status !== "Todos" && lead_status !== status) {
+        setLeads((list) => list.filter((l) => l.id !== id));
+      }
+    } catch {
+      setLeads(prev);
+      setMessage("Error de red al actualizar estado");
+    }
+  }
+
+  async function clearPortfolio() {
+    if (
+      !window.confirm(
+        "¿Eliminar todos los contactos del portafolio? Esta acción no se puede deshacer."
+      )
+    ) {
+      return;
+    }
+    setClearing(true);
+    setMessage("");
+    try {
+      const res = await fetch("/api/leads?confirm=true", { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage(data.error ?? "Error al vaciar portafolio");
+      } else {
+        setLeads([]);
+        setMessage(`Portafolio vaciado (${data.deleted ?? 0} contactos eliminados).`);
+      }
+    } catch {
+      setMessage("Error de red al vaciar portafolio");
+    } finally {
+      setClearing(false);
+    }
   }
 
   return (
@@ -59,13 +107,29 @@ export default function PortafolioPage() {
       </aside>
 
       <main className="flex-1 p-6 lg:p-8">
-        <h1 className="border-b-2 border-[#003366] pb-2 text-xl font-bold text-[#1A2332] dark:text-[#E8EEF4]">
-          Portafolio
-        </h1>
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b-2 border-[#003366] pb-2">
+          <h1 className="text-xl font-bold text-[#1A2332] dark:text-[#E8EEF4]">Portafolio</h1>
+          {leads.length > 0 && (
+            <button
+              type="button"
+              onClick={clearPortfolio}
+              disabled={clearing || loading}
+              className="rounded border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+            >
+              {clearing ? "Vaciando..." : "Vaciar portafolio"}
+            </button>
+          )}
+        </div>
         <p className="mt-2 text-xs text-[#6B7C93]">
           Cada contacto guardado incluye email y teléfono verificados en la prospección.
         </p>
-        {message && <p className="mt-4 text-sm text-red-600">{message}</p>}
+        {message && (
+          <p
+            className={`mt-4 text-sm ${message.includes("vaciado") ? "text-green-700 dark:text-green-400" : "text-red-600"}`}
+          >
+            {message}
+          </p>
+        )}
 
         {loading ? (
           <p className="mt-8 text-sm text-[#6B7C93]">Cargando...</p>

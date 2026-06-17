@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLeads, initDb, saveLeads } from "@/lib/db";
+import { clearAllLeads, ensureDb, getLeads, saveLeads } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   try {
-    await initDb();
+    await ensureDb();
     const { searchParams } = new URL(req.url);
     const leads = await getLeads({
       status: searchParams.get("status") ?? undefined,
@@ -19,13 +19,17 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await initDb();
+    await ensureDb();
     const body = await req.json();
     const leads = (body.leads ?? []) as Array<{
       apollo_id: string;
       nombre: string;
+      cargo?: string | null;
+      empresa?: string | null;
       email?: string | null;
       telefono?: string | null;
+      pais?: string | null;
+      linkedin_url?: string | null;
     }>;
 
     const invalid = leads.filter((l) => !l.email?.trim() || !l.telefono?.trim());
@@ -37,15 +41,38 @@ export async function POST(req: NextRequest) {
     }
 
     const normalized = leads.map((l) => ({
-      ...l,
+      apollo_id: l.apollo_id,
+      nombre: l.nombre,
+      cargo: l.cargo ?? null,
+      empresa: l.empresa ?? null,
       email: l.email!.trim(),
       telefono: l.telefono!.trim(),
+      pais: l.pais ?? null,
+      linkedin_url: l.linkedin_url ?? null,
     }));
 
     const result = await saveLeads(normalized, body.fuente ?? "Apollo");
     return NextResponse.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error al guardar leads";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const confirm = req.nextUrl.searchParams.get("confirm");
+    if (confirm !== "true") {
+      return NextResponse.json(
+        { error: "Confirmación requerida (?confirm=true)" },
+        { status: 400 }
+      );
+    }
+    await ensureDb();
+    const deleted = await clearAllLeads();
+    return NextResponse.json({ deleted });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Error al vaciar portafolio";
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

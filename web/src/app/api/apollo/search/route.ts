@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ApolloApiError, searchApolloWithContacts } from "@/lib/apollo";
 import { validateSearchRequest } from "@/lib/apollo-filters";
-import { initDb } from "@/lib/db";
+import { ensureDb } from "@/lib/db";
 
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    await initDb();
+    await ensureDb();
     const body = await req.json();
     const input = validateSearchRequest(body);
     const data = await searchApolloWithContacts(input);
