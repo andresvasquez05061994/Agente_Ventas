@@ -248,6 +248,15 @@ export default function ProspeccionPage() {
       return;
     }
 
+    const incomplete = toSave.filter((r) => !r.email?.trim() || !r.telefono?.trim());
+    if (incomplete.length) {
+      setStatus("error");
+      setMessage(
+        `${incomplete.length} contacto(s) sin email o teléfono. Solo se guardan contactos completos.`
+      );
+      return;
+    }
+
     const fuente = [country, titles.join(", "), keyword || null, seniority || null]
       .filter(Boolean)
       .join(" | ");
@@ -263,7 +272,10 @@ export default function ProspeccionPage() {
       setMessage(data.error);
     } else {
       setStatus("success");
-      setMessage(`${data.inserted} guardado(s). ${data.skipped} duplicado(s).`);
+      const parts = [`${data.inserted} nuevo(s)`];
+      if (data.updated) parts.push(`${data.updated} actualizado(s)`);
+      if (data.skipped) parts.push(`${data.skipped} omitido(s)`);
+      setMessage(`${parts.join(", ")} en portafolio (con email y teléfono).`);
     }
   }
 

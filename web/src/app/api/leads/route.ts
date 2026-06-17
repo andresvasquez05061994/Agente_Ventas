@@ -36,7 +36,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await saveLeads(body.leads, body.fuente ?? "Apollo");
+    const normalized = leads.map((l) => ({
+      ...l,
+      email: l.email!.trim(),
+      telefono: l.telefono!.trim(),
+    }));
+
+    const result = await saveLeads(normalized, body.fuente ?? "Apollo");
     return NextResponse.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error al guardar leads";

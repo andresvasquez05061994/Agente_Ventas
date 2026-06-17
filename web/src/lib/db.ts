@@ -87,25 +87,47 @@ export async function saveLeads(
 ) {
   const sql = getSql();
   let inserted = 0;
+  let updated = 0;
   let skipped = 0;
 
   for (const lead of leads) {
+    const email = lead.email?.trim() || null;
+    const telefono = lead.telefono?.trim() || null;
+    if (!email || !telefono) {
+      skipped++;
+      continue;
+    }
+
     const rows = await sql`
       INSERT INTO leads (
         apollo_id, nombre, cargo, empresa, email, telefono,
         pais, linkedin_url, lead_status, fuente_busqueda
       ) VALUES (
         ${lead.apollo_id}, ${lead.nombre}, ${lead.cargo}, ${lead.empresa},
-        ${lead.email}, ${lead.telefono}, ${lead.pais}, ${lead.linkedin_url},
+        ${email}, ${telefono}, ${lead.pais}, ${lead.linkedin_url},
         'Nuevo', ${fuente}
       )
-      ON CONFLICT (apollo_id) DO NOTHING
-      RETURNING id
+      ON CONFLICT (apollo_id) DO UPDATE SET
+        nombre = EXCLUDED.nombre,
+        cargo = EXCLUDED.cargo,
+        empresa = EXCLUDED.empresa,
+        email = EXCLUDED.email,
+        telefono = EXCLUDED.telefono,
+        pais = EXCLUDED.pais,
+        linkedin_url = EXCLUDED.linkedin_url,
+        fuente_busqueda = EXCLUDED.fuente_busqueda,
+        updated_at = NOW()
+      RETURNING id, (xmax = 0) AS is_insert
     `;
-    if (rows.length) inserted++;
-    else skipped++;
+    const row = rows[0] as { id: number; is_insert: boolean } | undefined;
+    if (!row) {
+      skipped++;
+      continue;
+    }
+    if (row.is_insert) inserted++;
+    else updated++;
   }
-  return { inserted, skipped };
+  return { inserted, updated, skipped };
 }
 
 export async function getStats() {
