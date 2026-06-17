@@ -28,6 +28,13 @@ export async function initDb() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS apollo_phone_cache (
+      apollo_id TEXT PRIMARY KEY,
+      telefono TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
 }
 
 export async function getLeads(filters?: {
@@ -125,4 +132,30 @@ export async function updateLeadNotes(id: number, notas: string) {
 export async function deleteLead(id: number) {
   const sql = getSql();
   await sql`DELETE FROM leads WHERE id = ${id}`;
+}
+
+export async function savePhoneCache(apolloId: string, telefono: string) {
+  const sql = getSql();
+  await sql`
+    INSERT INTO apollo_phone_cache (apollo_id, telefono, updated_at)
+    VALUES (${apolloId}, ${telefono}, NOW())
+    ON CONFLICT (apollo_id) DO UPDATE
+    SET telefono = EXCLUDED.telefono, updated_at = NOW()
+  `;
+}
+
+export async function getPhoneCache(apolloIds: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (!apolloIds.length) return map;
+
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT apollo_id, telefono FROM apollo_phone_cache
+    WHERE apollo_id = ANY(${apolloIds})
+  `) as Array<{ apollo_id: string; telefono: string }>;
+
+  for (const row of rows) {
+    if (row.telefono) map.set(row.apollo_id, row.telefono);
+  }
+  return map;
 }

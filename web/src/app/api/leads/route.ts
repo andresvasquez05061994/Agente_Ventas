@@ -21,6 +21,21 @@ export async function POST(req: NextRequest) {
   try {
     await initDb();
     const body = await req.json();
+    const leads = (body.leads ?? []) as Array<{
+      apollo_id: string;
+      nombre: string;
+      email?: string | null;
+      telefono?: string | null;
+    }>;
+
+    const invalid = leads.filter((l) => !l.email?.trim() || !l.telefono?.trim());
+    if (invalid.length) {
+      return NextResponse.json(
+        { error: "Solo se pueden guardar contactos con email y teléfono." },
+        { status: 400 }
+      );
+    }
+
     const result = await saveLeads(body.leads, body.fuente ?? "Apollo");
     return NextResponse.json(result);
   } catch (e) {

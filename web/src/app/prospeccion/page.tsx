@@ -6,6 +6,7 @@ import {
   APOLLO_COUNTRIES,
   APOLLO_JOB_TITLES,
   APOLLO_KEYWORDS,
+  APOLLO_PER_PAGE_OPTIONS,
   APOLLO_SENIORITIES,
   DEFAULT_SEARCH,
 } from "@/lib/apollo-filters";
@@ -42,13 +43,13 @@ function SearchFilters({
 }) {
   return (
     <>
-      <SectionLabel>Contexto de búsqueda</SectionLabel>
+      <SectionLabel>Filtros Apollo</SectionLabel>
       <p className="mb-3 text-[11px] leading-relaxed text-[#6B7C93]">
-        Apollo indexa cargos e industrias en inglés. Usa las listas para resultados confiables.
+        Solo listas validadas. Cada contacto incluye email y teléfono enriquecidos.
       </p>
 
       <label className="mb-1 block text-xs font-semibold text-[#1A2332] dark:text-[#E8EEF4]">
-        País (person_locations)
+        País
       </label>
       <select
         className="input-field mb-3"
@@ -62,7 +63,7 @@ function SearchFilters({
         ))}
       </select>
 
-      <label className="mb-1 block text-xs font-semibold">Cargos (person_titles)</label>
+      <label className="mb-1 block text-xs font-semibold">Cargos</label>
       <div className="mb-3 max-h-44 space-y-1.5 overflow-y-auto rounded border border-[#E2E6EA] bg-white p-2 dark:border-[#2A3544] dark:bg-[#1A222D]">
         {APOLLO_JOB_TITLES.map((t) => (
           <label
@@ -80,7 +81,7 @@ function SearchFilters({
         ))}
       </div>
 
-      <label className="mb-1 block text-xs font-semibold">Industria (q_keywords)</label>
+      <label className="mb-1 block text-xs font-semibold">Industria</label>
       <select
         className="input-field mb-3"
         value={keyword}
@@ -93,7 +94,7 @@ function SearchFilters({
         ))}
       </select>
 
-      <label className="mb-1 block text-xs font-semibold">Seniority (opcional)</label>
+      <label className="mb-1 block text-xs font-semibold">Seniority</label>
       <select
         className="input-field mb-3"
         value={seniority}
@@ -106,24 +107,26 @@ function SearchFilters({
         ))}
       </select>
 
-      <SectionLabel>Parámetros</SectionLabel>
-      <label className="mb-1 block text-xs font-semibold">Resultados: {perPage}</label>
-      <input
-        type="range"
-        min={5}
-        max={25}
-        step={5}
+      <SectionLabel>Resultados</SectionLabel>
+      <select
+        className="input-field mb-4"
         value={perPage}
         onChange={(e) => setPerPage(Number(e.target.value))}
-        className="mb-4 w-full accent-[#003366]"
-      />
+      >
+        {APOLLO_PER_PAGE_OPTIONS.map((n) => (
+          <option key={n} value={n}>
+            {n} contactos (con email y teléfono)
+          </option>
+        ))}
+      </select>
+
       <button
         type="button"
         onClick={onSearch}
         disabled={loading}
         className="btn-primary w-full disabled:opacity-60"
       >
-        {loading ? "Buscando en Apollo..." : "Ejecutar búsqueda"}
+        {loading ? "Buscando y enriqueciendo..." : "Ejecutar búsqueda"}
       </button>
     </>
   );
@@ -140,7 +143,11 @@ export default function ProspeccionPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<SearchStatus>("idle");
   const [message, setMessage] = useState("");
-  const [meta, setMeta] = useState<{ total_entries: number } | null>(null);
+  const [meta, setMeta] = useState<{
+    total_entries: number;
+    with_contact_data?: number;
+    scanned_profiles?: number;
+  } | null>(null);
 
   function toggleTitle(value: string) {
     setTitles((prev) =>
@@ -149,9 +156,9 @@ export default function ProspeccionPage() {
   }
 
   async function search() {
-    if (!titles.length && !keyword) {
+    if (!titles.length) {
       setStatus("error");
-      setMessage("Selecciona al menos un cargo o una industria.");
+      setMessage("Selecciona al menos un cargo de la lista.");
       return;
     }
 
@@ -164,10 +171,10 @@ export default function ProspeccionPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          person_locations: [country],
-          person_titles: titles,
-          person_seniorities: seniority ? [seniority] : [],
-          q_keywords: keyword,
+          country,
+          titles,
+          keyword,
+          seniority,
           per_page: perPage,
         }),
       });
@@ -185,13 +192,15 @@ export default function ProspeccionPage() {
       if (list.length === 0) {
         setStatus("empty");
         setMessage(
-          `0 contactos con estos filtros (total Apollo: ${data.meta?.total_entries ?? 0}). ` +
-            "Prueba quitar la industria, elegir más cargos o cambiar el país."
+          `No se encontraron contactos con email y teléfono para estos filtros. ` +
+            `Perfiles revisados: ${data.meta?.scanned_profiles ?? 0}. ` +
+            "Prueba más cargos, otra industria o quita el filtro de seniority."
         );
       } else {
         setStatus("success");
         setMessage(
-          `${list.length} contacto(s) en esta página · ${data.meta?.total_entries ?? list.length} coincidencias en Apollo.`
+          `${list.length} contacto(s) con email y teléfono · ` +
+            `${data.meta?.total_entries ?? 0} coincidencias en Apollo.`
         );
       }
     } catch (e) {
@@ -220,12 +229,8 @@ export default function ProspeccionPage() {
       setStatus("error");
       return;
     }
-    const fuente = [
-      country,
-      titles.join(", "),
-      keyword || null,
-      seniority || null,
-    ]
+
+    const fuente = [country, titles.join(", "), keyword || null, seniority || null]
       .filter(Boolean)
       .join(" | ");
 
@@ -275,7 +280,7 @@ export default function ProspeccionPage() {
           Prospección
         </h1>
 
-        <div className="mt-4 space-y-3 lg:hidden">
+        <div className="mt-4 lg:hidden">
           <SearchFilters
             country={country}
             setCountry={setCountry}
@@ -297,7 +302,11 @@ export default function ProspeccionPage() {
         {status === "loading" && (
           <div className="mt-12 flex flex-col items-center gap-3 text-center">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#003366] border-t-transparent dark:border-[#4A8FD4] dark:border-t-transparent" />
-            <p className="text-sm text-[#6B7C93]">Consultando base de Apollo...</p>
+            <p className="text-sm text-[#6B7C93]">
+              Buscando en Apollo y enriqueciendo email/teléfono…
+              <br />
+              <span className="text-xs">Puede tardar hasta 1 minuto.</span>
+            </p>
           </div>
         )}
 
@@ -307,23 +316,16 @@ export default function ProspeccionPage() {
               Listo para buscar
             </p>
             <p className="max-w-md text-sm text-[#6B7C93]">
-              Por defecto: Colombia + Director de TI. Pulsa &quot;Ejecutar búsqueda&quot; en el panel
-              izquierdo. Los emails no vienen en esta API; se obtienen al enriquecer el lead.
+              Por defecto: Colombia + Director de TI. Solo verás contactos con email y teléfono
+              confirmados por Apollo.
             </p>
-          </div>
-        )}
-
-        {status === "empty" && (
-          <div className="mt-8 rounded border border-[#FEC84B] bg-[#FFFAEB] p-4 text-sm text-[#7A2E0E] dark:border-[#93370D] dark:bg-[#2A1D0E] dark:text-[#FEC84B]">
-            No hay contactos con la combinación actual. Sugerencia: usa &quot;IT Director&quot; en lugar de
-            &quot;Director TI&quot;, y &quot;Construcción&quot; (construction) en la lista de industrias.
           </div>
         )}
 
         {results.length > 0 && status !== "loading" && (
           <>
             <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-[#6B7C93]">
-              <span>{meta?.total_entries ?? results.length} coincidencias en Apollo</span>
+              <span>{meta?.total_entries ?? results.length} en Apollo</span>
               <span>·</span>
               <span>{selected.size} seleccionados</span>
               <button
@@ -343,6 +345,7 @@ export default function ProspeccionPage() {
                     <th className="p-2">Cargo</th>
                     <th className="p-2">Empresa</th>
                     <th className="p-2">Email</th>
+                    <th className="p-2">Teléfono</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -363,15 +366,13 @@ export default function ProspeccionPage() {
                       </td>
                       <td className="p-2">{r.cargo ?? "—"}</td>
                       <td className="p-2">{r.empresa ?? "—"}</td>
-                      <td className="p-2 text-[#8A97A8]">{r.email ?? "En Apollo*"}</td>
+                      <td className="p-2">{r.email}</td>
+                      <td className="p-2">{r.telefono}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <p className="mt-2 text-xs text-[#8A97A8]">
-              * La búsqueda API no incluye email; Apollo indica disponibilidad al enriquecer.
-            </p>
             <button type="button" onClick={save} className="btn-primary mt-4">
               Guardar en portafolio
             </button>
