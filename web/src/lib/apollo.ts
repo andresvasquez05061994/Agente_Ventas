@@ -3,6 +3,7 @@ import type { ValidatedSearchRequest } from "./apollo-filters";
 import { getIndustrySearchStrategies } from "./apollo-filters";
 import {
   enrichPeopleWithContacts,
+  isApolloWebhookConfigured,
   normalizePerson,
 } from "./apollo-enrich";
 import { recordProspeccionCredits } from "./db";
@@ -10,8 +11,8 @@ import { recordProspeccionCredits } from "./db";
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
 const SEARCH_URL = `${BASE_URL}/mixed_people/api_search`;
-const MAX_SEARCH_PAGES = 3;
-const TIME_BUDGET_MS = 50000;
+const MAX_SCANNED_PROFILES = 100;
+const TIME_BUDGET_MS = 55000;
 
 function headers() {
   const key = process.env.APOLLO_API_KEY;
@@ -139,7 +140,7 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
 
   for (
     let page = input.page;
-    page < input.page + MAX_SEARCH_PAGES && collected.length < target;
+    page < input.page + 20 && collected.length < target && scanned < MAX_SCANNED_PROFILES;
     page++
   ) {
     if (Date.now() - started > TIME_BUDGET_MS) break;
@@ -201,6 +202,7 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       credits_consumed: enrichStats.credits_consumed,
       industry_relaxed: industryRelaxed,
       apollo_zero_results: totalEntries === 0 && scanned === 0,
+      webhook_configured: isApolloWebhookConfigured(),
     },
   };
 }

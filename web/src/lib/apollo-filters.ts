@@ -153,3 +153,79 @@ export function getIndustrySearchStrategies(
 
   return strategies.slice(0, 6);
 }
+
+export interface SearchEmptyMeta {
+  scanned_profiles?: number;
+  total_entries?: number;
+  apollo_zero_results?: boolean;
+  webhook_configured?: boolean;
+  enrich_stats?: {
+    candidates?: number;
+    matched?: number;
+    with_email?: number;
+    with_phone?: number;
+    with_both?: number;
+  };
+}
+
+/** Mensaje contextual cuando la búsqueda no devuelve contactos completos. */
+export function explainEmptySearchMessage(
+  meta: SearchEmptyMeta | null | undefined,
+  hasSeniorityFilter: boolean
+): string {
+  if (!meta) {
+    return "No se encontraron contactos con email y teléfono. Ajusta los filtros e intenta de nuevo.";
+  }
+
+  const scanned = meta.scanned_profiles ?? 0;
+  const total = meta.total_entries ?? 0;
+  const stats = meta.enrich_stats;
+
+  if (meta.apollo_zero_results) {
+    return (
+      "Apollo no tiene perfiles para esta combinación (país + cargos + industria). " +
+      "Prueba «Todas las industrias» u otra como Software o Salud."
+    );
+  }
+
+  if (scanned === 0) {
+    return "No se encontraron contactos con email y teléfono. Ajusta los filtros e intenta de nuevo.";
+  }
+
+  if (stats && stats.candidates === 0) {
+    return (
+      `Apollo devolvió ${scanned} perfiles (${total} coincidencias) pero ninguno era enriquecible. ` +
+      "Prueba más cargos o cambia la industria."
+    );
+  }
+
+  if (stats && (stats.with_email ?? 0) > 0 && (stats.with_both ?? 0) === 0) {
+    if (!meta.webhook_configured) {
+      return (
+        `Se obtuvo email en ${stats.with_email} perfil(es) revisados, pero no teléfono: ` +
+        "falta APOLLO_WEBHOOK_BASE_URL en el servidor para revelar móviles."
+      );
+    }
+    return (
+      `Se enriquecieron ${stats.candidates ?? scanned} perfiles: ${stats.with_email} con email ` +
+      `pero ninguno con teléfono a tiempo. Prueba «Todas las industrias», más cargos` +
+      (hasSeniorityFilter ? " o quita seniority" : "") +
+      "."
+    );
+  }
+
+  if (stats && (stats.candidates ?? 0) > 0 && (stats.matched ?? 0) === 0) {
+    return (
+      `Se intentó enriquecer ${stats.candidates} perfiles sin respuesta de Apollo. ` +
+      "Verifica créditos disponibles y que la API key sea Master."
+    );
+  }
+
+  const hints = ["prueba más cargos", "usa «Todas las industrias»"];
+  if (hasSeniorityFilter) hints.push("quita el filtro de seniority");
+
+  return (
+    `Se revisaron ${scanned} perfiles (${total} coincidencias) sin email y teléfono completos. ` +
+    `${hints[0].charAt(0).toUpperCase() + hints[0].slice(1)}, ${hints.slice(1).join(" o ")}.`
+  );
+}

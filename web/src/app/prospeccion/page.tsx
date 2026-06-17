@@ -9,6 +9,7 @@ import {
   APOLLO_PER_PAGE_OPTIONS,
   APOLLO_SENIORITIES,
   DEFAULT_SEARCH,
+  explainEmptySearchMessage,
 } from "@/lib/apollo-filters";
 import { FieldLabel, SectionLabel } from "@/components/ui";
 
@@ -145,6 +146,15 @@ export default function ProspeccionPage() {
     total_entries: number;
     with_contact_data?: number;
     scanned_profiles?: number;
+    apollo_zero_results?: boolean;
+    webhook_configured?: boolean;
+    enrich_stats?: {
+      candidates?: number;
+      matched?: number;
+      with_email?: number;
+      with_phone?: number;
+      with_both?: number;
+    };
   } | null>(null);
 
   function toggleTitle(value: string) {
@@ -189,23 +199,9 @@ export default function ProspeccionPage() {
 
       if (list.length === 0) {
         setStatus("empty");
-        const scanned = data.meta?.scanned_profiles ?? 0;
-        const total = data.meta?.total_entries ?? 0;
-        if (data.meta?.apollo_zero_results) {
-          setMessage(
-            `Apollo no tiene perfiles para esta combinación (país + cargos + industria). ` +
-              `Prueba «Todas las industrias» u otra como Software o Salud.`
-          );
-        } else if (scanned > 0) {
-          setMessage(
-            `Se revisaron ${scanned} perfiles en Apollo (${total} coincidencias) pero ninguno ` +
-              `quedó con email y teléfono enriquecidos. Prueba más cargos o quita seniority.`
-          );
-        } else {
-          setMessage(
-            "No se encontraron contactos con email y teléfono. Ajusta los filtros e intenta de nuevo."
-          );
-        }
+        setMessage(
+          explainEmptySearchMessage(data.meta, Boolean(seniority?.trim()))
+        );
       } else {
         setStatus("success");
         const credits = data.meta?.credits_consumed ?? 0;

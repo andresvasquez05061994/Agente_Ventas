@@ -5,7 +5,7 @@ const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
 const MATCH_URL = `${BASE_URL}/people/match`;
 const PHONE_POLL_MS = 1500;
-const PHONE_POLL_MAX_MS = 8000;
+const PHONE_POLL_MAX_MS = 18000;
 const MATCH_CONCURRENCY = 5;
 
 function apiHeaders() {
@@ -83,7 +83,15 @@ export function normalizePerson(raw: Record<string, unknown>): ApolloPerson {
 }
 
 export function isContactableInSearch(raw: Record<string, unknown>): boolean {
-  return raw.has_email === true;
+  const id = String(raw.id ?? raw.person_id ?? "");
+  if (!id) return false;
+  // api_search suele omitir has_email; people/match puede revelar el contacto igualmente.
+  if (raw.has_email === false && raw.has_direct_phone === false) return false;
+  return true;
+}
+
+export function isApolloWebhookConfigured(): boolean {
+  return Boolean(webhookBaseUrl());
 }
 
 export interface EnrichStats {
@@ -152,6 +160,11 @@ export async function enrichPeopleWithContacts(
   const ids = candidates.map((p) => String(p.id ?? "")).filter(Boolean);
   const enrichedMap = new Map<string, Record<string, unknown>>();
   let creditsConsumed = 0;
+
+  const cachedPhones = await getPhoneCache(ids);
+  for (const [id, phone] of cachedPhones) {
+    enrichedMap.set(id, { id, sanitized_phone: phone });
+  }
 
   const usePhoneReveal = Boolean(webhookBaseUrl());
   const matched: Array<{ id: string; person: Record<string, unknown> | null }> = [];
