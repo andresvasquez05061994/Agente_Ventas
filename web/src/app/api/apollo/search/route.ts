@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { searchApollo } from "@/lib/apollo";
+import { ApolloApiError, searchApollo } from "@/lib/apollo";
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(data);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error en búsqueda Apollo";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    const status = e instanceof ApolloApiError ? e.status : 500;
+    return NextResponse.json({ error: msg }, { status });
   }
 }

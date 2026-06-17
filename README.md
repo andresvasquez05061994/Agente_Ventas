@@ -19,6 +19,25 @@ Plataforma de prospección y gestión de leads (Fase 1).
    - `APOLLO_API_KEY` — tu key de Apollo.io
    - `DATABASE_URL` — conexión [Neon](https://neon.tech) (gratis, integración nativa con Vercel)
 5. Deploy. La tabla `leads` se crea automáticamente en el primer request.
+6. Verifica: `https://agente-ventas-three.vercel.app/api/health` debe responder `{"status":"ok",...}`.
+
+### Neon (base de datos)
+
+1. Crea un proyecto en [neon.tech](https://neon.tech).
+2. Copia la **connection string** (modo *pooled* recomendado para serverless).
+3. Pégala en Vercel como `DATABASE_URL` (Production + Preview si aplica).
+
+## Uso de Apollo API (cumplimiento)
+
+Esta plataforma usa Apollo **solo para prospección interna** del equipo IAC, conforme a los Términos de la API (ago. 2024):
+
+| Requisito | Cómo lo cumplimos |
+|-----------|-------------------|
+| Uso comercial interno (§2) | App privada del equipo, no producto público |
+| Credenciales confidenciales (§7) | `APOLLO_API_KEY` solo en variables de entorno (Vercel / `.env.local`) |
+| No exceder límites (§4) | Máx. 25 resultados por búsqueda; manejo de error 429 |
+| No sublicenciar ni redistribuir API (§2–3) | La key no se expone al navegador; llamadas solo desde rutas `/api/*` del servidor |
+| No competir con Apollo (§5) | Herramienta de gestión de leads propia, no réplica de Apollo |
 
 ## Desarrollo local (Next.js)
 
@@ -38,7 +57,7 @@ Abre http://localhost:3000
 git add .
 git commit -m "feat: plataforma Next.js Fase 1 + legacy Streamlit"
 git branch -M main
-git remote add origin https://github.com/TU_USUARIO/agente-ventas.git
+git remote add origin https://github.com/andresvasquez05061994/Agente_Ventas.git
 git push -u origin main
 ```
 

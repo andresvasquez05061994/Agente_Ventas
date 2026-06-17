@@ -1,7 +1,9 @@
 import type { ApolloPerson } from "./types";
 
+/** Uso interno del equipo — respeta límites del plan Apollo (ToS §4). */
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
+const MAX_PER_PAGE = 25;
 
 function headers() {
   const key = process.env.APOLLO_API_KEY;
@@ -47,11 +49,16 @@ export async function searchApollo(params: {
   const titles = params.cargo.split(",").map((t) => t.trim()).filter(Boolean);
   const tags = params.keywords.split(",").map((k) => k.trim()).filter(Boolean);
 
+  const perPage = Math.min(
+    Math.max(params.per_page ?? MAX_PER_PAGE, 1),
+    MAX_PER_PAGE
+  );
+
   const payload: Record<string, unknown> = {
     person_locations: params.pais ? [params.pais] : [],
     person_titles: titles,
     page: params.page ?? 1,
-    per_page: params.per_page ?? 25,
+    per_page: perPage,
   };
   if (tags.length) payload.q_organization_keyword_tags = tags;
   else if (params.keywords.trim()) payload.q_keywords = params.keywords.trim();
@@ -67,6 +74,12 @@ export async function searchApollo(params: {
       headers: headers(),
       body: JSON.stringify(payload),
     });
+    if (res.status === 429) {
+      throw new ApolloApiError(
+        "Límite de solicitudes Apollo alcanzado. Espera un momento e intenta de nuevo.",
+        429
+      );
+    }
     if (res.ok) {
       const data = await res.json();
       const raw = (data.contacts ?? data.people ?? []) as Record<
@@ -78,15 +91,31 @@ export async function searchApollo(params: {
         results: raw.map(normalize).filter((p) => p.apollo_id),
         meta: {
           page: pagination.page ?? params.page ?? 1,
-          per_page: pagination.per_page ?? params.per_page ?? 25,
+          per_page: pagination.per_page ?? perPage,
           total_entries: pagination.total_entries ?? raw.length,
           total_pages: pagination.total_pages ?? 1,
         },
       };
     }
     if (res.status !== 403) {
-      throw new Error(`Apollo ${res.status}: ${await res.text()}`);
+      throw new ApolloApiError(
+        `Apollo ${res.status}: ${await res.text()}`,
+        res.status
+      );
     }
   }
-  throw new Error("No se pudo conectar con Apollo. Revisa tu API key y plan.");
+  throw new ApolloApiError(
+    "No se pudo conectar con Apollo. Revisa tu API key y plan.",
+    403
+  );
+}
+
+export class ApolloApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = "ApolloApiError";
+  }
 }
