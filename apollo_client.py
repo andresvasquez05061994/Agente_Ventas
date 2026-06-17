@@ -41,11 +41,11 @@ class ApolloClient:
         """
         Busca personas en Apollo según país, cargo y palabras clave.
 
-        Usa POST mixed_people/search como endpoint principal.
-        Si el plan devuelve 403, reintenta con mixed_people/api_search.
+        Usa POST mixed_people/api_search (endpoint vigente para API).
+        mixed_people/search está deprecado y devuelve 422.
         """
         titles = [t.strip() for t in cargo.split(",") if t.strip()]
-        keyword_tags = [k.strip() for k in keywords.split(",") if k.strip()]
+        keyword_parts = [k.strip() for k in keywords.split(",") if k.strip()]
 
         payload: dict[str, Any] = {
             "person_locations": [pais] if pais else [],
@@ -53,35 +53,19 @@ class ApolloClient:
             "page": page,
             "per_page": per_page,
         }
-        if keyword_tags:
-            payload["q_organization_keyword_tags"] = keyword_tags
-        if keywords.strip() and not keyword_tags:
-            payload["q_keywords"] = keywords.strip()
+        if len(keyword_parts) == 1:
+            payload["q_keywords"] = keyword_parts[0]
+        elif keyword_parts:
+            payload["q_keywords"] = " ".join(keyword_parts)
 
-        endpoints = [
-            f"{self.base_url}/mixed_people/search",
-            f"{self.base_url}/mixed_people/api_search",
-        ]
-
-        last_error: str | None = None
-        for url in endpoints:
-            response = requests.post(
-                url, headers=self._headers, json=payload, timeout=60
-            )
-            if response.status_code == 200:
-                return response.json()
-            if response.status_code == 403 and url.endswith("api_search"):
-                last_error = response.text
-                continue
-            if response.status_code == 403:
-                last_error = response.text
-                continue
-            raise ApolloClientError(
-                f"Apollo respondió {response.status_code}: {response.text}"
-            )
-
+        url = f"{self.base_url}/mixed_people/api_search"
+        response = requests.post(
+            url, headers=self._headers, json=payload, timeout=60
+        )
+        if response.status_code == 200:
+            return response.json()
         raise ApolloClientError(
-            f"No se pudo buscar en Apollo. Último error: {last_error}"
+            f"Apollo respondió {response.status_code}: {response.text}"
         )
 
     def enrich_person(self, apollo_id: str) -> dict[str, Any] | None:
@@ -176,7 +160,8 @@ class ApolloClient:
         meta = {
             "page": pagination.get("page", page),
             "per_page": pagination.get("per_page", per_page),
-            "total_entries": pagination.get("total_entries", len(results)),
+            "total_entries": data.get("total_entries")
+            or pagination.get("total_entries", len(results)),
             "total_pages": pagination.get("total_pages", 1),
         }
         return results, meta
