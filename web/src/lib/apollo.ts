@@ -80,6 +80,13 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
   let lastPage = input.page;
   let scanned = 0;
   const started = Date.now();
+  let enrichStats = {
+    candidates: 0,
+    matched: 0,
+    with_email: 0,
+    with_phone: 0,
+    with_both: 0,
+  };
 
   for (
     let page = input.page;
@@ -96,7 +103,14 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
     if (!raw.length) break;
 
     const enriched = await enrichPeopleWithContacts(raw);
-    for (const person of enriched) {
+    enrichStats = {
+      candidates: enrichStats.candidates + enriched.stats.candidates,
+      matched: enrichStats.matched + enriched.stats.matched,
+      with_email: enrichStats.with_email + enriched.stats.with_email,
+      with_phone: enrichStats.with_phone + enriched.stats.with_phone,
+      with_both: enrichStats.with_both + enriched.stats.with_both,
+    };
+    for (const person of enriched.results) {
       if (collected.length >= target) break;
       if (seen.has(person.apollo_id)) continue;
       if (!person.email || !person.telefono) continue;
@@ -117,6 +131,7 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       total_pages: Math.max(1, Math.ceil(totalEntries / input.per_page)),
       scanned_profiles: scanned,
       with_contact_data: collected.length,
+      enrich_stats: enrichStats,
     },
   };
 }

@@ -83,14 +83,15 @@ export function normalizePerson(raw: Record<string, unknown>): ApolloPerson {
 }
 
 export function isContactableInSearch(raw: Record<string, unknown>): boolean {
-  if (raw.has_email !== true) return false;
-  const phoneFlag = raw.has_direct_phone;
-  if (phoneFlag === true) return true;
-  if (typeof phoneFlag === "string") {
-    const lower = phoneFlag.toLowerCase();
-    return lower.startsWith("yes") || lower.includes("maybe");
-  }
-  return false;
+  return raw.has_email === true;
+}
+
+export interface EnrichStats {
+  candidates: number;
+  matched: number;
+  with_email: number;
+  with_phone: number;
+  with_both: number;
 }
 
 function sleep(ms: number) {
@@ -103,7 +104,7 @@ async function matchPerson(
 ): Promise<Record<string, unknown> | null> {
   const url = new URL(MATCH_URL);
   url.searchParams.set("id", id);
-  url.searchParams.set("reveal_personal_emails", "false");
+  url.searchParams.set("reveal_personal_emails", "true");
 
   if (options.revealPhone) {
     const base = webhookBaseUrl();
@@ -144,7 +145,7 @@ async function pollPhones(ids: string[]): Promise<Map<string, string>> {
 
 export async function enrichPeopleWithContacts(
   rawPeople: Record<string, unknown>[]
-): Promise<ApolloPerson[]> {
+): Promise<{ results: ApolloPerson[]; stats: EnrichStats }> {
   const candidates = rawPeople.filter(isContactableInSearch);
   const ids = candidates.map((p) => String(p.id ?? "")).filter(Boolean);
   const enrichedMap = new Map<string, Record<string, unknown>>();
@@ -184,16 +185,30 @@ export async function enrichPeopleWithContacts(
   }
 
   const results: ApolloPerson[] = [];
+  let withEmail = 0;
+  let withPhone = 0;
+
   for (const raw of candidates) {
     const id = String(raw.id ?? "");
     const merged = enrichedMap.get(id) ?? raw;
     const person = normalizePerson(merged);
+    if (person.email) withEmail++;
+    if (person.telefono) withPhone++;
     if (person.email && person.telefono) {
       results.push(person);
     }
   }
 
-  return results;
+  return {
+    results,
+    stats: {
+      candidates: candidates.length,
+      matched: enrichedMap.size,
+      with_email: withEmail,
+      with_phone: withPhone,
+      with_both: results.length,
+    },
+  };
 }
 
 export function parsePhoneWebhookPayload(
