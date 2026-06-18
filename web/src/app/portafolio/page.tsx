@@ -137,7 +137,11 @@ function PortfolioFilters({
       <input
         className="input-field"
         value={search}
-        onChange={(e) => setSearch(e.target.value)}
+        onChange={(e) => {
+          setSearch(e.target.value);
+          setPage(1);
+          setLoading(true);
+        }}
         placeholder="Nombre, empresa..."
       />
     </>
@@ -185,12 +189,7 @@ export default function PortafolioPage() {
   }
 
   useEffect(() => {
-    setPage(1);
-  }, [debouncedSearch]);
-
-  useEffect(() => {
     let cancelled = false;
-    setLoading(true);
 
     fetch(`/api/leads?${buildLeadsQuery(page)}`)
       .then((res) => res.json())

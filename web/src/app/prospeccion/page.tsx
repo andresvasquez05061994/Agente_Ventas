@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import type { ApolloPerson } from "@/lib/types";
+import type { SmartSearchFilters, SmartSearchResult } from "@/lib/smart-search";
 import { ApolloSearchFilters } from "@/components/ApolloSearchFilters";
+import { SmartSearchPanel } from "@/components/SmartSearchPanel";
 import {
   DEFAULT_SEARCH,
   explainEmptySearchMessage,
@@ -10,8 +12,18 @@ import {
 
 type SearchStatus = "idle" | "loading" | "success" | "empty" | "error";
 
+type SearchParams = {
+  country: string;
+  titles: string[];
+  keyword: string;
+  seniority: string;
+  company: string;
+  perPage: number;
+};
+
 export default function ProspeccionPage() {
   const [country, setCountry] = useState(DEFAULT_SEARCH.country);
+  const [company, setCompany] = useState(DEFAULT_SEARCH.company);
   const [titles, setTitles] = useState<string[]>(DEFAULT_SEARCH.titles);
   const [keyword, setKeyword] = useState(DEFAULT_SEARCH.keyword);
   const [seniority, setSeniority] = useState(DEFAULT_SEARCH.seniority);
@@ -27,6 +39,9 @@ export default function ProspeccionPage() {
     scanned_profiles?: number;
     apollo_zero_results?: boolean;
     webhook_configured?: boolean;
+    organization_name?: string;
+    industry_relaxed?: boolean;
+    credits_consumed?: number;
     enrich_stats?: {
       candidates?: number;
       matched?: number;
@@ -42,11 +57,38 @@ export default function ProspeccionPage() {
     );
   }
 
-  async function search() {
-    if (!titles.length) {
+  function applyFilters(filters: SmartSearchFilters) {
+    setCountry(filters.country);
+    setCompany(filters.company);
+    setTitles(filters.titles);
+    setKeyword(filters.keyword);
+    setSeniority(filters.seniority);
+    setPerPage(filters.perPage);
+  }
+
+  async function search(overrides?: Partial<SearchParams>) {
+    const params: SearchParams = {
+      country: overrides?.country ?? country,
+      titles: overrides?.titles ?? titles,
+      keyword: overrides?.keyword ?? keyword,
+      seniority: overrides?.seniority ?? seniority,
+      company: overrides?.company ?? company,
+      perPage: overrides?.perPage ?? perPage,
+    };
+
+    if (!params.titles.length) {
       setStatus("error");
       setMessage("Selecciona al menos un cargo de la lista.");
       return;
+    }
+
+    if (!overrides) {
+      setCountry(params.country);
+      setCompany(params.company);
+      setTitles(params.titles);
+      setKeyword(params.keyword);
+      setSeniority(params.seniority);
+      setPerPage(params.perPage);
     }
 
     setStatus("loading");
@@ -58,11 +100,12 @@ export default function ProspeccionPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          country,
-          titles,
-          keyword,
-          seniority,
-          per_page: perPage,
+          country: params.country,
+          titles: params.titles,
+          keyword: params.keyword,
+          seniority: params.seniority,
+          company: params.company.trim() || undefined,
+          per_page: params.perPage,
         }),
       });
 
@@ -79,7 +122,7 @@ export default function ProspeccionPage() {
       if (list.length === 0) {
         setStatus("empty");
         setMessage(
-          explainEmptySearchMessage(data.meta, Boolean(seniority?.trim()))
+          explainEmptySearchMessage(data.meta, Boolean(params.seniority?.trim()))
         );
       } else {
         setStatus("success");
@@ -87,10 +130,14 @@ export default function ProspeccionPage() {
         const relaxed = data.meta?.industry_relaxed
           ? " · Industria ampliada (término alternativo en Apollo)"
           : "";
+        const org = params.company.trim()
+          ? ` · Empresa: ${params.company.trim()}`
+          : "";
         setMessage(
           `${list.length} contacto(s) con email y teléfono · ` +
             `${data.meta?.total_entries ?? 0} coincidencias en Apollo` +
             (credits > 0 ? ` · ${credits} crédito(s) en esta búsqueda` : "") +
+            org +
             relaxed
         );
       }
@@ -100,6 +147,12 @@ export default function ProspeccionPage() {
       setResults([]);
       setMeta(null);
     }
+  }
+
+  async function handleSmartApply(result: SmartSearchResult) {
+    applyFilters(result.filters);
+    setMessage(result.summary);
+    await search(result.filters);
   }
 
   function toggle(id: string) {
@@ -130,7 +183,13 @@ export default function ProspeccionPage() {
       return;
     }
 
-    const fuente = [country, titles.join(", "), keyword || null, seniority || null]
+    const fuente = [
+      country,
+      company.trim() || null,
+      titles.join(", "),
+      keyword || null,
+      seniority || null,
+    ]
       .filter(Boolean)
       .join(" | ");
 
@@ -159,23 +218,31 @@ export default function ProspeccionPage() {
         ? "text-[#B54708] dark:text-[#FDB022]"
         : "text-[#175CD3] dark:text-[#6BA3F7]";
 
+  const filterProps = {
+    country,
+    setCountry,
+    company,
+    setCompany,
+    titles,
+    toggleTitle,
+    keyword,
+    setKeyword,
+    seniority,
+    setSeniority,
+    perPage,
+    setPerPage,
+    loading: status === "loading",
+    onSearch: () => search(),
+  };
+
   return (
     <div className="flex w-full flex-1">
       <aside className="hidden w-[300px] shrink-0 border-r border-[#E2E6EA] bg-[#FAFBFC] p-5 dark:border-[#2A3544] dark:bg-[#151B23] lg:block">
-        <ApolloSearchFilters
-          country={country}
-          setCountry={setCountry}
-          titles={titles}
-          toggleTitle={toggleTitle}
-          keyword={keyword}
-          setKeyword={setKeyword}
-          seniority={seniority}
-          setSeniority={setSeniority}
-          perPage={perPage}
-          setPerPage={setPerPage}
-          loading={status === "loading"}
-          onSearch={search}
+        <SmartSearchPanel
+          disabled={status === "loading"}
+          onApply={handleSmartApply}
         />
+        <ApolloSearchFilters {...filterProps} />
       </aside>
 
       <main className="flex-1 p-6 lg:p-8">
@@ -184,20 +251,11 @@ export default function ProspeccionPage() {
         </div>
 
         <div className="mt-4 lg:hidden">
-          <ApolloSearchFilters
-            country={country}
-            setCountry={setCountry}
-            titles={titles}
-            toggleTitle={toggleTitle}
-            keyword={keyword}
-            setKeyword={setKeyword}
-            seniority={seniority}
-            setSeniority={setSeniority}
-            perPage={perPage}
-            setPerPage={setPerPage}
-            loading={status === "loading"}
-            onSearch={search}
+          <SmartSearchPanel
+            disabled={status === "loading"}
+            onApply={handleSmartApply}
           />
+          <ApolloSearchFilters {...filterProps} />
         </div>
 
         {message && <p className={`text-caption mt-4 font-medium ${messageClass}`}>{message}</p>}
@@ -217,8 +275,8 @@ export default function ProspeccionPage() {
           <div className="mt-12 flex min-h-[280px] flex-col items-center justify-center text-center">
             <p className="text-body-strong mb-2">Listo para buscar</p>
             <p className="text-caption max-w-md">
-              Por defecto: Colombia + Director de TI. Solo verás contactos con email y teléfono
-              confirmados por Apollo.
+              Usa búsqueda inteligente por texto o voz, indica una empresa opcional, o ajusta
+              los filtros manualmente. Solo verás contactos con email y teléfono confirmados.
             </p>
           </div>
         )}

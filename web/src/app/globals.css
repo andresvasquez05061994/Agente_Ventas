@@ -863,3 +863,12 @@ button {
   background: #4a8fd4;
   color: #0f1419;
 }
+
+.smart-search-panel {
+  border-bottom: 1px solid #e2e6ea;
+  padding-bottom: 12px;
+}
+
+.dark .smart-search-panel {
+  border-color: #2a3544;
+}

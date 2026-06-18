@@ -12,6 +12,8 @@ import { FieldLabel, SectionLabel } from "@/components/ui";
 export type ApolloSearchFiltersProps = {
   country: string;
   setCountry: (v: string) => void;
+  company: string;
+  setCompany: (v: string) => void;
   titles: string[];
   toggleTitle: (value: string) => void;
   keyword: string;
@@ -27,6 +29,8 @@ export type ApolloSearchFiltersProps = {
 export function ApolloSearchFilters({
   country,
   setCountry,
+  company,
+  setCompany,
   titles,
   toggleTitle,
   keyword,
@@ -57,6 +61,19 @@ export function ApolloSearchFilters({
           </option>
         ))}
       </select>
+
+      <FieldLabel>Empresa</FieldLabel>
+      <input
+        type="text"
+        className="input-field mb-3"
+        value={company}
+        onChange={(e) => setCompany(e.target.value)}
+        placeholder="Ej: Bancolombia, Grupo Éxito, Sura…"
+        maxLength={120}
+      />
+      <p className="text-micro mb-3 -mt-2">
+        Opcional. Filtra contactos dentro de esa organización en Apollo.
+      </p>
 
       <FieldLabel>Cargos</FieldLabel>
       <div className="mb-3 max-h-44 space-y-1.5 overflow-y-auto rounded border border-[#E2E6EA] bg-white p-2 dark:border-[#2A3544] dark:bg-[#1A222D]">

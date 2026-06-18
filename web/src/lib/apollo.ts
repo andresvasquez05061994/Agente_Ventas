@@ -43,6 +43,10 @@ function buildSearchPayload(
     payload.person_seniorities = input.person_seniorities;
   }
 
+  if (input.organization_name) {
+    payload.organization_names = [input.organization_name];
+  }
+
   if (industryOverride) {
     Object.assign(payload, industryOverride);
   } else if (input.q_keywords) {
@@ -93,7 +97,7 @@ async function fetchSearchPage(
   input: ValidatedSearchRequest,
   page: number
 ): Promise<{ data: Record<string, unknown>; industry_relaxed: boolean }> {
-  const strategies = input.q_keywords
+  const baseStrategies = input.q_keywords
     ? [
         buildSearchPayload(input, page),
         ...getIndustrySearchStrategies(input.q_keywords).map((override) =>
@@ -101,6 +105,14 @@ async function fetchSearchPage(
         ),
       ]
     : [buildSearchPayload(input, page)];
+
+  const strategies = [...baseStrategies];
+  if (input.organization_name) {
+    strategies.push({
+      ...buildSearchPayload(input, page),
+      q_organization_name: input.organization_name,
+    });
+  }
 
   const seen = new Set<string>();
   let lastData: Record<string, unknown> = { people: [], total_entries: 0 };
@@ -209,6 +221,7 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       enrich_stats: enrichStats,
       credits_consumed: enrichStats.credits_consumed,
       industry_relaxed: industryRelaxed,
+      organization_name: input.organization_name || undefined,
       apollo_zero_results: totalEntries === 0 && scanned === 0,
       webhook_configured: isApolloWebhookConfigured(),
       match_errors: enrichStats.match_errors,

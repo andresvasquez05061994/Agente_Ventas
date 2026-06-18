@@ -58,6 +58,7 @@ export const DEFAULT_SEARCH = {
   titles: ["IT Director"] as string[],
   keyword: "",
   seniority: "",
+  company: "",
   perPage: 10,
 };
 
@@ -71,6 +72,7 @@ export interface ValidatedSearchRequest {
   person_titles: string[];
   person_seniorities: string[];
   q_keywords: string;
+  organization_name: string;
   page: number;
   per_page: number;
 }
@@ -114,11 +116,20 @@ export function validateSearchRequest(body: Record<string, unknown>): ValidatedS
 
   const page = Math.max(1, Number(body.page ?? 1));
 
+  const company = String(body.company ?? body.organization_name ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 120);
+  if (company && !/^[\w\s.&'´\-áéíóúñÁÉÍÓÚÑ]+$/u.test(company)) {
+    throw new Error("Nombre de empresa con caracteres no permitidos.");
+  }
+
   return {
     person_locations: [country],
     person_titles: titles,
     person_seniorities: seniority ? [seniority] : [],
     q_keywords: keyword,
+    organization_name: company,
     page,
     per_page: perPage,
   };
@@ -159,6 +170,7 @@ export interface SearchEmptyMeta {
   total_entries?: number;
   apollo_zero_results?: boolean;
   webhook_configured?: boolean;
+  organization_name?: string;
   match_errors?: string[];
   enrich_stats?: {
     candidates?: number;
@@ -219,8 +231,9 @@ export function explainEmptySearchMessage(
 
   if (meta.apollo_zero_results) {
     return (
-      "Apollo no tiene perfiles para esta combinación (país + cargos + industria). " +
-      "Prueba «Todas las industrias» u otra como Software o Salud."
+      "Apollo no tiene perfiles para esta combinación (país + cargos + industria" +
+      (meta.organization_name ? " + empresa" : "") +
+      "). Prueba «Todas las industrias» u otra como Software o Salud."
     );
   }
 
