@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { EmptyState, MetricCard, PageSubtitle, PageTitle, SectionLabel } from "@/components/ui";
+import Link from "next/link";
+import {
+  EmptyState,
+  KpiCard,
+  KpiGrid,
+  PageSubtitle,
+  PageTitle,
+  SectionBlock,
+} from "@/components/ui";
 
 type Stats = {
   total: number;
@@ -16,6 +24,11 @@ type Stats = {
   };
 };
 
+function pct(part: number, total: number) {
+  if (!total) return 0;
+  return Math.round((part / total) * 100);
+}
+
 export default function ResumenPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState("");
@@ -28,6 +41,9 @@ export default function ResumenPage() {
   }, []);
 
   const apollo = stats?.apollo;
+  const phonePct = pct(stats?.with_phone ?? 0, stats?.total ?? 0);
+  const emailPct = pct(stats?.with_email ?? 0, stats?.total ?? 0);
+  const approvedPct = pct(stats?.approved ?? 0, stats?.total ?? 0);
 
   return (
     <main className="flex-1 p-6 lg:p-8">
@@ -44,26 +60,64 @@ export default function ResumenPage() {
         </div>
       )}
 
-      {!stats && !error && <p className="text-body mt-8">Cargando...</p>}
+      {!stats && !error && (
+        <KpiGrid>
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="kpi-skeleton" />
+          ))}
+        </KpiGrid>
+      )}
 
       {stats && (
         <>
-          <div className="mt-8">
-            <SectionLabel>Consumo Apollo (prospección)</SectionLabel>
-            <p className="text-caption mb-4">
-              Solo créditos usados al buscar y enriquecer contactos desde esta plataforma. La búsqueda
-              API no consume créditos; el enriquecimiento (email/teléfono) sí.
-            </p>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <MetricCard label="Créditos consumidos (total)" value={apollo?.total_credits ?? 0} />
-              <MetricCard label="Créditos este mes" value={apollo?.credits_this_month ?? 0} />
-              <MetricCard label="Búsquedas realizadas" value={apollo?.total_searches ?? 0} />
-              <MetricCard label="Búsquedas este mes" value={apollo?.searches_this_month ?? 0} />
-            </div>
-          </div>
+          <SectionBlock
+            label="Dimensión Apollo"
+            title="Consumo de prospección"
+            description="Créditos usados al enriquecer contactos (email y teléfono) desde esta plataforma. La búsqueda API no consume créditos."
+          >
+            <KpiGrid>
+              <KpiCard
+                label="Créditos consumidos"
+                value={apollo?.total_credits ?? 0}
+                sub="total acumulado"
+                accent="coral"
+                tag={{ positive: false, label: "enriquecimiento" }}
+              />
+              <KpiCard
+                label="Créditos este mes"
+                value={apollo?.credits_this_month ?? 0}
+                sub="período actual"
+                accent="coral"
+                tag={{
+                  positive: (apollo?.credits_this_month ?? 0) === 0,
+                  label:
+                    (apollo?.credits_this_month ?? 0) > 0
+                      ? "consumo activo"
+                      : "sin consumo",
+                }}
+              />
+              <KpiCard
+                label="Búsquedas realizadas"
+                value={apollo?.total_searches ?? 0}
+                sub="ejecuciones totales"
+                accent="blue"
+                tag={{ positive: true, label: "actividad API" }}
+              />
+              <KpiCard
+                label="Búsquedas este mes"
+                value={apollo?.searches_this_month ?? 0}
+                sub="en el mes en curso"
+                accent="blue"
+                tag={{ positive: true, label: "prospección reciente" }}
+              />
+            </KpiGrid>
+          </SectionBlock>
 
-          <div className="mt-10">
-            <SectionLabel>Pipeline de leads</SectionLabel>
+          <SectionBlock
+            label="Dimensión comercial"
+            title="Pipeline de leads"
+            description="Contactos guardados en portafolio con email y teléfono verificados en la prospección Apollo."
+          >
             {stats.total === 0 ? (
               <div className="mt-4">
                 <EmptyState
@@ -73,14 +127,49 @@ export default function ResumenPage() {
                 />
               </div>
             ) : (
-              <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <MetricCard label="Total leads" value={stats.total} />
-                <MetricCard label="Con teléfono" value={stats.with_phone} />
-                <MetricCard label="Con email" value={stats.with_email} />
-                <MetricCard label="Aprobados" value={stats.approved} />
-              </div>
+              <KpiGrid>
+                <KpiCard
+                  label="Total en portafolio"
+                  value={stats.total}
+                  sub="contactos guardados"
+                  accent="blue"
+                  tag={{ positive: true, label: "pipeline activo" }}
+                />
+                <KpiCard
+                  label="Con teléfono"
+                  value={stats.with_phone}
+                  sub={`${phonePct}% del portafolio`}
+                  accent="teal"
+                  tag={{ positive: phonePct >= 80, label: "móvil verificado" }}
+                />
+                <KpiCard
+                  label="Con email"
+                  value={stats.with_email}
+                  sub={`${emailPct}% del portafolio`}
+                  accent="teal"
+                  tag={{ positive: emailPct >= 80, label: "email verificado" }}
+                />
+                <KpiCard
+                  label="Aprobados para contacto"
+                  value={stats.approved}
+                  sub={`${approvedPct}% listos para venta`}
+                  accent="gray"
+                  tag={{
+                    positive: stats.approved > 0,
+                    label: stats.approved > 0 ? "listos para outreach" : "pendiente revisión",
+                  }}
+                />
+              </KpiGrid>
             )}
-          </div>
+
+            {stats.total > 0 && (
+              <p className="text-caption mt-4">
+                <Link href="/portafolio" className="text-[#003A70] font-semibold hover:underline dark:text-[#6BA3F7]">
+                  Ver portafolio completo →
+                </Link>
+              </p>
+            )}
+          </SectionBlock>
         </>
       )}
     </main>

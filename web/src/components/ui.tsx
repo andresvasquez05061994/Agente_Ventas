@@ -14,13 +14,74 @@ export function PageSubtitle({ children }: { children: React.ReactNode }) {
   return <p className="page-subtitle">{children}</p>;
 }
 
-export function MetricCard({ label, value }: { label: string; value: number }) {
+export type KpiAccent = "blue" | "teal" | "coral" | "gray";
+
+export function KpiCard({
+  label,
+  value,
+  sub,
+  accent = "blue",
+  tag,
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+  accent?: KpiAccent;
+  tag?: { positive: boolean; label: string };
+}) {
+  const display =
+    typeof value === "number" ? value.toLocaleString("es-CO") : value;
+
   return (
-    <div className="metric-card">
-      <p className="metric-card__label">{label}</p>
-      <p className="metric-card__value">{value}</p>
+    <div className={`kpi-card kpi-card--${accent}`}>
+      <p className="kpi-card__label" title={label}>
+        {label}
+      </p>
+      <p className="kpi-card__value">{display}</p>
+      {sub && (
+        <p className="kpi-card__sub" title={sub}>
+          {sub}
+        </p>
+      )}
+      {tag && (
+        <span
+          className={`kpi-card__tag ${tag.positive ? "kpi-card__tag--pos" : "kpi-card__tag--neg"}`}
+          title={tag.label}
+        >
+          {tag.label}
+        </span>
+      )}
     </div>
   );
+}
+
+export function KpiGrid({ children }: { children: React.ReactNode }) {
+  return <div className="kpi-grid">{children}</div>;
+}
+
+export function SectionBlock({
+  label,
+  title,
+  description,
+  children,
+}: {
+  label: string;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="section-block">
+      <SectionLabel>{label}</SectionLabel>
+      <h2 className="section-block__title">{title}</h2>
+      <p className="section-block__desc">{description}</p>
+      {children}
+    </section>
+  );
+}
+
+export function MetricCard({ label, value }: { label: string; value: number }) {
+  return <KpiCard label={label} value={value} accent="blue" />;
 }
 
 export function EmptyState({ message, href, cta }: { message: string; href: string; cta: string }) {
