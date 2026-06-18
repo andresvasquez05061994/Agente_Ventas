@@ -1,5 +1,12 @@
 import { neon } from "@neondatabase/serverless";
-import type { Lead, LeadStatus } from "./types";
+import type {
+  ConversationStats,
+  ConversationThread,
+  Lead,
+  LeadStatus,
+  MessageDirection,
+  WhatsAppMessage,
+} from "./types";
 
 const LEADS_LIMIT = 500;
 
@@ -62,6 +69,27 @@ export async function initDb() {
   await sql`
     CREATE INDEX IF NOT EXISTS idx_leads_status_created
     ON leads (lead_status, created_at DESC)
+  `;
+  await sql`
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS mistral_conversation_id TEXT
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS whatsapp_messages (
+      id SERIAL PRIMARY KEY,
+      lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+      telefono TEXT NOT NULL,
+      direction TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_wa_messages_lead_created
+    ON whatsapp_messages (lead_id, created_at DESC)
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_leads_whatsapp_status
+    ON leads (whatsapp_status, updated_at DESC)
   `;
 }
 
@@ -264,4 +292,177 @@ export async function getPhoneCache(apolloIds: string[]): Promise<Map<string, st
     if (row.telefono) map.set(row.apollo_id, row.telefono);
   }
   return map;
+}
+
+export async function getConversationStats(): Promise<ConversationStats> {
+  const sql = getSql();
+  const [row] = await sql`
+    SELECT
+      COUNT(*) FILTER (
+        WHERE EXISTS (SELECT 1 FROM whatsapp_messages m WHERE m.lead_id = leads.id)
+          OR whatsapp_status <> 'No iniciado'
+      )::int AS total_threads,
+      COUNT(*) FILTER (WHERE whatsapp_status = 'En conversación')::int AS active,
+      COUNT(*) FILTER (WHERE whatsapp_status IN ('Pendiente', 'Encolado'))::int AS pending,
+      COUNT(*) FILTER (WHERE whatsapp_status = 'Agendado')::int AS scheduled,
+      COUNT(*) FILTER (WHERE whatsapp_status IN ('Error', 'Sin teléfono'))::int AS errors,
+      COUNT(*) FILTER (
+        WHERE whatsapp_status IN ('Enviado', 'En conversación')
+          AND EXISTS (
+            SELECT 1 FROM whatsapp_messages m
+            WHERE m.lead_id = leads.id AND m.direction = 'outbound'
+              AND m.created_at > COALESCE(
+                (SELECT MAX(m2.created_at) FROM whatsapp_messages m2
+                 WHERE m2.lead_id = leads.id AND m2.direction = 'inbound'),
+                '1970-01-01'::timestamptz
+              )
+          )
+      )::int AS awaiting_reply
+    FROM leads
+  `;
+  const r = row as ConversationStats;
+  return {
+    total_threads: r?.total_threads ?? 0,
+    active: r?.active ?? 0,
+    pending: r?.pending ?? 0,
+    scheduled: r?.scheduled ?? 0,
+    errors: r?.errors ?? 0,
+    awaiting_reply: r?.awaiting_reply ?? 0,
+  };
+}
+
+export async function getConversationThreads(
+  filter: string = "all",
+  search?: string
+): Promise<ConversationThread[]> {
+  const sql = getSql();
+  const term = search?.trim() || null;
+  const pattern = term ? `%${term}%` : null;
+
+  const rows = (await sql`
+    SELECT
+      l.id,
+      l.nombre,
+      l.empresa,
+      l.cargo,
+      l.telefono,
+      l.email,
+      l.lead_status,
+      l.whatsapp_status,
+      l.notas,
+      latest.content AS last_message,
+      latest.direction AS last_direction,
+      latest.created_at AS last_message_at,
+      COALESCE(mc.cnt, 0)::int AS message_count
+    FROM leads l
+    LEFT JOIN LATERAL (
+      SELECT content, direction, created_at
+      FROM whatsapp_messages
+      WHERE lead_id = l.id
+      ORDER BY created_at DESC
+      LIMIT 1
+    ) latest ON TRUE
+    LEFT JOIN (
+      SELECT lead_id, COUNT(*)::int AS cnt
+      FROM whatsapp_messages
+      GROUP BY lead_id
+    ) mc ON mc.lead_id = l.id
+    WHERE (
+      latest.content IS NOT NULL
+      OR l.whatsapp_status <> 'No iniciado'
+    )
+    AND (
+      ${pattern}::text IS NULL
+      OR l.nombre ILIKE ${pattern}
+      OR l.empresa ILIKE ${pattern}
+      OR l.telefono ILIKE ${pattern}
+    )
+    AND (
+      ${filter}::text = 'all'
+      OR (${filter} = 'active' AND l.whatsapp_status = 'En conversación')
+      OR (${filter} = 'pending' AND l.whatsapp_status IN ('Pendiente', 'Encolado'))
+      OR (${filter} = 'scheduled' AND l.whatsapp_status = 'Agendado')
+      OR (${filter} = 'error' AND l.whatsapp_status IN ('Error', 'Sin teléfono'))
+      OR (
+        ${filter} = 'awaiting'
+        AND l.whatsapp_status IN ('Enviado', 'En conversación')
+        AND EXISTS (
+          SELECT 1 FROM whatsapp_messages m
+          WHERE m.lead_id = l.id AND m.direction = 'outbound'
+            AND m.created_at > COALESCE(
+              (SELECT MAX(m2.created_at) FROM whatsapp_messages m2
+               WHERE m2.lead_id = l.id AND m2.direction = 'inbound'),
+              '1970-01-01'::timestamptz
+            )
+        )
+      )
+    )
+    ORDER BY COALESCE(latest.created_at, l.updated_at) DESC
+    LIMIT 200
+  `) as ConversationThread[];
+
+  return rows;
+}
+
+export async function getLeadById(id: number): Promise<Lead | null> {
+  const sql = getSql();
+  const rows = (await sql`SELECT * FROM leads WHERE id = ${id}`) as Lead[];
+  return rows[0] ?? null;
+}
+
+export async function getLeadByPhone(telefono: string): Promise<Lead | null> {
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT * FROM leads WHERE telefono = ${telefono} LIMIT 1
+  `) as Lead[];
+  return rows[0] ?? null;
+}
+
+export async function getMessagesForLead(leadId: number): Promise<WhatsAppMessage[]> {
+  const sql = getSql();
+  return (await sql`
+    SELECT id, lead_id, telefono, direction, content, created_at
+    FROM whatsapp_messages
+    WHERE lead_id = ${leadId}
+    ORDER BY created_at ASC
+  `) as WhatsAppMessage[];
+}
+
+export async function saveWhatsAppMessage(
+  leadId: number,
+  telefono: string,
+  direction: MessageDirection,
+  content: string
+): Promise<WhatsAppMessage> {
+  const sql = getSql();
+  const rows = (await sql`
+    INSERT INTO whatsapp_messages (lead_id, telefono, direction, content)
+    VALUES (${leadId}, ${telefono}, ${direction}, ${content})
+    RETURNING id, lead_id, telefono, direction, content, created_at
+  `) as WhatsAppMessage[];
+  await sql`UPDATE leads SET updated_at = NOW() WHERE id = ${leadId}`;
+  return rows[0];
+}
+
+export async function updateLeadWhatsAppStatus(
+  id: number,
+  whatsappStatus: string
+): Promise<void> {
+  const sql = getSql();
+  await sql`
+    UPDATE leads SET whatsapp_status = ${whatsappStatus}, updated_at = NOW()
+    WHERE id = ${id}
+  `;
+}
+
+export async function updateLeadConversationId(
+  id: number,
+  conversationId: string
+): Promise<void> {
+  const sql = getSql();
+  await sql`
+    UPDATE leads
+    SET mistral_conversation_id = ${conversationId}, updated_at = NOW()
+    WHERE id = ${id}
+  `;
 }

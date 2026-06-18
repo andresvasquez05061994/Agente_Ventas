@@ -55,8 +55,14 @@ export function KpiCard({
   );
 }
 
-export function KpiGrid({ children }: { children: React.ReactNode }) {
-  return <div className="kpi-grid">{children}</div>;
+export function KpiGrid({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return <div className={`kpi-grid ${className}`.trim()}>{children}</div>;
 }
 
 export function SectionBlock({

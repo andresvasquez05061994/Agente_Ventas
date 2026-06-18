@@ -10,6 +10,7 @@ const NAV = [
   { href: "/resumen", label: "Resumen" },
   { href: "/prospeccion", label: "Prospección" },
   { href: "/portafolio", label: "Portafolio" },
+  { href: "/conversaciones", label: "Conversaciones" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -19,6 +20,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const isDark = theme === "dark";
   const logoSrc = isDark ? "/logos/logo-iac-white.png" : "/logos/logo-iac.png";
+  const isConsole = pathname.startsWith("/conversaciones");
 
   return (
     <div className="flex min-h-screen flex-col bg-white text-[#6B7C93] dark:bg-[#0F1419] dark:text-[#B8C5D3]">
@@ -65,7 +67,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-[1400px] flex-1 gap-0 px-0 lg:px-2">{children}</div>
+      <div
+        className={`mx-auto flex w-full flex-1 gap-0 px-0 ${isConsole ? "max-w-none" : "max-w-[1400px] lg:px-2"}`}
+      >
+        {children}
+      </div>
     </div>
   );
 }

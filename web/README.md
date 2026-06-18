@@ -11,6 +11,7 @@ Plataforma B2B de prospección con Apollo.io y gestión de leads en Neon Postgre
 | Prospección | `/prospeccion` | Búsqueda Apollo, enriquecimiento email/teléfono, guardado en portafolio |
 | Portafolio | `/portafolio` | Filtros, estados, notas, export CSV, eliminación individual/masiva |
 | Resumen | `/resumen` | KPIs Apollo y pipeline de leads |
+| **Conversaciones** | `/conversaciones` | Bandeja WhatsApp en tiempo casi real (inbox + hilo + detalle lead) |
 
 ## Variables de entorno
 
@@ -44,8 +45,9 @@ npm run dev
 - [x] Prospección Apollo con filtros validados y solo contactos con email + teléfono
 - [x] Portafolio CRUD, estados, notas, filtros, export CSV
 - [x] Resumen con métricas
+- [x] Panel de conversaciones WhatsApp (bandeja unificada, polling 4 s)
 - [x] Persistencia Neon + despliegue Vercel
 - [ ] Créditos Apollo operativos en producción (dependencia externa)
 - [ ] Logos IAC en `public/logos/` (opcional visual)
 
-Fases 2–3 (BD avanzada, WhatsApp/Mistral) están en `phases/` del repo raíz, no integradas en esta app.
+Fase 3 (envío automático WhatsApp + Mistral) requiere conectar Meta/Twilio y activar el worker. Los mensajes entrantes ya se registran en `POST /api/whatsapp/webhook`.
