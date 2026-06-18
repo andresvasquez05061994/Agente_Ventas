@@ -8,7 +8,16 @@ import type {
   WhatsAppMessage,
 } from "./types";
 
-const LEADS_LIMIT = 500;
+const LEADS_PAGE_SIZE = 20;
+const LEADS_EXPORT_MAX = 10_000;
+
+export type LeadsPage = {
+  leads: Lead[];
+  total: number;
+  page: number;
+  perPage: number;
+  totalPages: number;
+};
 
 let dbReady: Promise<void> | null = null;
 
@@ -93,11 +102,14 @@ export async function initDb() {
   `;
 }
 
-export async function getLeads(filters?: {
-  status?: string;
-  search?: string;
-  contact?: string;
-}): Promise<Lead[]> {
+export async function getLeads(
+  filters?: {
+    status?: string;
+    search?: string;
+    contact?: string;
+  },
+  pagination?: { page?: number; perPage?: number; all?: boolean }
+): Promise<LeadsPage> {
   const sql = getSql();
   const status =
     filters?.status && filters.status !== "Todos" ? filters.status : null;
@@ -106,7 +118,37 @@ export async function getLeads(filters?: {
   const contact =
     filters?.contact && filters.contact !== "Todos" ? filters.contact : null;
 
-  return (await sql`
+  const [countRow] = await sql`
+    SELECT COUNT(*)::int AS total FROM leads
+    WHERE (${status}::text IS NULL OR lead_status = ${status})
+      AND (
+        ${pattern}::text IS NULL
+        OR nombre ILIKE ${pattern}
+        OR empresa ILIKE ${pattern}
+        OR cargo ILIKE ${pattern}
+      )
+      AND (
+        ${contact}::text IS NULL
+        OR (${contact} = 'Con teléfono' AND telefono IS NOT NULL AND telefono <> '')
+        OR (${contact} = 'Sin teléfono' AND (telefono IS NULL OR telefono = ''))
+        OR (${contact} = 'Con email' AND email IS NOT NULL AND email <> '')
+        OR (${contact} = 'Sin email' AND (email IS NULL OR email = ''))
+      )
+  `;
+  const total = (countRow as { total: number })?.total ?? 0;
+
+  const perPage = pagination?.all
+    ? Math.min(total || LEADS_EXPORT_MAX, LEADS_EXPORT_MAX)
+    : Math.min(100, Math.max(1, pagination?.perPage ?? LEADS_PAGE_SIZE));
+  const totalPages = pagination?.all
+    ? 1
+    : Math.max(1, Math.ceil(total / perPage));
+  const page = pagination?.all
+    ? 1
+    : Math.min(Math.max(1, pagination?.page ?? 1), totalPages);
+  const offset = (page - 1) * perPage;
+
+  const leads = (await sql`
     SELECT * FROM leads
     WHERE (${status}::text IS NULL OR lead_status = ${status})
       AND (
@@ -123,8 +165,11 @@ export async function getLeads(filters?: {
         OR (${contact} = 'Sin email' AND (email IS NULL OR email = ''))
       )
     ORDER BY created_at DESC
-    LIMIT ${LEADS_LIMIT}
+    LIMIT ${perPage}
+    OFFSET ${offset}
   `) as Lead[];
+
+  return { leads, total, page, perPage, totalPages };
 }
 
 export async function saveLeads(

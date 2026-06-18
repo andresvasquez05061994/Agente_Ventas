@@ -5,12 +5,20 @@ export async function GET(req: NextRequest) {
   try {
     await ensureDb();
     const { searchParams } = new URL(req.url);
-    const leads = await getLeads({
-      status: searchParams.get("status") ?? undefined,
-      search: searchParams.get("search") ?? undefined,
-      contact: searchParams.get("contact") ?? undefined,
-    });
-    return NextResponse.json({ leads });
+    const all = searchParams.get("all") === "true";
+    const page = Math.max(1, Number(searchParams.get("page") ?? 1) || 1);
+    const perPage = Math.max(1, Number(searchParams.get("per_page") ?? 20) || 20);
+
+    const result = await getLeads(
+      {
+        status: searchParams.get("status") ?? undefined,
+        search: searchParams.get("search") ?? undefined,
+        contact: searchParams.get("contact") ?? undefined,
+      },
+      { page, perPage, all }
+    );
+
+    return NextResponse.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error al obtener leads";
     return NextResponse.json({ error: msg }, { status: 500 });
