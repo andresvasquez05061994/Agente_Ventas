@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { SmartSearchResult } from "@/lib/smart-search";
-import { FieldLabel } from "@/components/ui";
+import { ActionBanner, FieldLabel, type FeedbackTone } from "@/components/ui";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 
 type SmartSearchPanelProps = {
@@ -13,8 +13,11 @@ type SmartSearchPanelProps = {
 export function SmartSearchPanel({ disabled, onApply }: SmartSearchPanelProps) {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
-  const [feedback, setFeedback] = useState("");
-  const [error, setError] = useState("");
+  const [panelFeedback, setPanelFeedback] = useState<{
+    tone: FeedbackTone;
+    title?: string;
+    message: string;
+  } | null>(null);
   const [iaReady, setIaReady] = useState<boolean | null>(null);
   const [iaModel, setIaModel] = useState("");
 
@@ -38,13 +41,16 @@ export function SmartSearchPanel({ disabled, onApply }: SmartSearchPanelProps) {
   async function analyze() {
     const trimmed = query.trim();
     if (trimmed.length < 4) {
-      setError("Escribe o dicta al menos 4 caracteres describiendo tu persona objetivo.");
+      setPanelFeedback({
+        tone: "warning",
+        title: "Consulta muy corta",
+        message: "Escribe o dicta al menos 4 caracteres describiendo tu persona objetivo.",
+      });
       return;
     }
 
     setLoading(true);
-    setError("");
-    setFeedback("");
+    setPanelFeedback(null);
 
     try {
       const res = await fetch("/api/prospeccion/smart-search", {
@@ -57,10 +63,18 @@ export function SmartSearchPanel({ disabled, onApply }: SmartSearchPanelProps) {
         throw new Error(data.error ?? "Error al interpretar la búsqueda");
       }
 
-      setFeedback(data.summary ?? "Filtros aplicados.");
+      setPanelFeedback({
+        tone: "info",
+        title: "Interpretación lista",
+        message: data.summary ?? "Filtros aplicados. Ejecutando búsqueda…",
+      });
       await onApply(data as SmartSearchResult);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error de búsqueda inteligente");
+      setPanelFeedback({
+        tone: "error",
+        title: "Búsqueda inteligente fallida",
+        message: e instanceof Error ? e.message : "Error de búsqueda inteligente",
+      });
     } finally {
       setLoading(false);
     }
@@ -125,11 +139,21 @@ export function SmartSearchPanel({ disabled, onApply }: SmartSearchPanelProps) {
         <p className="text-micro smart-search-hint">Enter para buscar · Shift+Enter para nueva línea</p>
       </div>
 
-      {(error || micError) && (
-        <p className="text-caption mt-2 text-[#B42318] dark:text-[#F97066]">{error || micError}</p>
-      )}
-      {feedback && !error && (
-        <p className="text-caption mt-2 text-[#0D6E6E] dark:text-[#5EC4C4]">{feedback}</p>
+      {(panelFeedback || micError) && (
+        <div className="mt-2">
+          {panelFeedback && (
+            <ActionBanner
+              compact
+              tone={panelFeedback.tone}
+              title={panelFeedback.title}
+              message={panelFeedback.message}
+              onDismiss={() => setPanelFeedback(null)}
+            />
+          )}
+          {micError && !panelFeedback && (
+            <ActionBanner compact tone="error" title="Micrófono" message={micError} />
+          )}
+        </div>
       )}
     </div>
   );

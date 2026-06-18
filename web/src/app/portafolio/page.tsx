@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import type { Lead, LeadStatus } from "@/lib/types";
-import { EmptyState, FieldLabel, PageSubtitle, SectionLabel } from "@/components/ui";
+import { EmptyState, FieldLabel, PageSubtitle, SectionLabel, ActionBanner, FeedbackAnchor } from "@/components/ui";
+import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { useDebounce } from "@/hooks/use-debounce";
 import { downloadLeadsCsv } from "@/lib/export-leads";
 
@@ -156,10 +157,11 @@ export default function PortafolioPage() {
   const [contact, setContact] = useState("Todos");
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
-  const [message, setMessage] = useState("");
+  const { feedback, showSuccess, showError, showWarning, clear } = useActionFeedback();
   const [loading, setLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkStatus, setBulkStatus] = useState<LeadStatus>("En revisión");
@@ -172,7 +174,7 @@ export default function PortafolioPage() {
 
   function markReloading() {
     setLoading(true);
-    setMessage("");
+    clear();
     setPage(1);
   }
 
@@ -194,7 +196,7 @@ export default function PortafolioPage() {
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;
-        if (data.error) setMessage(data.error);
+        if (data.error) showError(data.error, "Error al cargar");
         else {
           setLeads(data.leads ?? []);
           setTotal(data.total ?? 0);
@@ -204,7 +206,7 @@ export default function PortafolioPage() {
         }
       })
       .catch(() => {
-        if (!cancelled) setMessage("No se pudo cargar el portafolio.");
+        if (!cancelled) showError("No se pudo cargar el portafolio.", "Error al cargar");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -227,23 +229,29 @@ export default function PortafolioPage() {
       if (!res.ok) {
         setLeads(prev);
         const data = await res.json();
-        setMessage(data.error ?? "Error al actualizar estado");
-      } else if (status !== "Todos" && lead_status !== status) {
-        setLeads((list) => list.filter((l) => l.id !== id));
-        setTotal((t) => Math.max(0, t - 1));
+        showError(data.error ?? "Error al actualizar estado", "Estado no actualizado");
+      } else {
+        showSuccess(`Contacto marcado como «${lead_status}».`, "Estado actualizado");
+        if (status !== "Todos" && lead_status !== status) {
+          setLeads((list) => list.filter((l) => l.id !== id));
+          setTotal((t) => Math.max(0, t - 1));
+        }
       }
     } catch {
       setLeads(prev);
-      setMessage("Error de red al actualizar estado");
+      showError("Error de red al actualizar estado", "Estado no actualizado");
     }
   }
 
   async function bulkUpdateStatus() {
     const ids = Array.from(selected);
-    if (!ids.length) return;
+    if (!ids.length) {
+      showWarning("Selecciona al menos un contacto para cambiar el estado.", "Sin selección");
+      return;
+    }
 
     setBulkUpdating(true);
-    setMessage("");
+    clear();
     const prev = leads;
     setLeads((list) =>
       list.map((l) => (selected.has(l.id) ? { ...l, lead_status: bulkStatus } : l))
@@ -262,18 +270,21 @@ export default function PortafolioPage() {
       const failed = results.some((r) => !r.ok);
       if (failed) {
         setLeads(prev);
-        setMessage("Error al actualizar el estado de uno o más contactos.");
+        showError("Error al actualizar el estado de uno o más contactos.", "Cambio masivo fallido");
       } else {
         if (status !== "Todos" && bulkStatus !== status) {
           setLeads((list) => list.filter((l) => !selected.has(l.id)));
           setTotal((t) => Math.max(0, t - ids.length));
         }
-        setMessage(`${ids.length} contacto(s) marcados como «${bulkStatus}».`);
+        showSuccess(
+          `${ids.length} contacto(s) marcados como «${bulkStatus}».`,
+          "Estados actualizados"
+        );
         setSelected(new Set());
       }
     } catch {
       setLeads(prev);
-      setMessage("Error de red al actualizar estados.");
+      showError("Error de red al actualizar estados.", "Cambio masivo fallido");
     } finally {
       setBulkUpdating(false);
     }
@@ -299,14 +310,14 @@ export default function PortafolioPage() {
       if (!res.ok) {
         setLeads(prev);
         const data = await res.json();
-        setMessage(data.error ?? "Error al guardar notas");
+        showError(data.error ?? "Error al guardar notas", "Notas no guardadas");
       } else {
         setEditingNotes(null);
-        setMessage("Notas guardadas.");
+        showSuccess("Las notas del contacto se guardaron correctamente.", "Notas guardadas");
       }
     } catch {
       setLeads(prev);
-      setMessage("Error de red al guardar notas");
+      showError("Error de red al guardar notas", "Notas no guardadas");
     } finally {
       setSavingNotes(false);
     }
@@ -335,7 +346,7 @@ export default function PortafolioPage() {
     if (!window.confirm(prompt)) return;
 
     setDeleting(true);
-    setMessage("");
+    clear();
     const prev = leads;
     const idSet = new Set(ids);
     setLeads((list) => list.filter((l) => !idSet.has(l.id)));
@@ -352,19 +363,20 @@ export default function PortafolioPage() {
       const failed = results.some((r) => !r.ok);
       if (failed) {
         setLeads(prev);
-        setMessage("Error al eliminar uno o más contactos.");
+        showError("Error al eliminar uno o más contactos.", "Eliminación fallida");
       } else {
         setTotal((t) => Math.max(0, t - count));
         if (leads.length === count && page > 1) {
           setPage(page - 1);
         }
-        setMessage(
-          count === 1 ? `Contacto eliminado: ${names[0]}.` : `${count} contactos eliminados.`
+        showSuccess(
+          count === 1 ? `Se eliminó a ${names[0]} del portafolio.` : `Se eliminaron ${count} contactos del portafolio.`,
+          "Contactos eliminados"
         );
       }
     } catch {
       setLeads(prev);
-      setMessage("Error de red al eliminar contactos.");
+      showError("Error de red al eliminar contactos.", "Eliminación fallida");
     } finally {
       setDeleting(false);
     }
@@ -390,21 +402,24 @@ export default function PortafolioPage() {
       return;
     }
     setClearing(true);
-    setMessage("");
+    clear();
     try {
       const res = await fetch("/api/leads?confirm=true", { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) {
-        setMessage(data.error ?? "Error al vaciar portafolio");
+        showError(data.error ?? "Error al vaciar portafolio", "Portafolio no vaciado");
       } else {
         setLeads([]);
         setSelected(new Set());
         setTotal(0);
         setPage(1);
-        setMessage(`Portafolio vaciado (${data.deleted ?? 0} contactos eliminados).`);
+        showSuccess(
+          `Se eliminaron ${data.deleted ?? 0} contactos. El portafolio quedó vacío.`,
+          "Portafolio vaciado"
+        );
       }
     } catch {
-      setMessage("Error de red al vaciar portafolio");
+      showError("Error de red al vaciar portafolio", "Portafolio no vaciado");
     } finally {
       setClearing(false);
     }
@@ -413,28 +428,33 @@ export default function PortafolioPage() {
   async function exportCsv() {
     const q = buildLeadsQuery(1);
     q.set("all", "true");
+    setExporting(true);
+    clear();
     try {
       const res = await fetch(`/api/leads?${q}`);
       const data = await res.json();
       if (data.error) {
-        setMessage(data.error);
+        showError(data.error, "Exportación fallida");
         return;
       }
-      downloadLeadsCsv(data.leads ?? []);
+      const rows = data.leads ?? [];
+      downloadLeadsCsv(rows);
+      showSuccess(
+        `Se descargó un CSV con ${rows.length} contacto(s) según los filtros actuales.`,
+        "Exportación completada"
+      );
     } catch {
-      setMessage("No se pudo exportar el portafolio.");
+      showError("No se pudo exportar el portafolio.", "Exportación fallida");
+    } finally {
+      setExporting(false);
     }
   }
 
-  const isSuccessMessage =
-    message.includes("vaciado") ||
-    message.includes("eliminado") ||
-    message.includes("marcados") ||
-    message.includes("Notas guardadas");
+  const busy = showLoading || clearing || deleting || exporting || bulkUpdating;
 
   return (
     <div className="flex w-full flex-1">
-      <aside className="hidden w-[300px] shrink-0 border-r border-[#E2E6EA] bg-[#FAFBFC] p-5 dark:border-[#2A3544] dark:bg-[#151B23] lg:block">
+      <aside className="filter-sidebar hidden w-[280px] shrink-0 border-r border-[#E2E6EA] bg-[#FAFBFC] dark:border-[#2A3544] dark:bg-[#151B23] lg:block">
         <PortfolioFilters
           status={status}
           setStatus={setStatus}
@@ -446,7 +466,7 @@ export default function PortafolioPage() {
         />
       </aside>
 
-      <main className="flex-1 p-6 lg:p-8">
+      <main className="min-w-0 flex-1 p-5 lg:p-7">
         <div className="page-header flex flex-wrap items-start justify-between gap-3">
           <h1 className="page-title">Portafolio</h1>
           {total > 0 && (
@@ -454,16 +474,16 @@ export default function PortafolioPage() {
               <button
                 type="button"
                 onClick={exportCsv}
-                disabled={showLoading}
+                disabled={busy}
                 className="btn-secondary"
               >
-                Exportar CSV ({total})
+                {exporting ? "Exportando…" : `Exportar CSV (${total})`}
               </button>
               {selected.size > 0 && (
                 <button
                   type="button"
                   onClick={deleteSelected}
-                  disabled={deleting || clearing || showLoading}
+                  disabled={deleting || clearing || busy}
                   className="btn-danger"
                 >
                   {deleting
@@ -476,7 +496,7 @@ export default function PortafolioPage() {
               <button
                 type="button"
                 onClick={clearPortfolio}
-                disabled={clearing || deleting || showLoading}
+                disabled={clearing || deleting || busy}
                 className="btn-danger"
               >
                 {clearing ? "Vaciando..." : "Vaciar portafolio"}
@@ -517,7 +537,7 @@ export default function PortafolioPage() {
             <button
               type="button"
               onClick={bulkUpdateStatus}
-              disabled={bulkUpdating || showLoading}
+              disabled={bulkUpdating || busy}
               className="btn-primary"
             >
               {bulkUpdating ? "Actualizando..." : "Cambiar estado"}
@@ -525,12 +545,10 @@ export default function PortafolioPage() {
           </div>
         )}
 
-        {message && (
-          <p
-            className={`text-caption mt-4 ${isSuccessMessage ? "text-green-700 dark:text-green-400" : "text-red-600"}`}
-          >
-            {message}
-          </p>
+        {feedback && (
+          <FeedbackAnchor>
+            <ActionBanner {...feedback} onDismiss={clear} />
+          </FeedbackAnchor>
         )}
 
         {showLoading ? (

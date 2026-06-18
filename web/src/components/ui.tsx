@@ -2,6 +2,70 @@ export function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="section-label">{children}</p>;
 }
 
+export type FeedbackTone = "success" | "error" | "warning" | "info";
+
+const FEEDBACK_DEFAULT_TITLES: Record<FeedbackTone, string> = {
+  success: "Acción completada",
+  error: "No se pudo completar",
+  warning: "Revisa los datos",
+  info: "Información",
+};
+
+export function ActionBanner({
+  tone,
+  title,
+  message,
+  onDismiss,
+  compact = false,
+}: {
+  tone: FeedbackTone;
+  title?: string;
+  message: string;
+  onDismiss?: () => void;
+  compact?: boolean;
+}) {
+  const displayTitle = title ?? FEEDBACK_DEFAULT_TITLES[tone];
+
+  return (
+    <div
+      className={`action-banner action-banner--${tone}${compact ? " action-banner--compact" : ""}`}
+      role="status"
+      aria-live="polite"
+    >
+      <span className="action-banner__icon" aria-hidden>
+        {tone === "success" && "✓"}
+        {tone === "error" && "!"}
+        {tone === "warning" && "△"}
+        {tone === "info" && "i"}
+      </span>
+      <div className="action-banner__body">
+        <p className="action-banner__title">{displayTitle}</p>
+        <p className="action-banner__message">{message}</p>
+      </div>
+      {onDismiss && (
+        <button
+          type="button"
+          className="action-banner__dismiss"
+          onClick={onDismiss}
+          aria-label="Cerrar mensaje"
+        >
+          ×
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function FeedbackAnchor({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return <div className={`feedback-anchor ${className}`.trim()}>{children}</div>;
+}
+
 export function FieldLabel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <label className={`field-label ${className}`}>{children}</label>;
 }

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   EmptyState,
+  ActionBanner,
+  FeedbackAnchor,
   KpiCard,
   KpiGrid,
   PageSubtitle,
@@ -55,9 +57,9 @@ export default function ResumenPage() {
       </PageSubtitle>
 
       {error && (
-        <div className="mt-4 rounded border-l-4 border-amber-500 bg-amber-50 p-3 text-caption text-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          {error}
-        </div>
+        <FeedbackAnchor>
+          <ActionBanner tone="error" title="Resumen no disponible" message={error} />
+        </FeedbackAnchor>
       )}
 
       {!stats && !error && (

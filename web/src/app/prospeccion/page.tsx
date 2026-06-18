@@ -5,6 +5,8 @@ import type { ApolloPerson } from "@/lib/types";
 import type { SmartSearchFilters, SmartSearchResult } from "@/lib/smart-search";
 import { ApolloSearchFilters } from "@/components/ApolloSearchFilters";
 import { SmartSearchPanel } from "@/components/SmartSearchPanel";
+import { ActionBanner, FeedbackAnchor } from "@/components/ui";
+import { useActionFeedback } from "@/hooks/use-action-feedback";
 import {
   DEFAULT_SEARCH,
   explainEmptySearchMessage,
@@ -32,7 +34,8 @@ export default function ProspeccionPage() {
   const [results, setResults] = useState<ApolloPerson[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<SearchStatus>("idle");
-  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  const { feedback, showSuccess, showError, showWarning, showInfo, clear } = useActionFeedback();
   const [meta, setMeta] = useState<{
     total_entries: number;
     with_contact_data?: number;
@@ -78,7 +81,7 @@ export default function ProspeccionPage() {
 
     if (!params.titles.length) {
       setStatus("error");
-      setMessage("Selecciona o agrega al menos un cargo.");
+      showWarning("Selecciona o agrega al menos un cargo antes de buscar.", "Filtros incompletos");
       return;
     }
 
@@ -92,7 +95,7 @@ export default function ProspeccionPage() {
     }
 
     setStatus("loading");
-    setMessage("");
+    clear();
     setResults([]);
 
     try {
@@ -121,29 +124,28 @@ export default function ProspeccionPage() {
 
       if (list.length === 0) {
         setStatus("empty");
-        setMessage(
-          explainEmptySearchMessage(data.meta, Boolean(params.seniority?.trim()))
+        showWarning(
+          explainEmptySearchMessage(data.meta, Boolean(params.seniority?.trim())),
+          "Sin contactos completos"
         );
       } else {
         setStatus("success");
         const credits = data.meta?.credits_consumed ?? 0;
         const relaxed = data.meta?.industry_relaxed
-          ? " · Industria ampliada (término alternativo en Apollo)"
+          ? " Industria ampliada con término alternativo en Apollo."
           : "";
-        const org = params.company.trim()
-          ? ` · Empresa: ${params.company.trim()}`
-          : "";
-        setMessage(
-          `${list.length} contacto(s) con email y teléfono · ` +
-            `${data.meta?.total_entries ?? 0} coincidencias en Apollo` +
-            (credits > 0 ? ` · ${credits} crédito(s) en esta búsqueda` : "") +
+        const org = params.company.trim() ? ` Empresa: ${params.company.trim()}.` : "";
+        showSuccess(
+          `${list.length} contacto(s) con email y teléfono · ${data.meta?.total_entries ?? 0} coincidencias en Apollo` +
+            (credits > 0 ? ` · ${credits} crédito(s) usados` : "") +
             org +
-            relaxed
+            relaxed,
+          "Búsqueda completada"
         );
       }
     } catch (e) {
       setStatus("error");
-      setMessage(e instanceof Error ? e.message : "Error de búsqueda");
+      showError(e instanceof Error ? e.message : "Error de búsqueda", "Búsqueda fallida");
       setResults([]);
       setMeta(null);
     }
@@ -151,7 +153,7 @@ export default function ProspeccionPage() {
 
   async function handleSmartApply(result: SmartSearchResult) {
     applyFilters(result.filters);
-    setMessage(result.summary);
+    showInfo(result.summary, "Filtros interpretados");
     await search(result.filters);
   }
 
@@ -169,16 +171,15 @@ export default function ProspeccionPage() {
   async function save() {
     const toSave = results.filter((r) => selected.has(r.apollo_id));
     if (!toSave.length) {
-      setMessage("Selecciona al menos un contacto.");
-      setStatus("error");
+      showWarning("Marca al menos un contacto en la tabla antes de guardar.", "Nada seleccionado");
       return;
     }
 
     const incomplete = toSave.filter((r) => !r.email?.trim() || !r.telefono?.trim());
     if (incomplete.length) {
-      setStatus("error");
-      setMessage(
-        `${incomplete.length} contacto(s) sin email o teléfono. Solo se guardan contactos completos.`
+      showError(
+        `${incomplete.length} contacto(s) sin email o teléfono. Solo se guardan contactos completos.`,
+        "Datos incompletos"
       );
       return;
     }
@@ -193,30 +194,34 @@ export default function ProspeccionPage() {
       .filter(Boolean)
       .join(" | ");
 
-    const res = await fetch("/api/leads", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ leads: toSave, fuente }),
-    });
-    const data = await res.json();
-    if (data.error) {
-      setStatus("error");
-      setMessage(data.error);
-    } else {
-      setStatus("success");
-      const parts = [`${data.inserted} nuevo(s)`];
-      if (data.updated) parts.push(`${data.updated} actualizado(s)`);
-      if (data.skipped) parts.push(`${data.skipped} omitido(s)`);
-      setMessage(`${parts.join(", ")} en portafolio (con email y teléfono).`);
+    setSaving(true);
+    clear();
+
+    try {
+      const res = await fetch("/api/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leads: toSave, fuente }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        showError(data.error, "No se guardó en portafolio");
+      } else {
+        const parts = [`${data.inserted} nuevo(s)`];
+        if (data.updated) parts.push(`${data.updated} actualizado(s)`);
+        if (data.skipped) parts.push(`${data.skipped} omitido(s)`);
+        showSuccess(
+          `${parts.join(", ")} con email y teléfono verificados. Puedes revisarlos en Portafolio.`,
+          "Guardado en portafolio"
+        );
+        setSelected(new Set());
+      }
+    } catch {
+      showError("Error de red al guardar. Intenta de nuevo.", "No se guardó en portafolio");
+    } finally {
+      setSaving(false);
     }
   }
-
-  const messageClass =
-    status === "error"
-      ? "text-[#B42318] dark:text-[#F97066]"
-      : status === "empty"
-        ? "text-[#B54708] dark:text-[#FDB022]"
-        : "text-[#175CD3] dark:text-[#6BA3F7]";
 
   const filterProps = {
     country,
@@ -232,37 +237,37 @@ export default function ProspeccionPage() {
     setSeniority,
     perPage,
     setPerPage,
-    loading: status === "loading",
+    loading: status === "loading" || saving,
     onSearch: () => search(),
   };
 
+  const busy = status === "loading" || saving;
+
   return (
     <div className="flex w-full flex-1">
-      <aside className="hidden w-[300px] shrink-0 border-r border-[#E2E6EA] bg-[#FAFBFC] p-5 dark:border-[#2A3544] dark:bg-[#151B23] lg:block">
-        <SmartSearchPanel
-          disabled={status === "loading"}
-          onApply={handleSmartApply}
-        />
+      <aside className="filter-sidebar hidden w-[280px] shrink-0 border-r border-[#E2E6EA] bg-[#FAFBFC] dark:border-[#2A3544] dark:bg-[#151B23] lg:block">
+        <SmartSearchPanel disabled={busy} onApply={handleSmartApply} />
         <ApolloSearchFilters {...filterProps} />
       </aside>
 
-      <main className="flex-1 p-6 lg:p-8">
+      <main className="min-w-0 flex-1 p-5 lg:p-7">
         <div className="page-header">
           <h1 className="page-title">Prospección</h1>
         </div>
 
         <div className="mt-4 lg:hidden">
-          <SmartSearchPanel
-            disabled={status === "loading"}
-            onApply={handleSmartApply}
-          />
+          <SmartSearchPanel disabled={busy} onApply={handleSmartApply} />
           <ApolloSearchFilters {...filterProps} />
         </div>
 
-        {message && <p className={`text-caption mt-4 font-medium ${messageClass}`}>{message}</p>}
+        {feedback && (
+          <FeedbackAnchor>
+            <ActionBanner {...feedback} onDismiss={clear} />
+          </FeedbackAnchor>
+        )}
 
         {status === "loading" && (
-          <div className="mt-12 flex flex-col items-center gap-3 text-center">
+          <div className="mt-10 flex flex-col items-center gap-3 text-center">
             <div className="h-7 w-7 animate-spin rounded-full border-2 border-[#003A70] border-t-transparent dark:border-[#4A8FD4] dark:border-t-transparent" />
             <p className="text-caption">
               Buscando en Apollo y enriqueciendo email/teléfono…
@@ -272,8 +277,8 @@ export default function ProspeccionPage() {
           </div>
         )}
 
-        {status === "idle" && (
-          <div className="mt-12 flex min-h-[280px] flex-col items-center justify-center text-center">
+        {status === "idle" && !feedback && (
+          <div className="mt-10 flex min-h-[240px] flex-col items-center justify-center text-center">
             <p className="text-body-strong mb-2">Listo para buscar</p>
             <p className="text-caption max-w-md">
               Usa búsqueda inteligente por texto o voz, indica una empresa opcional, o ajusta
@@ -284,15 +289,15 @@ export default function ProspeccionPage() {
 
         {results.length > 0 && status !== "loading" && (
           <>
-            <div className="text-body mt-4 flex flex-wrap items-center gap-3">
+            <div className="text-body mt-4 flex flex-wrap items-center gap-2">
               <span>{meta?.total_entries ?? results.length} en Apollo</span>
-              <span>·</span>
+              <span className="text-[#C8D0D8]">·</span>
               <span>{selected.size} seleccionados</span>
-              <button type="button" onClick={selectAll} className="btn-link">
+              <button type="button" onClick={selectAll} className="btn-link" disabled={busy}>
                 Seleccionar todos
               </button>
             </div>
-            <div className="mt-4 overflow-x-auto rounded border border-[#E2E6EA] dark:border-[#2A3544]">
+            <div className="mt-3 overflow-x-auto rounded border border-[#E2E6EA] dark:border-[#2A3544]">
               <table className="data-table">
                 <thead>
                   <tr>
@@ -312,6 +317,7 @@ export default function ProspeccionPage() {
                           type="checkbox"
                           checked={selected.has(r.apollo_id)}
                           onChange={() => toggle(r.apollo_id)}
+                          disabled={busy}
                         />
                       </td>
                       <td className="cell-strong">{r.nombre}</td>
@@ -324,8 +330,17 @@ export default function ProspeccionPage() {
                 </tbody>
               </table>
             </div>
-            <button type="button" onClick={save} className="btn-primary mt-4">
-              Guardar en portafolio
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={busy || selected.size === 0}
+              className="btn-primary mt-4 disabled:opacity-60"
+            >
+              {saving
+                ? "Guardando en portafolio…"
+                : selected.size > 0
+                  ? `Guardar en portafolio (${selected.size})`
+                  : "Guardar en portafolio"}
             </button>
           </>
         )}

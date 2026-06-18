@@ -13,7 +13,7 @@ import {
   isValidJobTitle,
   sanitizeJobTitle,
 } from "@/lib/apollo-filters";
-import { FieldLabel, SectionLabel } from "@/components/ui";
+import { FieldLabel, SectionLabel, ActionBanner } from "@/components/ui";
 
 export type ApolloSearchFiltersProps = {
   country: string;
@@ -80,6 +80,7 @@ export function ApolloSearchFilters({
 }: ApolloSearchFiltersProps) {
   const [customTitle, setCustomTitle] = useState("");
   const [customError, setCustomError] = useState("");
+  const [customSuccess, setCustomSuccess] = useState("");
 
   const customTitles = titles.filter((t) => !isPresetJobTitle(t));
   const allPresetsSelected = getAllPresetTitleValues().every((v) => titles.includes(v));
@@ -102,6 +103,8 @@ export function ApolloSearchFilters({
     setTitles([...titles, value]);
     setCustomTitle("");
     setCustomError("");
+    setCustomSuccess(`«${value}» agregado a la búsqueda.`);
+    window.setTimeout(() => setCustomSuccess(""), 4000);
   }
 
   function removeCustomTitle(value: string) {
@@ -211,7 +214,14 @@ export function ApolloSearchFilters({
           Agregar
         </button>
       </div>
-      {customError && <p className="text-micro apollo-titles-custom-error">{customError}</p>}
+      {customError && (
+        <ActionBanner compact tone="error" title="Cargo inválido" message={customError} />
+      )}
+      {customSuccess && !customError && (
+        <div className="mb-2">
+          <ActionBanner compact tone="success" title="Cargo agregado" message={customSuccess} />
+        </div>
+      )}
       {customTitles.length > 0 && (
         <div className="apollo-titles-chips">
           {customTitles.map((t) => (
