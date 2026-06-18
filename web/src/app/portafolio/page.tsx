@@ -1,47 +1,125 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Lead, LeadStatus } from "@/lib/types";
 import { EmptyState, FieldLabel, PageSubtitle, SectionLabel } from "@/components/ui";
 import { useDebounce } from "@/hooks/use-debounce";
+import { downloadLeadsCsv } from "@/lib/export-leads";
 
 const STATUSES: LeadStatus[] = ["Nuevo", "En revisión", "Aprobado para contacto", "Descartado"];
+const CONTACT_FILTERS = ["Todos", "Con teléfono", "Sin teléfono", "Con email", "Sin email"] as const;
+
+function PortfolioFilters({
+  status,
+  setStatus,
+  contact,
+  setContact,
+  search,
+  setSearch,
+  onFilterChange,
+}: {
+  status: string;
+  setStatus: (v: string) => void;
+  contact: string;
+  setContact: (v: string) => void;
+  search: string;
+  setSearch: (v: string) => void;
+  onFilterChange: () => void;
+}) {
+  return (
+    <>
+      <SectionLabel>Filtros</SectionLabel>
+      <FieldLabel>Estado</FieldLabel>
+      <select
+        className="input-field mb-3"
+        value={status}
+        onChange={(e) => {
+          onFilterChange();
+          setStatus(e.target.value);
+        }}
+      >
+        <option>Todos</option>
+        {STATUSES.map((s) => (
+          <option key={s}>{s}</option>
+        ))}
+      </select>
+      <FieldLabel>Contacto</FieldLabel>
+      <select
+        className="input-field mb-3"
+        value={contact}
+        onChange={(e) => {
+          onFilterChange();
+          setContact(e.target.value);
+        }}
+      >
+        {CONTACT_FILTERS.map((c) => (
+          <option key={c}>{c}</option>
+        ))}
+      </select>
+      <FieldLabel>Buscar</FieldLabel>
+      <input
+        className="input-field"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Nombre, empresa..."
+      />
+    </>
+  );
+}
 
 export default function PortafolioPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [status, setStatus] = useState("Todos");
+  const [contact, setContact] = useState("Todos");
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [bulkUpdating, setBulkUpdating] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkStatus, setBulkStatus] = useState<LeadStatus>("En revisión");
+  const [editingNotes, setEditingNotes] = useState<number | null>(null);
+  const [notesDraft, setNotesDraft] = useState("");
+  const [savingNotes, setSavingNotes] = useState(false);
 
-  const load = useCallback(async () => {
+  const pendingSearch = search !== debouncedSearch;
+  const showLoading = loading || pendingSearch;
+
+  function markReloading() {
     setLoading(true);
     setMessage("");
+  }
+
+  useEffect(() => {
+    let cancelled = false;
     const q = new URLSearchParams();
     if (status !== "Todos") q.set("status", status);
     if (debouncedSearch) q.set("search", debouncedSearch);
-    try {
-      const res = await fetch(`/api/leads?${q}`);
-      const data = await res.json();
-      if (data.error) setMessage(data.error);
-      else {
-        setLeads(data.leads);
-        setSelected(new Set());
-      }
-    } catch {
-      setMessage("No se pudo cargar el portafolio.");
-    } finally {
-      setLoading(false);
-    }
-  }, [status, debouncedSearch]);
+    if (contact !== "Todos") q.set("contact", contact);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+    fetch(`/api/leads?${q}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.error) setMessage(data.error);
+        else {
+          setLeads(data.leads);
+          setSelected(new Set());
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setMessage("No se pudo cargar el portafolio.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [status, debouncedSearch, contact]);
 
   async function updateStatus(id: number, lead_status: LeadStatus) {
     const prev = leads;
@@ -62,6 +140,79 @@ export default function PortafolioPage() {
     } catch {
       setLeads(prev);
       setMessage("Error de red al actualizar estado");
+    }
+  }
+
+  async function bulkUpdateStatus() {
+    const ids = Array.from(selected);
+    if (!ids.length) return;
+
+    setBulkUpdating(true);
+    setMessage("");
+    const prev = leads;
+    setLeads((list) =>
+      list.map((l) => (selected.has(l.id) ? { ...l, lead_status: bulkStatus } : l))
+    );
+
+    try {
+      const results = await Promise.all(
+        ids.map((id) =>
+          fetch(`/api/leads/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lead_status: bulkStatus }),
+          })
+        )
+      );
+      const failed = results.some((r) => !r.ok);
+      if (failed) {
+        setLeads(prev);
+        setMessage("Error al actualizar el estado de uno o más contactos.");
+      } else {
+        if (status !== "Todos" && bulkStatus !== status) {
+          setLeads((list) => list.filter((l) => !selected.has(l.id)));
+        }
+        setMessage(`${ids.length} contacto(s) marcados como «${bulkStatus}».`);
+        setSelected(new Set());
+      }
+    } catch {
+      setLeads(prev);
+      setMessage("Error de red al actualizar estados.");
+    } finally {
+      setBulkUpdating(false);
+    }
+  }
+
+  function openNotes(lead: Lead) {
+    setEditingNotes(lead.id);
+    setNotesDraft(lead.notas ?? "");
+  }
+
+  async function saveNotes(id: number) {
+    setSavingNotes(true);
+    const prev = leads;
+    setLeads((list) =>
+      list.map((l) => (l.id === id ? { ...l, notas: notesDraft.trim() || null } : l))
+    );
+    try {
+      const res = await fetch(`/api/leads/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notas: notesDraft.trim() || null }),
+      });
+      if (!res.ok) {
+        setLeads(prev);
+        const data = await res.json();
+        setMessage(data.error ?? "Error al guardar notas");
+      } else {
+        setEditingNotes(null);
+        setMessage("Notas guardadas.");
+      }
+    } catch {
+      setLeads(prev);
+      setMessage("Error de red al guardar notas");
+    } finally {
+      setSavingNotes(false);
     }
   }
 
@@ -157,23 +308,23 @@ export default function PortafolioPage() {
     }
   }
 
+  const isSuccessMessage =
+    message.includes("vaciado") ||
+    message.includes("eliminado") ||
+    message.includes("marcados") ||
+    message.includes("Notas guardadas");
+
   return (
     <div className="flex w-full flex-1">
       <aside className="hidden w-[300px] shrink-0 border-r border-[#E2E6EA] bg-[#FAFBFC] p-5 dark:border-[#2A3544] dark:bg-[#151B23] lg:block">
-        <SectionLabel>Filtros</SectionLabel>
-        <FieldLabel>Estado</FieldLabel>
-        <select className="input-field mb-3" value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option>Todos</option>
-          {STATUSES.map((s) => (
-            <option key={s}>{s}</option>
-          ))}
-        </select>
-        <FieldLabel>Buscar</FieldLabel>
-        <input
-          className="input-field"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Nombre, empresa..."
+        <PortfolioFilters
+          status={status}
+          setStatus={setStatus}
+          contact={contact}
+          setContact={setContact}
+          search={search}
+          setSearch={setSearch}
+          onFilterChange={markReloading}
         />
       </aside>
 
@@ -182,11 +333,19 @@ export default function PortafolioPage() {
           <h1 className="page-title">Portafolio</h1>
           {leads.length > 0 && (
             <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => downloadLeadsCsv(leads)}
+                disabled={showLoading}
+                className="btn-secondary"
+              >
+                Exportar CSV
+              </button>
               {selected.size > 0 && (
                 <button
                   type="button"
                   onClick={deleteSelected}
-                  disabled={deleting || clearing || loading}
+                  disabled={deleting || clearing || showLoading}
                   className="btn-danger"
                 >
                   {deleting
@@ -199,7 +358,7 @@ export default function PortafolioPage() {
               <button
                 type="button"
                 onClick={clearPortfolio}
-                disabled={clearing || deleting || loading}
+                disabled={clearing || deleting || showLoading}
                 className="btn-danger"
               >
                 {clearing ? "Vaciando..." : "Vaciar portafolio"}
@@ -210,15 +369,51 @@ export default function PortafolioPage() {
         <PageSubtitle>
           Cada contacto guardado incluye email y teléfono verificados en la prospección.
         </PageSubtitle>
+
+        <div className="mt-4 lg:hidden">
+          <PortfolioFilters
+            status={status}
+            setStatus={setStatus}
+            contact={contact}
+            setContact={setContact}
+            search={search}
+            setSearch={setSearch}
+            onFilterChange={markReloading}
+          />
+        </div>
+
+        {selected.size > 0 && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded border border-[#E2E6EA] bg-[#FAFBFC] p-3 dark:border-[#2A3544] dark:bg-[#151B23]">
+            <span className="text-caption">{selected.size} seleccionado(s)</span>
+            <select
+              className="input-field py-1"
+              value={bulkStatus}
+              onChange={(e) => setBulkStatus(e.target.value as LeadStatus)}
+            >
+              {STATUSES.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={bulkUpdateStatus}
+              disabled={bulkUpdating || showLoading}
+              className="btn-primary"
+            >
+              {bulkUpdating ? "Actualizando..." : "Cambiar estado"}
+            </button>
+          </div>
+        )}
+
         {message && (
           <p
-            className={`text-caption mt-4 ${message.includes("vaciado") || message.includes("eliminado") ? "text-green-700 dark:text-green-400" : "text-red-600"}`}
+            className={`text-caption mt-4 ${isSuccessMessage ? "text-green-700 dark:text-green-400" : "text-red-600"}`}
           >
             {message}
           </p>
         )}
 
-        {loading ? (
+        {showLoading ? (
           <p className="text-body mt-8">Cargando...</p>
         ) : leads.length === 0 ? (
           <div className="mt-8">
@@ -244,6 +439,7 @@ export default function PortafolioPage() {
                   <th>Email</th>
                   <th>Teléfono</th>
                   <th>Estado</th>
+                  <th>Notas</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -262,12 +458,8 @@ export default function PortafolioPage() {
                     <td className="cell-strong">{l.nombre}</td>
                     <td>{l.cargo ?? "—"}</td>
                     <td>{l.empresa ?? "—"}</td>
-                    <td>
-                      {l.email ? <a href={`mailto:${l.email}`}>{l.email}</a> : "—"}
-                    </td>
-                    <td>
-                      {l.telefono ? <a href={`tel:${l.telefono}`}>{l.telefono}</a> : "—"}
-                    </td>
+                    <td>{l.email ? <a href={`mailto:${l.email}`}>{l.email}</a> : "—"}</td>
+                    <td>{l.telefono ? <a href={`tel:${l.telefono}`}>{l.telefono}</a> : "—"}</td>
                     <td>
                       <select
                         className="input-field py-1"
@@ -278,6 +470,39 @@ export default function PortafolioPage() {
                           <option key={s}>{s}</option>
                         ))}
                       </select>
+                    </td>
+                    <td className="max-w-[200px]">
+                      {editingNotes === l.id ? (
+                        <div className="space-y-1">
+                          <textarea
+                            className="input-field min-h-[60px] w-full text-[12px]"
+                            value={notesDraft}
+                            onChange={(e) => setNotesDraft(e.target.value)}
+                            rows={2}
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => saveNotes(l.id)}
+                              disabled={savingNotes}
+                              className="btn-link"
+                            >
+                              Guardar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingNotes(null)}
+                              className="btn-link"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={() => openNotes(l)} className="btn-link text-left">
+                          {l.notas?.trim() ? l.notas : "Añadir notas"}
+                        </button>
+                      )}
                     </td>
                     <td>
                       <button

@@ -4,7 +4,6 @@ import { getIndustrySearchStrategies } from "./apollo-filters";
 import {
   enrichPeopleWithContacts,
   isApolloWebhookConfigured,
-  normalizePerson,
 } from "./apollo-enrich";
 import { recordProspeccionCredits } from "./db";
 
@@ -226,5 +225,3 @@ export class ApolloApiError extends Error {
     this.name = "ApolloApiError";
   }
 }
-
-export { normalizePerson };

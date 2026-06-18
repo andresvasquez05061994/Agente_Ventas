@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
+import { useMounted } from "@/hooks/use-mounted";
 
 const NAV = [
   { href: "/resumen", label: "Resumen" },
@@ -15,9 +15,7 @@ const NAV = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
+  const mounted = useMounted();
 
   const isDark = theme === "dark";
   const logoSrc = isDark ? "/logos/logo-iac-white.png" : "/logos/logo-iac.png";

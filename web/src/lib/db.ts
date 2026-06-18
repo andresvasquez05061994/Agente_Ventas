@@ -75,56 +75,28 @@ export async function getLeads(filters?: {
     filters?.status && filters.status !== "Todos" ? filters.status : null;
   const term = filters?.search?.trim() || null;
   const pattern = term ? `%${term}%` : null;
+  const contact =
+    filters?.contact && filters.contact !== "Todos" ? filters.contact : null;
 
-  if (status && pattern) {
-    return (await sql`
-      SELECT * FROM leads
-      WHERE lead_status = ${status}
-        AND (
-          nombre ILIKE ${pattern}
-          OR empresa ILIKE ${pattern}
-          OR cargo ILIKE ${pattern}
-        )
-      ORDER BY created_at DESC
-      LIMIT ${LEADS_LIMIT}
-    `) as Lead[];
-  }
-
-  if (status) {
-    return (await sql`
-      SELECT * FROM leads
-      WHERE lead_status = ${status}
-      ORDER BY created_at DESC
-      LIMIT ${LEADS_LIMIT}
-    `) as Lead[];
-  }
-
-  if (pattern) {
-    return (await sql`
-      SELECT * FROM leads
-      WHERE nombre ILIKE ${pattern}
-         OR empresa ILIKE ${pattern}
-         OR cargo ILIKE ${pattern}
-      ORDER BY created_at DESC
-      LIMIT ${LEADS_LIMIT}
-    `) as Lead[];
-  }
-
-  const rows = (await sql`
+  return (await sql`
     SELECT * FROM leads
+    WHERE (${status}::text IS NULL OR lead_status = ${status})
+      AND (
+        ${pattern}::text IS NULL
+        OR nombre ILIKE ${pattern}
+        OR empresa ILIKE ${pattern}
+        OR cargo ILIKE ${pattern}
+      )
+      AND (
+        ${contact}::text IS NULL
+        OR (${contact} = 'Con teléfono' AND telefono IS NOT NULL AND telefono <> '')
+        OR (${contact} = 'Sin teléfono' AND (telefono IS NULL OR telefono = ''))
+        OR (${contact} = 'Con email' AND email IS NOT NULL AND email <> '')
+        OR (${contact} = 'Sin email' AND (email IS NULL OR email = ''))
+      )
     ORDER BY created_at DESC
     LIMIT ${LEADS_LIMIT}
   `) as Lead[];
-
-  if (!filters?.contact) return rows;
-
-  return rows.filter((lead) => {
-    if (filters.contact === "Con teléfono" && !lead.telefono) return false;
-    if (filters.contact === "Sin teléfono" && lead.telefono) return false;
-    if (filters.contact === "Con email" && !lead.email) return false;
-    if (filters.contact === "Sin email" && lead.email) return false;
-    return true;
-  });
 }
 
 export async function saveLeads(

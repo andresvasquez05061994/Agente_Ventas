@@ -80,10 +80,6 @@ export function SectionBlock({
   );
 }
 
-export function MetricCard({ label, value }: { label: string; value: number }) {
-  return <KpiCard label={label} value={value} accent="blue" />;
-}
-
 export function EmptyState({ message, href, cta }: { message: string; href: string; cta: string }) {
   return (
     <div className="flex min-h-[360px] flex-col items-center justify-center text-center">

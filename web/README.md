@@ -1,36 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Agente Ventas IAC — Web (Fase 1)
 
-## Getting Started
+Plataforma B2B de prospección con Apollo.io y gestión de leads en Neon PostgreSQL.
 
-First, run the development server:
+**Producción:** https://agente-ventas-three.vercel.app
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Módulos (Fase 1)
+
+| Módulo | Ruta | Funcionalidad |
+|--------|------|---------------|
+| Prospección | `/prospeccion` | Búsqueda Apollo, enriquecimiento email/teléfono, guardado en portafolio |
+| Portafolio | `/portafolio` | Filtros, estados, notas, export CSV, eliminación individual/masiva |
+| Resumen | `/resumen` | KPIs Apollo y pipeline de leads |
+
+## Variables de entorno
+
+```env
+DATABASE_URL=postgresql://...
+APOLLO_API_KEY=...
+APOLLO_WEBHOOK_BASE_URL=https://tu-dominio.vercel.app   # opcional; en Vercel usa VERCEL_URL
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Apollo requiere **créditos activos** para `people/bulk_match` (email y teléfono).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Desarrollo
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+cd web
+npm install
+npm run dev
+```
 
-## Learn More
+## Scripts
 
-To learn more about Next.js, take a look at the following resources:
+| Comando | Descripción |
+|---------|-------------|
+| `npm run dev` | Servidor local |
+| `npm run build` | Build de producción |
+| `npm run lint` | ESLint |
+| `npm run test:apollo` | Prueba manual de integración Apollo |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Criterios de cierre Fase 1
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- [x] Prospección Apollo con filtros validados y solo contactos con email + teléfono
+- [x] Portafolio CRUD, estados, notas, filtros, export CSV
+- [x] Resumen con métricas
+- [x] Persistencia Neon + despliegue Vercel
+- [ ] Créditos Apollo operativos en producción (dependencia externa)
+- [ ] Logos IAC en `public/logos/` (opcional visual)
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Fases 2–3 (BD avanzada, WhatsApp/Mistral) están en `phases/` del repo raíz, no integradas en esta app.
