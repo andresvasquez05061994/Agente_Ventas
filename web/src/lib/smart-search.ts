@@ -1,10 +1,11 @@
 import {
   APOLLO_COUNTRIES,
-  APOLLO_JOB_TITLES,
   APOLLO_KEYWORDS,
   APOLLO_PER_PAGE_OPTIONS,
+  APOLLO_PRESET_JOB_TITLES,
   APOLLO_SENIORITIES,
   DEFAULT_SEARCH,
+  normalizeJobTitles,
 } from "./apollo-filters";
 
 export type SmartSearchFilters = {
@@ -44,7 +45,7 @@ export class SmartSearchError extends Error {
 
 const FILTER_CATALOG = {
   countries: APOLLO_COUNTRIES.map((c) => ({ label: c.label, value: c.value })),
-  jobTitles: APOLLO_JOB_TITLES.map((t) => ({ label: t.label, value: t.value })),
+  jobTitles: APOLLO_PRESET_JOB_TITLES.map((t) => ({ label: t.label, value: t.value })),
   industries: APOLLO_KEYWORDS.map((k) => ({ label: k.label, value: k.value })),
   seniorities: APOLLO_SENIORITIES.map((s) => ({ label: s.label, value: s.value })),
   perPageOptions: [...APOLLO_PER_PAGE_OPTIONS],
@@ -110,16 +111,78 @@ export function mapTitlesFromSuggestions(suggestions: string[]): string[] {
 
     if (norm.includes("tecnolog") || norm.includes("sistemas") || (norm.includes("director") && /\bti\b/.test(norm))) {
       matched.add("IT Director");
-      matched.add("Director of Technology");
-      matched.add("Director of Information Technology");
       continue;
     }
-    if (norm.includes("gerente") && /\bti\b/.test(norm)) {
-      matched.add("IT Manager");
+    if (norm.includes("automatiz") || norm.includes("rpa") || norm.includes("proceso")) {
+      matched.add("Director of Automation");
+      matched.add("Chief Operating Officer");
       continue;
     }
+    if (
+      norm.includes("inteligencia artificial") ||
+      norm.includes(" entrenamiento") ||
+      /\bia\b/.test(norm) ||
+      norm.includes("machine learning") ||
+      norm.includes(" aprendizaje")
+    ) {
+      matched.add("Director of Artificial Intelligence");
+      matched.add("Director of Data Science");
+      matched.add("CTO");
+      continue;
+    }
+    if (
+      norm.includes("predicci") ||
+      norm.includes("demanda") ||
+      norm.includes("forecast") ||
+      norm.includes("planificaci") ||
+      norm.includes("supply chain") ||
+      norm.includes("cadena")
+    ) {
+      matched.add("Director of Demand Planning");
+      matched.add("VP of Supply Chain");
+      matched.add("Director of Analytics");
+      continue;
+    }
+    if (norm.includes("datos") || norm.includes("data") || norm.includes("analytics") || norm.includes("bi")) {
+      matched.add("Chief Data Officer");
+      matched.add("Director of Data Science");
+      matched.add("Director of Analytics");
+      continue;
+    }
+    if (norm.includes("operac") || norm.includes("coo")) {
+      matched.add("Chief Operating Officer");
+      continue;
+    }
+    if (norm.includes("innovaci")) {
+      matched.add("Director of Innovation");
+      continue;
+    }
+    if (
+      norm.includes("recursos humanos") ||
+      norm.includes("rrhh") ||
+      norm.includes("talento humano") ||
+      norm.includes("people")
+    ) {
+      matched.add("Human Resources Director");
+      matched.add("Chief Human Resources Officer");
+      continue;
+    }
+    if (norm.includes("logist") || norm.includes("transporte") || norm.includes("almacen")) {
+      matched.add("Director of Logistics");
+      matched.add("Logistics Manager");
+      continue;
+    }
+    if (norm.includes("compras") || norm.includes("procurement")) {
+      matched.add("Director of Procurement");
+      continue;
+    }
+    if (norm.includes("marketing")) matched.add("Marketing Director");
+    if (norm.includes("ventas") || norm.includes("sales") || norm.includes("comercial")) {
+      matched.add("Sales Director");
+    }
+    if (norm.includes("finanz") || norm.includes("cfo")) matched.add("Chief Financial Officer");
 
-    for (const t of APOLLO_JOB_TITLES) {
+    for (const t of APOLLO_PRESET_JOB_TITLES) {
       const val = t.value.toLowerCase();
       const lab = t.label.toLowerCase();
       if (norm === val || norm === lab || lab.includes(norm) || norm.includes(val)) {
@@ -128,18 +191,24 @@ export function mapTitlesFromSuggestions(suggestions: string[]): string[] {
     }
     if (/(^|\s)cto(\s|$)/.test(norm) || norm === "cto") matched.add("CTO");
     if (/(^|\s)cio(\s|$)/.test(norm) || norm === "cio") matched.add("CIO");
-    if (/(^|\s)ceo(\s|$)/.test(norm) || norm === "ceo" || norm.includes("director general")) {
-      matched.add("CEO");
-    }
-    if (norm.includes("vp") && norm.includes("ingenier")) matched.add("VP of Engineering");
-    if (norm.includes("jefe") && /\bti\b/.test(norm)) matched.add("Head of IT");
-    if (norm.includes("compras") || norm.includes("procurement")) matched.add("Director");
-    if (norm.includes("marketing")) matched.add("Director");
-    if (norm.includes("ventas") || norm.includes("sales")) matched.add("Director");
-    if (norm.includes("recursos humanos") || norm.includes("rrhh")) matched.add("Director");
+    if (norm.includes("cdo") || norm.includes("chief data")) matched.add("Chief Data Officer");
   }
 
   return [...matched];
+}
+
+/** Combina mapeo por reglas con cargos libres válidos para Apollo. */
+export function coerceJobTitles(suggestions: string[], fallbackQuery?: string): string[] {
+  const mapped = mapTitlesFromSuggestions(suggestions);
+  const merged = normalizeJobTitles([...mapped, ...suggestions]);
+  if (merged.length) return merged;
+
+  const fromQuery = fallbackQuery
+    ? normalizeJobTitles([...mapTitlesFromSuggestions([fallbackQuery]), fallbackQuery])
+    : [];
+  if (fromQuery.length) return fromQuery;
+
+  return [...DEFAULT_SEARCH.titles];
 }
 
 function sanitizeCompany(raw: string | undefined): string {
@@ -170,9 +239,7 @@ function buildFiltersFromParsed(
     : parsed.titles
       ? [String(parsed.titles)]
       : [];
-  let titles = mapTitlesFromSuggestions(rawTitles);
-  if (!titles.length) titles = mapTitlesFromSuggestions([userQuery]);
-  if (!titles.length) titles = [...DEFAULT_SEARCH.titles];
+  const titles = coerceJobTitles(rawTitles, userQuery);
 
   const filters: SmartSearchFilters = {
     country: pickCountry(String(parsed.country ?? "")),
@@ -196,7 +263,7 @@ export function buildSmartSearchPrompt(userQuery: string): string {
 Analiza la intención y devuelve SOLO un JSON válido (sin markdown) con esta forma exacta:
 {
   "country": "valor exacto de país de la lista",
-  "titles": ["uno o más valores exactos de cargo de la lista"],
+  "titles": ["uno o más cargos: valor exacto de jobTitles o título libre válido en inglés"],
   "keyword": "valor exacto de industria o cadena vacía",
   "seniority": "valor exacto de seniority o cadena vacía",
   "company": "nombre de empresa si la menciona, o cadena vacía",
@@ -205,7 +272,8 @@ Analiza la intención y devuelve SOLO un JSON válido (sin markdown) con esta fo
 }
 
 Reglas estrictas:
-- country, titles, keyword y seniority deben ser valores "value" EXACTOS de las listas (copia literal).
+- country, keyword y seniority deben ser valores "value" EXACTOS de las listas (copia literal).
+- titles: usa valores de jobTitles cuando aplique; si no hay coincidencia, un título libre en inglés válido para Apollo (ej. "Warehouse Manager").
 - Si no menciona país → "Colombia".
 - Si no menciona industria → "".
 - Si no menciona seniority → "".
@@ -385,8 +453,7 @@ function ruleBasedInterpret(userQuery: string): SmartSearchResult {
     company = sanitizeCompany(companyMatch[1].replace(/\s+(con|que|en|de|para).*$/i, ""));
   }
 
-  let titles = mapTitlesFromSuggestions(titleHints.length ? titleHints : [userQuery]);
-  if (!titles.length) titles = [...DEFAULT_SEARCH.titles];
+  const titles = coerceJobTitles(titleHints.length ? titleHints : [userQuery], userQuery);
 
   const parts = [
     country,
@@ -427,7 +494,10 @@ export async function interpretSmartSearch(userQuery: string): Promise<SmartSear
 }
 
 export function normalizeSmartFilters(raw: Partial<SmartSearchFilters>): SmartSearchFilters {
-  const titles = mapTitlesFromSuggestions(raw.titles ?? []);
+  const titles = normalizeJobTitles([
+    ...mapTitlesFromSuggestions(raw.titles ?? []),
+    ...(raw.titles ?? []),
+  ]);
   return {
     country: pickCountry(raw.country),
     titles: titles.length ? titles : [...DEFAULT_SEARCH.titles],

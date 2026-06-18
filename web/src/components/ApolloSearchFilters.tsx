@@ -1,11 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import {
   APOLLO_COUNTRIES,
   APOLLO_JOB_TITLES,
+  APOLLO_JOB_TITLES_OTHER,
   APOLLO_KEYWORDS,
   APOLLO_PER_PAGE_OPTIONS,
   APOLLO_SENIORITIES,
+  getAllPresetTitleValues,
+  isPresetJobTitle,
+  isValidJobTitle,
+  sanitizeJobTitle,
 } from "@/lib/apollo-filters";
 import { FieldLabel, SectionLabel } from "@/components/ui";
 
@@ -15,6 +21,7 @@ export type ApolloSearchFiltersProps = {
   company: string;
   setCompany: (v: string) => void;
   titles: string[];
+  setTitles: (titles: string[]) => void;
   toggleTitle: (value: string) => void;
   keyword: string;
   setKeyword: (v: string) => void;
@@ -26,12 +33,41 @@ export type ApolloSearchFiltersProps = {
   onSearch: () => void;
 };
 
+function TitleCheckboxList({
+  items,
+  titles,
+  toggleTitle,
+  loading,
+}: {
+  items: readonly { label: string; value: string }[];
+  titles: string[];
+  toggleTitle: (value: string) => void;
+  loading: boolean;
+}) {
+  return (
+    <div className="apollo-titles-list" role="group">
+      {items.map((t) => (
+        <label key={t.value} className="apollo-titles-item">
+          <input
+            type="checkbox"
+            checked={titles.includes(t.value)}
+            onChange={() => toggleTitle(t.value)}
+            disabled={loading}
+          />
+          <span>{t.label}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 export function ApolloSearchFilters({
   country,
   setCountry,
   company,
   setCompany,
   titles,
+  setTitles,
   toggleTitle,
   keyword,
   setKeyword,
@@ -42,6 +78,36 @@ export function ApolloSearchFilters({
   loading,
   onSearch,
 }: ApolloSearchFiltersProps) {
+  const [customTitle, setCustomTitle] = useState("");
+  const [customError, setCustomError] = useState("");
+
+  const customTitles = titles.filter((t) => !isPresetJobTitle(t));
+  const allPresetsSelected = getAllPresetTitleValues().every((v) => titles.includes(v));
+
+  function selectAllPresets() {
+    const customs = titles.filter((t) => !isPresetJobTitle(t));
+    setTitles([...getAllPresetTitleValues(), ...customs]);
+  }
+
+  function addCustomTitle() {
+    const value = sanitizeJobTitle(customTitle);
+    if (!isValidJobTitle(value)) {
+      setCustomError("Escribe un cargo válido (mín. 2 caracteres).");
+      return;
+    }
+    if (titles.some((t) => t.toLowerCase() === value.toLowerCase())) {
+      setCustomError("Ese cargo ya está seleccionado.");
+      return;
+    }
+    setTitles([...titles, value]);
+    setCustomTitle("");
+    setCustomError("");
+  }
+
+  function removeCustomTitle(value: string) {
+    setTitles(titles.filter((t) => t !== value));
+  }
+
   return (
     <>
       <SectionLabel>Filtros Apollo</SectionLabel>
@@ -75,23 +141,102 @@ export function ApolloSearchFilters({
         Opcional. Filtra contactos dentro de esa organización en Apollo.
       </p>
 
-      <FieldLabel>Cargos</FieldLabel>
-      <div className="mb-3 max-h-44 space-y-1.5 overflow-y-auto rounded border border-[#E2E6EA] bg-white p-2 dark:border-[#2A3544] dark:bg-[#1A222D]">
-        {APOLLO_JOB_TITLES.map((t) => (
-          <label
-            key={t.value}
-            className="flex cursor-pointer items-start gap-2 text-[12px] text-[#6B7C93] dark:text-[#B8C5D3]"
+      <div className="apollo-titles-header">
+        <FieldLabel className="!mb-0">Cargos</FieldLabel>
+        <div className="apollo-titles-header__actions">
+          <button
+            type="button"
+            className="apollo-titles-link"
+            onClick={selectAllPresets}
+            disabled={loading || allPresetsSelected}
           >
-            <input
-              type="checkbox"
-              className="mt-0.5 accent-[#003366]"
-              checked={titles.includes(t.value)}
-              onChange={() => toggleTitle(t.value)}
-            />
-            <span>{t.label}</span>
-          </label>
-        ))}
+            Todos
+          </button>
+          <span className="apollo-titles-header__sep" aria-hidden>
+            ·
+          </span>
+          <button
+            type="button"
+            className="apollo-titles-link"
+            onClick={() => setTitles([])}
+            disabled={loading || titles.length === 0}
+          >
+            Ninguno
+          </button>
+        </div>
       </div>
+
+      <p className="apollo-titles-group-label">IA, automatización y demanda</p>
+      <TitleCheckboxList
+        items={APOLLO_JOB_TITLES}
+        titles={titles}
+        toggleTitle={toggleTitle}
+        loading={loading}
+      />
+
+      <p className="apollo-titles-group-label">RRHH, logística y otros</p>
+      <TitleCheckboxList
+        items={APOLLO_JOB_TITLES_OTHER}
+        titles={titles}
+        toggleTitle={toggleTitle}
+        loading={loading}
+      />
+
+      <FieldLabel className="!mt-2">Otro cargo</FieldLabel>
+      <div className="apollo-titles-custom-row">
+        <input
+          type="text"
+          className="input-field"
+          value={customTitle}
+          onChange={(e) => {
+            setCustomTitle(e.target.value);
+            setCustomError("");
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addCustomTitle();
+            }
+          }}
+          placeholder="Ej: Warehouse Manager, HR Business Partner…"
+          maxLength={80}
+          disabled={loading}
+        />
+        <button
+          type="button"
+          className="btn-secondary apollo-titles-custom-add"
+          onClick={addCustomTitle}
+          disabled={loading || !customTitle.trim()}
+        >
+          Agregar
+        </button>
+      </div>
+      {customError && <p className="text-micro apollo-titles-custom-error">{customError}</p>}
+      {customTitles.length > 0 && (
+        <div className="apollo-titles-chips">
+          {customTitles.map((t) => (
+            <span key={t} className="apollo-titles-chip">
+              {t}
+              <button
+                type="button"
+                className="apollo-titles-chip__remove"
+                onClick={() => removeCustomTitle(t)}
+                disabled={loading}
+                aria-label={`Quitar ${t}`}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <p className="text-micro apollo-titles-hint">
+        Selecciona de la lista o agrega cargos libres (ideal en inglés para Apollo).
+        {titles.length > 0 && (
+          <span className="apollo-titles-count"> · {titles.length} seleccionados</span>
+        )}
+      </p>
 
       <FieldLabel>Industria</FieldLabel>
       <select

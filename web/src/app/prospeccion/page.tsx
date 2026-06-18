@@ -78,7 +78,7 @@ export default function ProspeccionPage() {
 
     if (!params.titles.length) {
       setStatus("error");
-      setMessage("Selecciona al menos un cargo de la lista.");
+      setMessage("Selecciona o agrega al menos un cargo.");
       return;
     }
 
@@ -224,6 +224,7 @@ export default function ProspeccionPage() {
     company,
     setCompany,
     titles,
+    setTitles,
     toggleTitle,
     keyword,
     setKeyword,
