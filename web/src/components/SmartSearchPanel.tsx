@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { SmartSearchResult } from "@/lib/smart-search";
-import { SectionLabel } from "@/components/ui";
+import { FieldLabel } from "@/components/ui";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 
 type SmartSearchPanelProps = {
@@ -66,53 +66,63 @@ export function SmartSearchPanel({ disabled, onApply }: SmartSearchPanelProps) {
     }
   }
 
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!disabled && !loading) void analyze();
+    }
+  }
+
   return (
     <div className="smart-search-panel mb-4">
-      <SectionLabel>Búsqueda inteligente</SectionLabel>
-      <p className="text-caption mb-2">
-        Describe en texto o voz a quién buscas. Mistral IA interpreta y aplica país, cargos, industria y
-        empresa.
-      </p>
-      {iaReady === true && (
-        <p className="text-micro mb-2 text-[#0D6E6E] dark:text-[#5EC4C4]">
-          IA activa · {iaModel || "Mistral"}
-        </p>
-      )}
-      {iaReady === false && (
-        <p className="text-micro mb-2 text-[#B54708]">
-          Mistral no disponible — se usará modo básico o revisa MISTRAL_API_KEY en Vercel.
-        </p>
-      )}
-
-      <textarea
-        className="input-field mb-2 min-h-[72px] resize-y"
-        placeholder='Ej: "Directores de TI en empresas de salud en Bogotá, empresa Sura"'
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        disabled={disabled || loading}
-        rows={3}
-      />
-
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={analyze}
-          disabled={disabled || loading}
-          className="btn-primary flex-1 disabled:opacity-60"
-        >
-          {loading ? "Analizando con IA…" : "Analizar y buscar"}
-        </button>
+      <div className="smart-search-header">
+        <div className="smart-search-header__label">
+          <FieldLabel className="!mb-0">Búsqueda inteligente</FieldLabel>
+          {iaReady === true && (
+            <span className="smart-search-ia-badge" title="Mistral conectado">
+              IA · {iaModel || "Mistral"}
+            </span>
+          )}
+          {iaReady === false && (
+            <span className="smart-search-ia-badge smart-search-ia-badge--warn">
+              Modo básico
+            </span>
+          )}
+        </div>
         {supported && (
           <button
             type="button"
             onClick={toggle}
             disabled={disabled || loading}
-            className={`btn-secondary ${listening ? "ring-2 ring-[#0D6E6E]" : ""}`}
+            className={`dictate-btn ${listening ? "dictate-btn--active" : ""}`}
             title="Dictar por voz"
           >
-            {listening ? "Escuchando…" : "Voz"}
+            <span className="dictate-btn__dot" aria-hidden />
+            {listening ? "Escuchando…" : "Dictar"}
           </button>
         )}
+      </div>
+
+      <textarea
+        className="input-field smart-search-textarea resize-y"
+        placeholder="Describe a quién buscas en lenguaje natural (país, cargo, industria y empresa)"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={handleKeyDown}
+        disabled={disabled || loading}
+        rows={4}
+      />
+
+      <div className="smart-search-actions">
+        <button
+          type="button"
+          onClick={() => void analyze()}
+          disabled={disabled || loading}
+          className="btn-primary w-full disabled:opacity-60"
+        >
+          {loading ? "Interpretando con IA…" : "Interpretar y buscar"}
+        </button>
+        <p className="text-micro smart-search-hint">Enter para buscar · Shift+Enter para nueva línea</p>
       </div>
 
       {(error || micError) && (

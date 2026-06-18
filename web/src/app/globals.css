@@ -872,3 +872,126 @@ button {
 .dark .smart-search-panel {
   border-color: #2a3544;
 }
+
+.smart-search-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.smart-search-header__label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.smart-search-ia-badge {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #0d6e6e;
+}
+
+.smart-search-ia-badge--warn {
+  color: #b54708;
+}
+
+.dark .smart-search-ia-badge {
+  color: #5ec4c4;
+}
+
+.dark .smart-search-ia-badge--warn {
+  color: #f7b27a;
+}
+
+.dictate-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--iac-text-muted);
+  background: #fff;
+  border: 1px solid #e2e6ea;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.dictate-btn:hover:not(:disabled) {
+  border-color: #c5cdd6;
+  color: var(--iac-text);
+}
+
+.dictate-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dictate-btn--active {
+  border-color: #0d6e6e;
+  color: #0d6e6e;
+}
+
+.dictate-btn__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #8a97a8;
+}
+
+.dictate-btn--active .dictate-btn__dot {
+  background: #0d6e6e;
+  animation: dictate-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes dictate-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.85);
+  }
+}
+
+.dark .dictate-btn {
+  background: #1a222d;
+  border-color: #3d4d61;
+  color: #b8c5d3;
+}
+
+.dark .dictate-btn--active {
+  border-color: #5ec4c4;
+  color: #5ec4c4;
+}
+
+.dark .dictate-btn--active .dictate-btn__dot {
+  background: #5ec4c4;
+}
+
+.smart-search-textarea {
+  min-height: 88px;
+  margin-bottom: 8px;
+}
+
+.smart-search-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.smart-search-hint {
+  text-align: center;
+  color: var(--iac-text-faint);
+}
