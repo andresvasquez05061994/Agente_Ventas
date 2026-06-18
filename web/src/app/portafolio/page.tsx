@@ -3,13 +3,22 @@
 import { useEffect, useState } from "react";
 import type { Lead, LeadStatus } from "@/lib/types";
 import { EmptyState, FieldLabel, PageSubtitle, SectionLabel, ActionBanner, FeedbackAnchor } from "@/components/ui";
+import { ColdCallPanel } from "@/components/ColdCallPanel";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { useDebounce } from "@/hooks/use-debounce";
 import { downloadLeadsCsv } from "@/lib/export-leads";
+import type { ColdCallResult } from "@/lib/cold-call";
 
 const STATUSES: LeadStatus[] = ["Nuevo", "En revisión", "Aprobado para contacto", "Descartado"];
 const CONTACT_FILTERS = ["Todos", "Con teléfono", "Sin teléfono", "Con email", "Sin email"] as const;
 const PER_PAGE = 20;
+
+const STATUS_SHORT: Record<LeadStatus, string> = {
+  Nuevo: "Nuevo",
+  "En revisión": "En revisión",
+  "Aprobado para contacto": "Aprobado",
+  Descartado: "Descartado",
+};
 
 function getPageNumbers(current: number, total: number): (number | "…")[] {
   if (total <= 9) {
@@ -168,6 +177,11 @@ export default function PortafolioPage() {
   const [editingNotes, setEditingNotes] = useState<number | null>(null);
   const [notesDraft, setNotesDraft] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
+  const [coldCallLead, setColdCallLead] = useState<Lead | null>(null);
+  const [coldCallResult, setColdCallResult] = useState<ColdCallResult | null>(null);
+  const [coldCallLoading, setColdCallLoading] = useState(false);
+  const [coldCallError, setColdCallError] = useState("");
+  const [coldCallLeadId, setColdCallLeadId] = useState<number | null>(null);
 
   const pendingSearch = search !== debouncedSearch;
   const showLoading = loading || pendingSearch;
@@ -389,8 +403,44 @@ export default function PortafolioPage() {
     deleteContacts(ids, names);
   }
 
-  function deleteOne(lead: Lead) {
-    deleteContacts([lead.id], [lead.nombre]);
+  async function fetchColdCall(lead: Lead) {
+    setColdCallLead(lead);
+    setColdCallResult(null);
+    setColdCallError("");
+    setColdCallLoading(true);
+    setColdCallLeadId(lead.id);
+
+    try {
+      const res = await fetch("/api/portafolio/cold-call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nombre: lead.nombre,
+          cargo: lead.cargo,
+          empresa: lead.empresa,
+          pais: lead.pais,
+          notas: lead.notas,
+          fuente: lead.fuente_busqueda,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error ?? "Error al generar mensaje");
+      }
+      setColdCallResult(data as ColdCallResult);
+    } catch (e) {
+      setColdCallError(e instanceof Error ? e.message : "Error al generar mensaje comercial");
+    } finally {
+      setColdCallLoading(false);
+    }
+  }
+
+  function closeColdCall() {
+    setColdCallLead(null);
+    setColdCallResult(null);
+    setColdCallError("");
+    setColdCallLoading(false);
+    setColdCallLeadId(null);
   }
 
   async function clearPortfolio() {
@@ -560,66 +610,89 @@ export default function PortafolioPage() {
         ) : (
           <>
           <div className="mt-6 overflow-x-auto rounded border border-[#E2E6EA] dark:border-[#2A3544]">
-            <table className="data-table">
+            <table className="data-table portfolio-table">
               <thead>
                 <tr>
-                  <th className="w-10">
+                  <th className="portfolio-table__check">
                     <input
                       type="checkbox"
                       checked={leads.length > 0 && selected.size === leads.length}
                       onChange={toggleSelectAll}
                       aria-label="Seleccionar todos"
-                      className="h-3.5 w-3.5 rounded border-[#C8D0D8]"
                     />
                   </th>
-                  <th>Nombre</th>
-                  <th>Cargo</th>
-                  <th>Empresa</th>
-                  <th>Email</th>
-                  <th>Teléfono</th>
-                  <th>Estado</th>
-                  <th>Notas</th>
-                  <th>Acciones</th>
+                  <th className="portfolio-table__name">Nombre</th>
+                  <th className="portfolio-table__role">Cargo</th>
+                  <th className="portfolio-table__company">Empresa</th>
+                  <th className="portfolio-table__email">Email</th>
+                  <th className="portfolio-table__phone">Teléfono</th>
+                  <th className="portfolio-table__status">Estado</th>
+                  <th className="portfolio-table__notes">Notas</th>
+                  <th className="portfolio-table__ia">IA</th>
                 </tr>
               </thead>
               <tbody>
                 {leads.map((l) => (
                   <tr key={l.id}>
-                    <td>
+                    <td className="portfolio-table__check">
                       <input
                         type="checkbox"
                         checked={selected.has(l.id)}
                         onChange={() => toggleSelect(l.id)}
                         aria-label={`Seleccionar ${l.nombre}`}
-                        className="h-3.5 w-3.5 rounded border-[#C8D0D8]"
                       />
                     </td>
-                    <td className="cell-strong">{l.nombre}</td>
-                    <td>{l.cargo ?? "—"}</td>
-                    <td>{l.empresa ?? "—"}</td>
-                    <td>{l.email ? <a href={`mailto:${l.email}`}>{l.email}</a> : "—"}</td>
-                    <td>{l.telefono ? <a href={`tel:${l.telefono}`}>{l.telefono}</a> : "—"}</td>
-                    <td>
+                    <td className="portfolio-table__name cell-strong" title={l.nombre}>
+                      {l.nombre}
+                    </td>
+                    <td className="portfolio-table__role" title={l.cargo ?? undefined}>
+                      {l.cargo ?? "—"}
+                    </td>
+                    <td className="portfolio-table__company" title={l.empresa ?? undefined}>
+                      {l.empresa ?? "—"}
+                    </td>
+                    <td className="portfolio-table__email">
+                      {l.email ? (
+                        <a href={`mailto:${l.email}`} title={l.email}>
+                          {l.email}
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="portfolio-table__phone">
+                      {l.telefono ? (
+                        <a href={`tel:${l.telefono}`} title={l.telefono}>
+                          {l.telefono}
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="portfolio-table__status">
                       <select
-                        className="input-field py-1"
+                        className="portfolio-status-select"
                         value={l.lead_status}
+                        title={l.lead_status}
                         onChange={(e) => updateStatus(l.id, e.target.value as LeadStatus)}
                       >
                         {STATUSES.map((s) => (
-                          <option key={s}>{s}</option>
+                          <option key={s} value={s}>
+                            {STATUS_SHORT[s]}
+                          </option>
                         ))}
                       </select>
                     </td>
-                    <td className="max-w-[200px]">
+                    <td className="portfolio-table__notes">
                       {editingNotes === l.id ? (
-                        <div className="space-y-1">
+                        <div className="portfolio-notes-edit">
                           <textarea
-                            className="input-field min-h-[60px] w-full text-[12px]"
+                            className="input-field portfolio-notes-textarea"
                             value={notesDraft}
                             onChange={(e) => setNotesDraft(e.target.value)}
                             rows={2}
                           />
-                          <div className="flex gap-2">
+                          <div className="portfolio-notes-actions">
                             <button
                               type="button"
                               onClick={() => saveNotes(l.id)}
@@ -638,19 +711,24 @@ export default function PortafolioPage() {
                           </div>
                         </div>
                       ) : (
-                        <button type="button" onClick={() => openNotes(l)} className="btn-link text-left">
-                          {l.notas?.trim() ? l.notas : "Añadir notas"}
+                        <button
+                          type="button"
+                          onClick={() => openNotes(l)}
+                          className="portfolio-notes-link"
+                          title={l.notas?.trim() || "Añadir notas"}
+                        >
+                          {l.notas?.trim() ? "Ver" : "Notas"}
                         </button>
                       )}
                     </td>
-                    <td>
+                    <td className="portfolio-table__ia">
                       <button
                         type="button"
-                        onClick={() => deleteOne(l)}
-                        disabled={deleting || clearing}
-                        className="btn-link-danger"
+                        onClick={() => void fetchColdCall(l)}
+                        disabled={coldCallLoading && coldCallLeadId === l.id}
+                        className="btn-ia"
                       >
-                        Eliminar
+                        {coldCallLoading && coldCallLeadId === l.id ? "…" : "Mensaje IA"}
                       </button>
                     </td>
                   </tr>
@@ -672,6 +750,15 @@ export default function PortafolioPage() {
           </>
         )}
       </main>
+
+      <ColdCallPanel
+        lead={coldCallLead}
+        loading={coldCallLoading}
+        error={coldCallError}
+        result={coldCallResult}
+        onClose={closeColdCall}
+        onRetry={() => coldCallLead && void fetchColdCall(coldCallLead)}
+      />
     </div>
   );
 }
