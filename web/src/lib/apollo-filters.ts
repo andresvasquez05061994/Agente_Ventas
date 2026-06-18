@@ -84,6 +84,32 @@ export function getAllPresetTitleValues(): string[] {
   return APOLLO_PRESET_JOB_TITLES.map((t) => t.value);
 }
 
+/** Normaliza nombre de empresa para comparación flexible. */
+export function normalizeOrgName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** ¿El contacto pertenece a la empresa filtrada? (coincidencia parcial por tokens). */
+export function organizationMatches(
+  company: string | null | undefined,
+  filter: string
+): boolean {
+  const f = normalizeOrgName(filter);
+  if (!f) return true;
+  const c = normalizeOrgName(company ?? "");
+  if (!c) return false;
+  if (c.includes(f) || f.includes(c)) return true;
+  const tokens = f.split(" ").filter((t) => t.length >= 3);
+  if (!tokens.length) return c.includes(f);
+  return tokens.every((t) => c.includes(t));
+}
+
 export const APOLLO_KEYWORDS = [
   { label: "Todas las industrias", value: "", searchTerms: [] as string[] },
   { label: "Construcción", value: "construction", searchTerms: ["construction", "building materials"] },
@@ -226,6 +252,7 @@ export interface SearchEmptyMeta {
   apollo_zero_results?: boolean;
   webhook_configured?: boolean;
   organization_name?: string;
+  company_rejected?: number;
   match_errors?: string[];
   enrich_stats?: {
     candidates?: number;
@@ -288,7 +315,19 @@ export function explainEmptySearchMessage(
     return (
       "Apollo no tiene perfiles para esta combinación (país + cargos + industria" +
       (meta.organization_name ? " + empresa" : "") +
-      "). Prueba «Todas las industrias» u otra como Software o Salud."
+      "). Prueba «Todas las industrias», otro nombre de empresa o menos cargos."
+    );
+  }
+
+  if (
+    meta.organization_name &&
+    (meta.company_rejected ?? 0) > 0 &&
+    scanned > 0 &&
+    (stats?.with_both ?? 0) === 0
+  ) {
+    return (
+      `Apollo devolvió perfiles pero ninguno coincide con «${meta.organization_name}» ` +
+      `(${meta.company_rejected} descartados por empresa). Verifica el nombre exacto en Apollo.`
     );
   }
 

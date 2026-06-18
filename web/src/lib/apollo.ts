@@ -1,6 +1,6 @@
 import type { ApolloPerson } from "./types";
 import type { ValidatedSearchRequest } from "./apollo-filters";
-import { getIndustrySearchStrategies } from "./apollo-filters";
+import { getIndustrySearchStrategies, organizationMatches } from "./apollo-filters";
 import {
   enrichPeopleWithContacts,
   isApolloWebhookConfigured,
@@ -44,7 +44,7 @@ function buildSearchPayload(
   }
 
   if (input.organization_name) {
-    payload.organization_names = [input.organization_name];
+    payload.q_organization_name = input.organization_name;
   }
 
   if (industryOverride) {
@@ -107,12 +107,6 @@ async function fetchSearchPage(
     : [buildSearchPayload(input, page)];
 
   const strategies = [...baseStrategies];
-  if (input.organization_name) {
-    strategies.push({
-      ...buildSearchPayload(input, page),
-      q_organization_name: input.organization_name,
-    });
-  }
 
   const seen = new Set<string>();
   let lastData: Record<string, unknown> = { people: [], total_entries: 0 };
@@ -136,11 +130,13 @@ async function fetchSearchPage(
 
 export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
   const target = input.per_page;
+  const companyFilter = input.organization_name?.trim() ?? "";
   const collected: ApolloPerson[] = [];
   const seen = new Set<string>();
   let totalEntries = 0;
   let lastPage = input.page;
   let scanned = 0;
+  let companyRejected = 0;
   let industryRelaxed = false;
   const started = Date.now();
   let enrichStats = {
@@ -189,6 +185,10 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       if (collected.length >= target) break;
       if (seen.has(person.apollo_id)) continue;
       if (!person.email || !person.telefono) continue;
+      if (companyFilter && !organizationMatches(person.empresa, companyFilter)) {
+        companyRejected++;
+        continue;
+      }
       seen.add(person.apollo_id);
       collected.push(person);
     }
@@ -222,6 +222,7 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       credits_consumed: enrichStats.credits_consumed,
       industry_relaxed: industryRelaxed,
       organization_name: input.organization_name || undefined,
+      company_rejected: companyFilter ? companyRejected : undefined,
       apollo_zero_results: totalEntries === 0 && scanned === 0,
       webhook_configured: isApolloWebhookConfigured(),
       match_errors: enrichStats.match_errors,
