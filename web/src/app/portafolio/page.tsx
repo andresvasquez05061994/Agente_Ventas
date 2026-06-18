@@ -609,8 +609,19 @@ export default function PortafolioPage() {
           </div>
         ) : (
           <>
-          <div className="mt-6 overflow-x-auto rounded border border-[#E2E6EA] dark:border-[#2A3544]">
+          <div className="portfolio-table-wrap mt-6 rounded border border-[#E2E6EA] dark:border-[#2A3544]">
             <table className="data-table portfolio-table">
+              <colgroup>
+                <col style={{ width: 32 }} />
+                <col style={{ width: "11%" }} />
+                <col style={{ width: 180 }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "17%" }} />
+                <col style={{ width: 108 }} />
+                <col style={{ width: 96 }} />
+                <col style={{ width: 52 }} />
+                <col style={{ width: 76 }} />
+              </colgroup>
               <thead>
                 <tr>
                   <th className="portfolio-table__check">
