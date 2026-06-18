@@ -102,6 +102,30 @@ export async function initDb() {
   `;
 }
 
+export async function searchDistinctCompanies(
+  query: string,
+  limit = 6
+): Promise<string[]> {
+  const sql = getSql();
+  const term = query.trim();
+  if (term.length < 2) return [];
+  const pattern = `%${term}%`;
+
+  const rows = await sql`
+    SELECT DISTINCT empresa
+    FROM leads
+    WHERE empresa IS NOT NULL
+      AND TRIM(empresa) <> ''
+      AND empresa ILIKE ${pattern}
+    ORDER BY empresa ASC
+    LIMIT ${limit}
+  `;
+
+  return rows
+    .map((r) => String((r as { empresa: string }).empresa ?? "").trim())
+    .filter(Boolean);
+}
+
 export async function getLeads(
   filters?: {
     status?: string;

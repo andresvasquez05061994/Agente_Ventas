@@ -1800,3 +1800,114 @@ button {
   border-color: #2a3544;
   background: #1a222d;
 }
+
+/* ── Autocompletado empresa ── */
+
+.company-autocomplete {
+  position: relative;
+}
+
+.company-autocomplete__hint {
+  margin-top: 4px;
+  margin-bottom: 0;
+}
+
+.company-autocomplete__list {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% - 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #c8d0d8;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(5, 28, 44, 0.12);
+}
+
+.dark .company-autocomplete__list {
+  background: #151b23;
+  border-color: #3d4d61;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.company-autocomplete__option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.company-autocomplete__option:hover,
+.company-autocomplete__option--active {
+  background: #f4f8fc;
+}
+
+.dark .company-autocomplete__option:hover,
+.dark .company-autocomplete__option--active {
+  background: #1e2a38;
+}
+
+.company-autocomplete__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--iac-text);
+}
+
+.company-autocomplete__tag {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 3px;
+}
+
+.company-autocomplete__tag--apollo {
+  color: #175cd3;
+  background: #eff8ff;
+}
+
+.company-autocomplete__tag--portafolio {
+  color: #0d6e6e;
+  background: #e6f7f7;
+}
+
+.dark .company-autocomplete__tag--apollo {
+  color: #84caff;
+  background: #102a56;
+}
+
+.dark .company-autocomplete__tag--portafolio {
+  color: #5ec4c4;
+  background: #0d2f2f;
+}
+
+.company-autocomplete__meta {
+  flex-basis: 100%;
+  font-size: 9px;
+  color: var(--iac-text-faint);
+}
+
+.company-autocomplete__status {
+  padding: 8px 10px;
+  font-size: 10px;
+  color: var(--iac-text-muted);
+}
+
+.company-autocomplete__status--error {
+  color: #b42318;
+}

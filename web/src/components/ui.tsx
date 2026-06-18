@@ -66,8 +66,20 @@ export function FeedbackAnchor({
   return <div className={`feedback-anchor ${className}`.trim()}>{children}</div>;
 }
 
-export function FieldLabel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <label className={`field-label ${className}`}>{children}</label>;
+export function FieldLabel({
+  children,
+  className = "",
+  htmlFor,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  htmlFor?: string;
+}) {
+  return (
+    <label className={`field-label ${className}`} htmlFor={htmlFor}>
+      {children}
+    </label>
+  );
 }
 
 export function PageTitle({ children }: { children: React.ReactNode }) {

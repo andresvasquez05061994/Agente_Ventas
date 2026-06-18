@@ -14,6 +14,7 @@ import {
   sanitizeJobTitle,
 } from "@/lib/apollo-filters";
 import { FieldLabel, SectionLabel, ActionBanner } from "@/components/ui";
+import { CompanyAutocomplete } from "@/components/CompanyAutocomplete";
 
 export type ApolloSearchFiltersProps = {
   country: string;
@@ -131,18 +132,12 @@ export function ApolloSearchFilters({
         ))}
       </select>
 
-      <FieldLabel>Empresa</FieldLabel>
-      <input
-        type="text"
-        className="input-field mb-3"
+      <CompanyAutocomplete
         value={company}
-        onChange={(e) => setCompany(e.target.value)}
-        placeholder="Ej: Bancolombia, Grupo Éxito, Sura…"
-        maxLength={120}
+        onChange={setCompany}
+        country={country}
+        disabled={loading}
       />
-      <p className="text-micro mb-3 -mt-2">
-        Opcional. Filtra contactos dentro de esa organización en Apollo.
-      </p>
 
       <div className="apollo-titles-header">
         <FieldLabel className="!mb-0">Cargos</FieldLabel>
