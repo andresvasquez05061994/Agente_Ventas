@@ -138,9 +138,8 @@ function PortfolioFilters({
         className="input-field"
         value={search}
         onChange={(e) => {
+          onFilterChange();
           setSearch(e.target.value);
-          setPage(1);
-          setLoading(true);
         }}
         placeholder="Nombre, empresa..."
       />
