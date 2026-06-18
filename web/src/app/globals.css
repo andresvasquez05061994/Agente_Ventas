@@ -1378,6 +1378,10 @@ button {
   -webkit-overflow-scrolling: touch;
 }
 
+.portfolio-table-wrap:has(.portfolio-row--notes-editing) {
+  overflow: visible;
+}
+
 .portfolio-table {
   table-layout: fixed;
   width: 100%;
@@ -1440,6 +1444,12 @@ button {
 .portfolio-table__notes {
   width: 52px;
   min-width: 52px;
+  position: relative;
+  overflow: visible;
+}
+
+.portfolio-row--notes-editing .portfolio-table__notes {
+  z-index: 15;
 }
 
 .portfolio-table__ia {
@@ -1513,18 +1523,42 @@ button {
 }
 
 .portfolio-notes-edit {
-  min-width: 140px;
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 200px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #c8d0d8;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 35, 70, 0.12);
+  z-index: 20;
+}
+
+.dark .portfolio-notes-edit {
+  background: #151b23;
+  border-color: #3d4d61;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 
 .portfolio-notes-textarea {
-  min-height: 48px;
+  min-height: 52px;
+  width: 100%;
   padding: 4px 6px;
   font-size: 10px;
+  resize: vertical;
+  box-sizing: border-box;
 }
 
 .portfolio-notes-actions {
   display: flex;
   gap: 6px;
+  margin-top: 4px;
+}
+
+.portfolio-row--notes-editing .portfolio-table__ia {
+  visibility: hidden;
 }
 
 .btn-ia {
@@ -1559,7 +1593,89 @@ button {
   background: linear-gradient(135deg, #0d6e6e 0%, #4a8fd4 100%);
 }
 
-/* ── Panel Mensaje IA (llamada en frío) ── */
+/* ── Panel Mensaje IA (llamada / correo en frío) ── */
+
+.message-ia-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 20px;
+  border-bottom: 1px solid #e2e6ea;
+  background: #fafbfc;
+}
+
+.dark .message-ia-tabs {
+  border-bottom-color: #2a3544;
+  background: #0f1419;
+}
+
+.message-ia-tabs__btn {
+  flex: 1;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #5a6a7e;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.message-ia-tabs__btn:hover:not(:disabled) {
+  color: #003366;
+}
+
+.message-ia-tabs__btn--active {
+  color: #003366;
+  border-bottom-color: #0d6e6e;
+}
+
+.message-ia-tabs__btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.dark .message-ia-tabs__btn {
+  color: #8a97a8;
+}
+
+.dark .message-ia-tabs__btn:hover:not(:disabled),
+.dark .message-ia-tabs__btn--active {
+  color: #e8eef4;
+}
+
+.dark .message-ia-tabs__btn--active {
+  border-bottom-color: #4a8fd4;
+}
+
+.message-ia-email-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--iac-text);
+}
+
+.message-ia-email-ps {
+  margin-top: 4px;
+  font-size: 12px;
+  font-style: italic;
+  color: #5a6a7e;
+}
+
+.dark .message-ia-email-ps {
+  color: #8a97a8;
+}
+
+.cold-call-block__text--strong {
+  font-weight: 600;
+  color: #003366;
+}
+
+.dark .cold-call-block__text--strong {
+  color: #6ba3f7;
+}
 
 .cold-call-overlay {
   position: fixed;

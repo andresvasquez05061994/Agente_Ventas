@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
-import { generateOutreachMessage, OutreachError } from "@/lib/commercial-outreach";
+import {
+  generateOutreachMessage,
+  OutreachError,
+  type OutreachChannel,
+} from "@/lib/commercial-outreach";
 
-/** @deprecated Usar /api/portafolio/outreach */
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Record<string, unknown>;
+    const channel = body.channel === "email" ? "email" : "call";
+
     const result = await generateOutreachMessage(
       {
         nombre: String(body.nombre ?? ""),
@@ -15,8 +20,9 @@ export async function POST(req: Request) {
         notas: body.notas != null ? String(body.notas) : null,
         fuente: body.fuente != null ? String(body.fuente) : null,
       },
-      "call"
+      channel as OutreachChannel
     );
+
     return NextResponse.json(result);
   } catch (e) {
     const message = e instanceof OutreachError ? e.message : "Error al generar mensaje comercial";

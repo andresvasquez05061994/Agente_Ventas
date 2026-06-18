@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react";
 import type { Lead, LeadStatus } from "@/lib/types";
 import { EmptyState, FieldLabel, PageSubtitle, SectionLabel, ActionBanner, FeedbackAnchor } from "@/components/ui";
-import { ColdCallPanel } from "@/components/ColdCallPanel";
+import { MessageIAPanel } from "@/components/MessageIAPanel";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { useDebounce } from "@/hooks/use-debounce";
 import { downloadLeadsCsv } from "@/lib/export-leads";
-import type { ColdCallResult } from "@/lib/cold-call";
+import type { ColdCallResult, ColdEmailResult, OutreachChannel } from "@/lib/commercial-outreach";
 
 const STATUSES: LeadStatus[] = ["Nuevo", "En revisión", "Aprobado para contacto", "Descartado"];
 const CONTACT_FILTERS = ["Todos", "Con teléfono", "Sin teléfono", "Con email", "Sin email"] as const;
@@ -177,11 +177,13 @@ export default function PortafolioPage() {
   const [editingNotes, setEditingNotes] = useState<number | null>(null);
   const [notesDraft, setNotesDraft] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
-  const [coldCallLead, setColdCallLead] = useState<Lead | null>(null);
-  const [coldCallResult, setColdCallResult] = useState<ColdCallResult | null>(null);
-  const [coldCallLoading, setColdCallLoading] = useState(false);
-  const [coldCallError, setColdCallError] = useState("");
-  const [coldCallLeadId, setColdCallLeadId] = useState<number | null>(null);
+  const [messageIALead, setMessageIALead] = useState<Lead | null>(null);
+  const [messageIAChannel, setMessageIAChannel] = useState<OutreachChannel>("call");
+  const [callResult, setCallResult] = useState<ColdCallResult | null>(null);
+  const [emailResult, setEmailResult] = useState<ColdEmailResult | null>(null);
+  const [messageIALoading, setMessageIALoading] = useState(false);
+  const [messageIAError, setMessageIAError] = useState("");
+  const [messageIALeadId, setMessageIALeadId] = useState<number | null>(null);
 
   const pendingSearch = search !== debouncedSearch;
   const showLoading = loading || pendingSearch;
@@ -403,22 +405,27 @@ export default function PortafolioPage() {
     deleteContacts(ids, names);
   }
 
-  async function fetchColdCall(lead: Lead) {
-    setColdCallLead(lead);
-    setColdCallResult(null);
-    setColdCallError("");
-    setColdCallLoading(true);
-    setColdCallLeadId(lead.id);
+  async function fetchOutreach(lead: Lead, channel: OutreachChannel) {
+    setMessageIALead(lead);
+    setMessageIAChannel(channel);
+    setMessageIAError("");
+    setMessageIALoading(true);
+    setMessageIALeadId(lead.id);
+
+    if (channel === "call") setCallResult(null);
+    else setEmailResult(null);
 
     try {
-      const res = await fetch("/api/portafolio/cold-call", {
+      const res = await fetch("/api/portafolio/outreach", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          channel,
           nombre: lead.nombre,
           cargo: lead.cargo,
           empresa: lead.empresa,
           pais: lead.pais,
+          email: lead.email,
           notas: lead.notas,
           fuente: lead.fuente_busqueda,
         }),
@@ -427,20 +434,40 @@ export default function PortafolioPage() {
       if (!res.ok || data.error) {
         throw new Error(data.error ?? "Error al generar mensaje");
       }
-      setColdCallResult(data as ColdCallResult);
+      if (channel === "email") {
+        setEmailResult(data as ColdEmailResult);
+      } else {
+        setCallResult(data as ColdCallResult);
+      }
     } catch (e) {
-      setColdCallError(e instanceof Error ? e.message : "Error al generar mensaje comercial");
+      setMessageIAError(e instanceof Error ? e.message : "Error al generar mensaje comercial");
     } finally {
-      setColdCallLoading(false);
+      setMessageIALoading(false);
     }
   }
 
-  function closeColdCall() {
-    setColdCallLead(null);
-    setColdCallResult(null);
-    setColdCallError("");
-    setColdCallLoading(false);
-    setColdCallLeadId(null);
+  function openMessageIA(lead: Lead) {
+    setCallResult(null);
+    setEmailResult(null);
+    void fetchOutreach(lead, "call");
+  }
+
+  function changeMessageIAChannel(channel: OutreachChannel) {
+    if (!messageIALead || messageIAChannel === channel) return;
+    setMessageIAChannel(channel);
+    if (channel === "call" && callResult) return;
+    if (channel === "email" && emailResult) return;
+    void fetchOutreach(messageIALead, channel);
+  }
+
+  function closeMessageIA() {
+    setMessageIALead(null);
+    setCallResult(null);
+    setEmailResult(null);
+    setMessageIAError("");
+    setMessageIALoading(false);
+    setMessageIALeadId(null);
+    setMessageIAChannel("call");
   }
 
   async function clearPortfolio() {
@@ -644,7 +671,10 @@ export default function PortafolioPage() {
               </thead>
               <tbody>
                 {leads.map((l) => (
-                  <tr key={l.id}>
+                  <tr
+                    key={l.id}
+                    className={editingNotes === l.id ? "portfolio-row--notes-editing" : undefined}
+                  >
                     <td className="portfolio-table__check">
                       <input
                         type="checkbox"
@@ -733,14 +763,16 @@ export default function PortafolioPage() {
                       )}
                     </td>
                     <td className="portfolio-table__ia">
-                      <button
-                        type="button"
-                        onClick={() => void fetchColdCall(l)}
-                        disabled={coldCallLoading && coldCallLeadId === l.id}
-                        className="btn-ia"
-                      >
-                        {coldCallLoading && coldCallLeadId === l.id ? "…" : "Mensaje IA"}
-                      </button>
+                      {editingNotes !== l.id && (
+                        <button
+                          type="button"
+                          onClick={() => openMessageIA(l)}
+                          disabled={messageIALoading && messageIALeadId === l.id}
+                          className="btn-ia"
+                        >
+                          {messageIALoading && messageIALeadId === l.id ? "…" : "Mensaje IA"}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -762,13 +794,16 @@ export default function PortafolioPage() {
         )}
       </main>
 
-      <ColdCallPanel
-        lead={coldCallLead}
-        loading={coldCallLoading}
-        error={coldCallError}
-        result={coldCallResult}
-        onClose={closeColdCall}
-        onRetry={() => coldCallLead && void fetchColdCall(coldCallLead)}
+      <MessageIAPanel
+        lead={messageIALead}
+        activeChannel={messageIAChannel}
+        loading={messageIALoading}
+        error={messageIAError}
+        callResult={callResult}
+        emailResult={emailResult}
+        onClose={closeMessageIA}
+        onChannelChange={changeMessageIAChannel}
+        onRetry={() => messageIALead && void fetchOutreach(messageIALead, messageIAChannel)}
       />
     </div>
   );
