@@ -7,6 +7,7 @@ import type {
   MessageDirection,
   WhatsAppMessage,
 } from "./types";
+import { isLeadStatus } from "./types";
 
 const LEADS_PAGE_SIZE = 20;
 const LEADS_EXPORT_MAX = 10_000;
@@ -81,6 +82,21 @@ export async function initDb() {
   `;
   await sql`
     ALTER TABLE leads ADD COLUMN IF NOT EXISTS mistral_conversation_id TEXT
+  `;
+  await sql`
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_status TEXT NOT NULL DEFAULT 'Nuevo'
+  `;
+  await sql`
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS whatsapp_status TEXT NOT NULL DEFAULT 'No iniciado'
+  `;
+  await sql`
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS notas TEXT
+  `;
+  await sql`
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS fuente_busqueda TEXT
+  `;
+  await sql`
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   `;
   await sql`
     CREATE TABLE IF NOT EXISTS whatsapp_messages (
@@ -222,6 +238,7 @@ export async function saveLeads(
       continue;
     }
 
+    // En re-guardados desde prospección se conservan lead_status, notas y whatsapp_status.
     const rows = await sql`
       INSERT INTO leads (
         apollo_id, nombre, cargo, empresa, email, telefono,
@@ -316,14 +333,49 @@ export async function getApolloProspeccionCredits() {
   };
 }
 
-export async function updateLeadStatus(id: number, status: LeadStatus) {
+export async function updateLeadStatus(id: number, status: LeadStatus): Promise<Lead> {
+  if (!isLeadStatus(status)) {
+    throw new Error(`Estado de lead no válido: ${String(status)}`);
+  }
+
   const sql = getSql();
-  await sql`UPDATE leads SET lead_status = ${status}, updated_at = NOW() WHERE id = ${id}`;
+  const leadId = Number(id);
+  if (!Number.isFinite(leadId) || leadId <= 0) {
+    throw new Error("ID de contacto no válido");
+  }
+
+  const rows = (await sql`
+    UPDATE leads
+    SET lead_status = ${status}, updated_at = NOW()
+    WHERE id = ${leadId}
+    RETURNING *
+  `) as Lead[];
+
+  const lead = rows[0];
+  if (!lead) {
+    throw new Error("Contacto no encontrado");
+  }
+  return lead;
 }
 
-export async function updateLeadNotes(id: number, notas: string) {
+export async function updateLeadNotes(id: number, notas: string): Promise<Lead> {
   const sql = getSql();
-  await sql`UPDATE leads SET notas = ${notas}, updated_at = NOW() WHERE id = ${id}`;
+  const leadId = Number(id);
+  if (!Number.isFinite(leadId) || leadId <= 0) {
+    throw new Error("ID de contacto no válido");
+  }
+
+  const rows = (await sql`
+    UPDATE leads SET notas = ${notas}, updated_at = NOW()
+    WHERE id = ${leadId}
+    RETURNING *
+  `) as Lead[];
+
+  const lead = rows[0];
+  if (!lead) {
+    throw new Error("Contacto no encontrado");
+  }
+  return lead;
 }
 
 export async function deleteLead(id: number) {

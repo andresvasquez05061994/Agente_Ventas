@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deleteLead, ensureDb, updateLeadNotes, updateLeadStatus } from "@/lib/db";
-import type { LeadStatus } from "@/lib/types";
+import { isLeadStatus } from "@/lib/types";
+
+export const dynamic = "force-dynamic";
 
 export async function PATCH(
   req: NextRequest,
@@ -9,13 +11,31 @@ export async function PATCH(
   try {
     await ensureDb();
     const { id } = await params;
-    const body = await req.json();
-    if (body.lead_status) await updateLeadStatus(Number(id), body.lead_status as LeadStatus);
-    if (body.notas !== undefined) await updateLeadNotes(Number(id), body.notas);
-    return NextResponse.json({ ok: true });
+    const leadId = Number(id);
+    if (!Number.isFinite(leadId) || leadId <= 0) {
+      return NextResponse.json({ error: "ID de contacto no válido" }, { status: 400 });
+    }
+
+    const body = (await req.json()) as Record<string, unknown>;
+
+    if (body.lead_status !== undefined && body.lead_status !== null) {
+      if (!isLeadStatus(body.lead_status)) {
+        return NextResponse.json({ error: "Estado de lead no válido" }, { status: 400 });
+      }
+      const lead = await updateLeadStatus(leadId, body.lead_status);
+      return NextResponse.json({ ok: true, lead });
+    }
+
+    if (body.notas !== undefined) {
+      const lead = await updateLeadNotes(leadId, String(body.notas ?? ""));
+      return NextResponse.json({ ok: true, lead });
+    }
+
+    return NextResponse.json({ error: "Nada que actualizar" }, { status: 400 });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error al actualizar";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    const status = msg.includes("no encontrado") ? 404 : 500;
+    return NextResponse.json({ error: msg }, { status });
   }
 }
 

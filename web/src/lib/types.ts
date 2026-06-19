@@ -4,6 +4,17 @@ export type LeadStatus =
   | "Aprobado para contacto"
   | "Descartado";
 
+export const LEAD_STATUSES: LeadStatus[] = [
+  "Nuevo",
+  "En revisión",
+  "Aprobado para contacto",
+  "Descartado",
+];
+
+export function isLeadStatus(value: unknown): value is LeadStatus {
+  return typeof value === "string" && (LEAD_STATUSES as string[]).includes(value);
+}
+
 export type WhatsAppStatus =
   | "No iniciado"
   | "Pendiente"

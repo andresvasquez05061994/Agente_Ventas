@@ -184,6 +184,7 @@ export default function PortafolioPage() {
   const [messageIALoading, setMessageIALoading] = useState(false);
   const [messageIAError, setMessageIAError] = useState("");
   const [messageIALeadId, setMessageIALeadId] = useState<number | null>(null);
+  const [statusSavingId, setStatusSavingId] = useState<number | null>(null);
 
   const pendingSearch = search !== debouncedSearch;
   const showLoading = loading || pendingSearch;
@@ -208,7 +209,7 @@ export default function PortafolioPage() {
   useEffect(() => {
     let cancelled = false;
 
-    fetch(`/api/leads?${buildLeadsQuery(page)}`)
+    fetch(`/api/leads?${buildLeadsQuery(page)}`, { cache: "no-store" })
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;
@@ -235,27 +236,37 @@ export default function PortafolioPage() {
 
   async function updateStatus(id: number, lead_status: LeadStatus) {
     const prev = leads;
-    setLeads((list) => list.map((l) => (l.id === id ? { ...l, lead_status } : l)));
+    setStatusSavingId(id);
+    setLeads((list) =>
+      list.map((l) => (Number(l.id) === id ? { ...l, lead_status } : l))
+    );
     try {
       const res = await fetch(`/api/leads/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lead_status }),
+        cache: "no-store",
       });
-      if (!res.ok) {
+      const data = await res.json();
+      if (!res.ok || !data.lead) {
         setLeads(prev);
-        const data = await res.json();
         showError(data.error ?? "Error al actualizar estado", "Estado no actualizado");
-      } else {
-        showSuccess(`Contacto marcado como «${lead_status}».`, "Estado actualizado");
-        if (status !== "Todos" && lead_status !== status) {
-          setLeads((list) => list.filter((l) => l.id !== id));
-          setTotal((t) => Math.max(0, t - 1));
-        }
+        return;
+      }
+
+      const saved = data.lead as Lead;
+      setLeads((list) => list.map((l) => (Number(l.id) === id ? saved : l)));
+      showSuccess(`Contacto marcado como «${saved.lead_status}».`, "Estado actualizado");
+
+      if (status !== "Todos" && saved.lead_status !== status) {
+        setLeads((list) => list.filter((l) => Number(l.id) !== id));
+        setTotal((t) => Math.max(0, t - 1));
       }
     } catch {
       setLeads(prev);
       showError("Error de red al actualizar estado", "Estado no actualizado");
+    } finally {
+      setStatusSavingId(null);
     }
   }
 
@@ -275,21 +286,28 @@ export default function PortafolioPage() {
 
     try {
       const results = await Promise.all(
-        ids.map((id) =>
-          fetch(`/api/leads/${id}`, {
+        ids.map(async (id) => {
+          const res = await fetch(`/api/leads/${id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ lead_status: bulkStatus }),
-          })
-        )
+            cache: "no-store",
+          });
+          const data = await res.json();
+          return { id, ok: res.ok && Boolean(data.lead), lead: data.lead as Lead | undefined };
+        })
       );
       const failed = results.some((r) => !r.ok);
       if (failed) {
         setLeads(prev);
         showError("Error al actualizar el estado de uno o más contactos.", "Cambio masivo fallido");
       } else {
+        const savedById = new Map(results.map((r) => [r.id, r.lead!]));
+        setLeads((list) =>
+          list.map((l) => savedById.get(Number(l.id)) ?? l)
+        );
         if (status !== "Todos" && bulkStatus !== status) {
-          setLeads((list) => list.filter((l) => !selected.has(l.id)));
+          setLeads((list) => list.filter((l) => !selected.has(Number(l.id))));
           setTotal((t) => Math.max(0, t - ids.length));
         }
         showSuccess(
@@ -315,19 +333,23 @@ export default function PortafolioPage() {
     setSavingNotes(true);
     const prev = leads;
     setLeads((list) =>
-      list.map((l) => (l.id === id ? { ...l, notas: notesDraft.trim() || null } : l))
+      list.map((l) => (Number(l.id) === id ? { ...l, notas: notesDraft.trim() || null } : l))
     );
     try {
       const res = await fetch(`/api/leads/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notas: notesDraft.trim() || null }),
+        cache: "no-store",
       });
-      if (!res.ok) {
+      const data = await res.json();
+      if (!res.ok || !data.lead) {
         setLeads(prev);
-        const data = await res.json();
         showError(data.error ?? "Error al guardar notas", "Notas no guardadas");
       } else {
+        setLeads((list) =>
+          list.map((l) => (Number(l.id) === id ? (data.lead as Lead) : l))
+        );
         setEditingNotes(null);
         showSuccess("Las notas del contacto se guardaron correctamente.", "Notas guardadas");
       }
@@ -715,7 +737,8 @@ export default function PortafolioPage() {
                         className="portfolio-status-select"
                         value={l.lead_status}
                         title={l.lead_status}
-                        onChange={(e) => updateStatus(l.id, e.target.value as LeadStatus)}
+                        disabled={statusSavingId === Number(l.id)}
+                        onChange={(e) => updateStatus(Number(l.id), e.target.value as LeadStatus)}
                       >
                         {STATUSES.map((s) => (
                           <option key={s} value={s}>
