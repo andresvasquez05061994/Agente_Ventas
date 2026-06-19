@@ -78,7 +78,9 @@ export function MessageIAPanel({
   onChannelChange,
   onRetry,
 }: MessageIAPanelProps) {
-  const [copied, setCopied] = useState(false);
+  const copyContextKey = `${activeChannel}:${callResult?.headline ?? ""}:${emailResult?.headline ?? ""}`;
+  const [copiedForKey, setCopiedForKey] = useState<string | null>(null);
+  const copied = copiedForKey === copyContextKey;
 
   useEffect(() => {
     if (!lead) return;
@@ -93,10 +95,6 @@ export function MessageIAPanel({
     };
   }, [lead, onClose]);
 
-  useEffect(() => {
-    setCopied(false);
-  }, [activeChannel, callResult, emailResult]);
-
   if (!lead) return null;
 
   const result = activeChannel === "email" ? emailResult : callResult;
@@ -108,8 +106,8 @@ export function MessageIAPanel({
     } else if (callResult) {
       copyCallScript(callResult, lead!);
     }
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
+    setCopiedForKey(copyContextKey);
+    window.setTimeout(() => setCopiedForKey(null), 2000);
   }
 
   return (

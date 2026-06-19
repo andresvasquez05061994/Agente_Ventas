@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test:apollo": "node scripts/test-apollo-integration.mjs",
     "test:smart-search": "node scripts/test-smart-search.mjs",
-    "test:mistral": "node scripts/test-mistral-production.mjs"
+    "test:mistral": "node scripts/test-mistral-production.mjs",
+    "test:platform": "node scripts/test-platform.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
