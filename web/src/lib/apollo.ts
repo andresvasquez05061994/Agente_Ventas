@@ -1,11 +1,16 @@
 import type { ApolloPerson } from "./types";
 import type { ValidatedSearchRequest } from "./apollo-filters";
-import { getIndustrySearchStrategies, organizationMatches } from "./apollo-filters";
+import {
+  getIndustrySearchStrategies,
+  organizationMatches,
+  personMatchesCountry,
+} from "./apollo-filters";
 import {
   enrichPeopleWithContacts,
   isApolloWebhookConfigured,
+  resolveApolloPersonId,
 } from "./apollo-enrich";
-import { recordProspeccionCredits } from "./db";
+import { getPortfolioApolloIds, recordProspeccionCredits } from "./db";
 
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
@@ -45,6 +50,10 @@ function buildSearchPayload(
 
   if (input.organization_name) {
     payload.q_organization_name = input.organization_name;
+  }
+
+  if (input.organization_num_employees_ranges.length) {
+    payload.organization_num_employees_ranges = input.organization_num_employees_ranges;
   }
 
   if (industryOverride) {
@@ -130,13 +139,17 @@ async function fetchSearchPage(
 
 export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
   const target = input.per_page;
+  const countryFilter = input.person_locations[0] ?? "";
   const companyFilter = input.organization_name?.trim() ?? "";
+  const portfolioIds = await getPortfolioApolloIds();
   const collected: ApolloPerson[] = [];
   const seen = new Set<string>();
   let totalEntries = 0;
   let lastPage = input.page;
   let scanned = 0;
   let companyRejected = 0;
+  let countryRejected = 0;
+  let portfolioSkipped = 0;
   let industryRelaxed = false;
   const started = Date.now();
   let enrichStats = {
@@ -149,11 +162,11 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
     match_errors: [] as string[],
   };
 
-  const maxScan = maxProfilesToScan(target);
+  const maxScan = maxProfilesToScan(target) + (portfolioIds.size > 0 ? 30 : 0);
 
   for (
     let page = input.page;
-    page < input.page + 10 && collected.length < target && scanned < maxScan;
+    page < input.page + 12 && collected.length < target && scanned < maxScan;
     page++
   ) {
     if (Date.now() - started > TIME_BUDGET_MS) break;
@@ -168,7 +181,41 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
 
     if (!raw.length) break;
 
-    const enriched = await enrichPeopleWithContacts(raw);
+    const freshRaw: Record<string, unknown>[] = [];
+    for (const person of raw) {
+      const id = resolveApolloPersonId(person);
+      if (id && portfolioIds.has(id)) {
+        portfolioSkipped++;
+        continue;
+      }
+      if (countryFilter && !personMatchesCountry(person, countryFilter)) {
+        countryRejected++;
+        continue;
+      }
+      freshRaw.push(person);
+    }
+
+    const rawById = new Map<string, Record<string, unknown>>();
+    for (const person of freshRaw) {
+      const id = resolveApolloPersonId(person);
+      if (id) rawById.set(id, person);
+    }
+
+    const enriched =
+      freshRaw.length > 0
+        ? await enrichPeopleWithContacts(freshRaw)
+        : {
+            results: [],
+            stats: {
+              candidates: 0,
+              matched: 0,
+              with_email: 0,
+              with_phone: 0,
+              with_both: 0,
+              credits_consumed: 0,
+              match_errors: [] as string[],
+            },
+          };
     enrichStats = {
       candidates: enrichStats.candidates + enriched.stats.candidates,
       matched: enrichStats.matched + enriched.stats.matched,
@@ -185,6 +232,13 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       if (collected.length >= target) break;
       if (seen.has(person.apollo_id)) continue;
       if (!person.email || !person.telefono) continue;
+      if (
+        countryFilter &&
+        !personMatchesCountry(rawById.get(person.apollo_id) ?? {}, countryFilter)
+      ) {
+        countryRejected++;
+        continue;
+      }
       if (companyFilter && !organizationMatches(person.empresa, companyFilter)) {
         companyRejected++;
         continue;
@@ -223,6 +277,11 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       industry_relaxed: industryRelaxed,
       organization_name: input.organization_name || undefined,
       company_rejected: companyFilter ? companyRejected : undefined,
+      country_rejected: countryFilter ? countryRejected : undefined,
+      portfolio_skipped: portfolioSkipped || undefined,
+      employee_ranges: input.organization_num_employees_ranges.length
+        ? input.organization_num_employees_ranges
+        : undefined,
       apollo_zero_results: totalEntries === 0 && scanned === 0,
       webhook_configured: isApolloWebhookConfigured(),
       match_errors: enrichStats.match_errors,

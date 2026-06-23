@@ -135,12 +135,27 @@ export const APOLLO_SENIORITIES = [
 
 export const APOLLO_PER_PAGE_OPTIONS = [5, 10, 15, 20, 25] as const;
 
+/** Rangos de empleados Apollo (min,max sin espacios). */
+export const APOLLO_EMPLOYEE_RANGES = [
+  { label: "Cualquier tamaño", value: "" },
+  { label: "Micro / pequeña (1-50)", value: "1,50" },
+  { label: "Mediana (51-200)", value: "51,200" },
+  { label: "Mediana (51-500)", value: "51,500" },
+  { label: "Grande (501-5.000)", value: "501,5000" },
+  { label: "Enterprise (5.000+)", value: "5001,10000" },
+] as const;
+
+const ALLOWED_EMPLOYEE_RANGE_VALUES = new Set<string>(
+  APOLLO_EMPLOYEE_RANGES.map((r) => r.value).filter(Boolean)
+);
+
 export const DEFAULT_SEARCH = {
   country: "Colombia",
   titles: ["IT Director"] as string[],
   keyword: "",
   seniority: "",
   company: "",
+  employeeRanges: [] as string[],
   perPage: 10,
 };
 
@@ -154,8 +169,107 @@ export interface ValidatedSearchRequest {
   person_seniorities: string[];
   q_keywords: string;
   organization_name: string;
+  organization_num_employees_ranges: string[];
   page: number;
   per_page: number;
+}
+
+const COUNTRY_LOCATION_ALIASES: Record<string, string[]> = {
+  Colombia: ["colombia", "bogota", "bogotá", "medellin", "medellín", "cali", "barranquilla", "cartagena"],
+  Mexico: ["mexico", "méxico", "cdmx", "guadalajara", "monterrey", "ciudad de mexico"],
+  Brazil: ["brazil", "brasil", "sao paulo", "são paulo", "rio de janeiro"],
+  Argentina: ["argentina", "buenos aires", "córdoba", "cordoba"],
+  Chile: ["chile", "santiago"],
+  Peru: ["peru", "perú", "lima"],
+  Ecuador: ["ecuador", "quito", "guayaquil"],
+  Panama: ["panama", "panamá", "ciudad de panama"],
+  "United States": ["united states", "usa", "u.s.", "new york", "california", "texas"],
+  Spain: ["spain", "españa", "espana", "madrid", "barcelona"],
+};
+
+function normalizeLocationText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function collectPersonLocationText(raw: Record<string, unknown>): string {
+  const org = raw.organization as Record<string, unknown> | undefined;
+  const parts = [
+    raw.country,
+    raw.city,
+    raw.state,
+    raw.present_raw_address,
+    raw.formatted_address,
+    org?.country,
+    org?.raw_address,
+    org?.city,
+    org?.state,
+    typeof raw.pais === "string" ? raw.pais : null,
+  ];
+  return normalizeLocationText(parts.filter(Boolean).map(String).join(" "));
+}
+
+/** ¿El perfil está en el país solicitado? Filtro estricto post-Apollo. */
+export function personMatchesCountry(
+  raw: Record<string, unknown>,
+  countryValue: string
+): boolean {
+  const text = collectPersonLocationText(raw);
+  if (!text) return false;
+
+  const targetAliases = COUNTRY_LOCATION_ALIASES[countryValue] ?? [
+    normalizeLocationText(countryValue),
+  ];
+  const matchesTarget = targetAliases.some(
+    (alias) => alias.length >= 3 && text.includes(alias)
+  );
+  return matchesTarget;
+}
+
+export function normalizeEmployeeRanges(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw.map(String) : raw ? [String(raw)] : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of list) {
+    const v = item.trim();
+    if (!v || !ALLOWED_EMPLOYEE_RANGE_VALUES.has(v) || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
+}
+
+export function inferEmployeeRangesFromText(text: string): string[] {
+  const q = text.toLowerCase();
+  if (
+    q.includes("mediana") ||
+    q.includes("medianas") ||
+    q.includes("mid-market") ||
+    q.includes("mid market")
+  ) {
+    return q.includes("pequeña") || q.includes("pequeñas") ? ["11,200"] : ["51,500"];
+  }
+  if (
+    q.includes("pequeña") ||
+    q.includes("pequeñas") ||
+    q.includes("pyme") ||
+    q.includes("startup")
+  ) {
+    return ["1,50"];
+  }
+  if (
+    q.includes("grande") ||
+    q.includes("grandes") ||
+    q.includes("enterprise") ||
+    q.includes("corporativ")
+  ) {
+    return ["501,5000"];
+  }
+  return [];
 }
 
 export function validateSearchRequest(body: Record<string, unknown>): ValidatedSearchRequest {
@@ -205,12 +319,17 @@ export function validateSearchRequest(body: Record<string, unknown>): ValidatedS
     throw new Error("Nombre de empresa con caracteres no permitidos.");
   }
 
+  const employeeRanges = normalizeEmployeeRanges(
+    body.organization_num_employees_ranges ?? body.employee_ranges ?? body.employeeRanges
+  );
+
   return {
     person_locations: [country],
     person_titles: titles,
     person_seniorities: seniority ? [seniority] : [],
     q_keywords: keyword,
     organization_name: company,
+    organization_num_employees_ranges: employeeRanges,
     page,
     per_page: perPage,
   };
@@ -253,6 +372,8 @@ export interface SearchEmptyMeta {
   webhook_configured?: boolean;
   organization_name?: string;
   company_rejected?: number;
+  country_rejected?: number;
+  portfolio_skipped?: number;
   match_errors?: string[];
   enrich_stats?: {
     candidates?: number;
@@ -316,6 +437,20 @@ export function explainEmptySearchMessage(
       "Apollo no tiene perfiles para esta combinación (país + cargos + industria" +
       (meta.organization_name ? " + empresa" : "") +
       "). Prueba «Todas las industrias», otro nombre de empresa o menos cargos."
+    );
+  }
+
+  if ((meta.portfolio_skipped ?? 0) > 0 && scanned === 0) {
+    return (
+      `Los perfiles encontrados ya están en tu portafolio (${meta.portfolio_skipped} omitidos). ` +
+      "No se gastaron créditos en duplicados. Amplía cargos o cambia filtros para contactos nuevos."
+    );
+  }
+
+  if ((meta.country_rejected ?? 0) > 0 && scanned > 0 && (stats?.with_both ?? 0) === 0) {
+    return (
+      `Apollo devolvió perfiles fuera del país solicitado (${meta.country_rejected} descartados por ubicación). ` +
+      "Verifica que el país en filtros sea el correcto."
     );
   }
 

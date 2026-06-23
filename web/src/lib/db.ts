@@ -118,6 +118,15 @@ export async function initDb() {
   `;
 }
 
+export async function getPortfolioApolloIds(): Promise<Set<string>> {
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT apollo_id FROM leads
+    WHERE apollo_id IS NOT NULL AND TRIM(apollo_id) <> ''
+  `) as Array<{ apollo_id: string }>;
+  return new Set(rows.map((r) => String(r.apollo_id).trim()).filter(Boolean));
+}
+
 export async function searchDistinctCompanies(
   query: string,
   limit = 6
@@ -204,7 +213,7 @@ export async function getLeads(
         OR (${contact} = 'Con email' AND email IS NOT NULL AND email <> '')
         OR (${contact} = 'Sin email' AND (email IS NULL OR email = ''))
       )
-    ORDER BY created_at DESC
+    ORDER BY created_at ASC, id ASC
     LIMIT ${perPage}
     OFFSET ${offset}
   `) as Lead[];
@@ -238,15 +247,15 @@ export async function saveLeads(
       continue;
     }
 
-    // En re-guardados desde prospección se conservan lead_status, notas y whatsapp_status.
+    // En re-guardados desde prospección se conservan lead_status, notas, whatsapp_status y created_at.
     const rows = await sql`
       INSERT INTO leads (
         apollo_id, nombre, cargo, empresa, email, telefono,
-        pais, linkedin_url, lead_status, fuente_busqueda
+        pais, linkedin_url, lead_status, fuente_busqueda, created_at, updated_at
       ) VALUES (
         ${lead.apollo_id}, ${lead.nombre}, ${lead.cargo}, ${lead.empresa},
         ${email}, ${telefono}, ${lead.pais}, ${lead.linkedin_url},
-        'Nuevo', ${fuente}
+        'Nuevo', ${fuente}, NOW(), NOW()
       )
       ON CONFLICT (apollo_id) DO UPDATE SET
         nombre = EXCLUDED.nombre,

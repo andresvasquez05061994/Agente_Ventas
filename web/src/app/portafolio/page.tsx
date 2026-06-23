@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { Lead, LeadStatus } from "@/lib/types";
 import { EmptyState, FieldLabel, PageSubtitle, SectionLabel, ActionBanner, FeedbackAnchor } from "@/components/ui";
 import { MessageIAPanel } from "@/components/MessageIAPanel";
@@ -158,6 +159,16 @@ function PortfolioFilters({
 }
 
 export default function PortafolioPage() {
+  return (
+    <Suspense fallback={<p className="text-body mt-8 p-5 lg:p-7">Cargando portafolio…</p>}>
+      <PortafolioContent />
+    </Suspense>
+  );
+}
+
+function PortafolioContent() {
+  const searchParams = useSearchParams();
+  const openLastPage = searchParams.get("page") === "last";
   const [leads, setLeads] = useState<Lead[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -215,6 +226,10 @@ export default function PortafolioPage() {
         if (cancelled) return;
         if (data.error) showError(data.error, "Error al cargar");
         else {
+          if (openLastPage && data.totalPages && page !== data.totalPages) {
+            setPage(data.totalPages);
+            return;
+          }
           setLeads(data.leads ?? []);
           setTotal(data.total ?? 0);
           setTotalPages(data.totalPages ?? 1);
@@ -232,7 +247,7 @@ export default function PortafolioPage() {
     return () => {
       cancelled = true;
     };
-  }, [status, debouncedSearch, contact, page]);
+  }, [status, debouncedSearch, contact, page, openLastPage]);
 
   async function updateStatus(id: number, lead_status: LeadStatus) {
     const prev = leads;
@@ -605,7 +620,7 @@ export default function PortafolioPage() {
         </div>
         <PageSubtitle>
           {total > 0
-            ? `${total.toLocaleString("es-CO")} contacto(s) guardados · ${PER_PAGE} por página. Cada uno incluye email y teléfono verificados.`
+            ? `${total.toLocaleString("es-CO")} contacto(s) guardados · ${PER_PAGE} por página. Orden: del más antiguo al más reciente (los nuevos al final).`
             : "Cada contacto guardado incluye email y teléfono verificados en la prospección."}
         </PageSubtitle>
 

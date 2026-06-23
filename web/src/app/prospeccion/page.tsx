@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { ApolloPerson } from "@/lib/types";
 import type { SmartSearchFilters, SmartSearchResult } from "@/lib/smart-search";
@@ -20,15 +21,18 @@ type SearchParams = {
   keyword: string;
   seniority: string;
   company: string;
+  employeeRanges: string[];
   perPage: number;
 };
 
 export default function ProspeccionPage() {
+  const router = useRouter();
   const [country, setCountry] = useState(DEFAULT_SEARCH.country);
   const [company, setCompany] = useState(DEFAULT_SEARCH.company);
   const [titles, setTitles] = useState<string[]>(DEFAULT_SEARCH.titles);
   const [keyword, setKeyword] = useState(DEFAULT_SEARCH.keyword);
   const [seniority, setSeniority] = useState(DEFAULT_SEARCH.seniority);
+  const [employeeRanges, setEmployeeRanges] = useState<string[]>(DEFAULT_SEARCH.employeeRanges);
   const [perPage, setPerPage] = useState(DEFAULT_SEARCH.perPage);
 
   const [results, setResults] = useState<ApolloPerson[]>([]);
@@ -45,6 +49,9 @@ export default function ProspeccionPage() {
     organization_name?: string;
     industry_relaxed?: boolean;
     credits_consumed?: number;
+    portfolio_skipped?: number;
+    country_rejected?: number;
+    employee_ranges?: string[];
     enrich_stats?: {
       candidates?: number;
       matched?: number;
@@ -66,6 +73,7 @@ export default function ProspeccionPage() {
     setTitles(filters.titles);
     setKeyword(filters.keyword);
     setSeniority(filters.seniority);
+    setEmployeeRanges(filters.employeeRanges ?? []);
     setPerPage(filters.perPage);
   }
 
@@ -76,6 +84,7 @@ export default function ProspeccionPage() {
       keyword: overrides?.keyword ?? keyword,
       seniority: overrides?.seniority ?? seniority,
       company: overrides?.company ?? company,
+      employeeRanges: overrides?.employeeRanges ?? employeeRanges,
       perPage: overrides?.perPage ?? perPage,
     };
 
@@ -91,6 +100,7 @@ export default function ProspeccionPage() {
       setTitles(params.titles);
       setKeyword(params.keyword);
       setSeniority(params.seniority);
+      setEmployeeRanges(params.employeeRanges);
       setPerPage(params.perPage);
     }
 
@@ -108,6 +118,7 @@ export default function ProspeccionPage() {
           keyword: params.keyword,
           seniority: params.seniority,
           company: params.company.trim() || undefined,
+          employee_ranges: params.employeeRanges.length ? params.employeeRanges : undefined,
           per_page: params.perPage,
         }),
       });
@@ -135,10 +146,18 @@ export default function ProspeccionPage() {
           ? " Industria ampliada con término alternativo en Apollo."
           : "";
         const org = params.company.trim() ? ` Empresa: ${params.company.trim()}.` : "";
+        const skipped = data.meta?.portfolio_skipped
+          ? ` ${data.meta.portfolio_skipped} perfil(es) ya en portafolio omitidos (sin gastar créditos).`
+          : "";
+        const countryFiltered = data.meta?.country_rejected
+          ? ` ${data.meta.country_rejected} descartados por ubicación distinta a ${params.country}.`
+          : "";
         showSuccess(
           `${list.length} contacto(s) con email y teléfono · ${data.meta?.total_entries ?? 0} coincidencias en Apollo` +
             (credits > 0 ? ` · ${credits} crédito(s) usados` : "") +
             org +
+            skipped +
+            countryFiltered +
             relaxed,
           "Búsqueda completada"
         );
@@ -211,10 +230,13 @@ export default function ProspeccionPage() {
         if (data.updated) parts.push(`${data.updated} actualizado(s)`);
         if (data.skipped) parts.push(`${data.skipped} omitido(s)`);
         showSuccess(
-          `${parts.join(", ")} con email y teléfono verificados. Puedes revisarlos en Portafolio.`,
+          `${parts.join(", ")} con email y teléfono verificados. Se añadieron al final del portafolio.`,
           "Guardado en portafolio"
         );
         setSelected(new Set());
+        if (data.inserted > 0) {
+          router.push("/portafolio?page=last");
+        }
       }
     } catch {
       showError("Error de red al guardar. Intenta de nuevo.", "No se guardó en portafolio");

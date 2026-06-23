@@ -1,10 +1,13 @@
 import {
   APOLLO_COUNTRIES,
+  APOLLO_EMPLOYEE_RANGES,
   APOLLO_KEYWORDS,
   APOLLO_PER_PAGE_OPTIONS,
   APOLLO_PRESET_JOB_TITLES,
   APOLLO_SENIORITIES,
   DEFAULT_SEARCH,
+  inferEmployeeRangesFromText,
+  normalizeEmployeeRanges,
   normalizeJobTitles,
 } from "./apollo-filters";
 
@@ -14,8 +17,11 @@ export type SmartSearchFilters = {
   keyword: string;
   seniority: string;
   company: string;
+  employeeRanges: string[];
   perPage: number;
 };
+
+const MAX_SMART_TITLES = 6;
 
 export type SmartSearchResult = {
   filters: SmartSearchFilters;
@@ -48,6 +54,10 @@ const FILTER_CATALOG = {
   jobTitles: APOLLO_PRESET_JOB_TITLES.map((t) => ({ label: t.label, value: t.value })),
   industries: APOLLO_KEYWORDS.map((k) => ({ label: k.label, value: k.value })),
   seniorities: APOLLO_SENIORITIES.map((s) => ({ label: s.label, value: s.value })),
+  employeeRanges: APOLLO_EMPLOYEE_RANGES.filter((r) => r.value).map((r) => ({
+    label: r.label,
+    value: r.value,
+  })),
   perPageOptions: [...APOLLO_PER_PAGE_OPTIONS],
 };
 
@@ -68,6 +78,22 @@ function pickCountry(raw: string | undefined): string {
     (c) => c.label.toLowerCase() === norm || c.label.toLowerCase().includes(norm)
   );
   return byLabel?.value ?? DEFAULT_SEARCH.country;
+}
+
+/** Si el usuario menciona un país en la consulta, tiene prioridad sobre la IA. */
+function enforceCountryFromQuery(country: string, userQuery: string): string {
+  const q = userQuery.toLowerCase();
+  if (q.includes("colombian") || q.includes(" en colombia") || q.endsWith("colombia")) {
+    return "Colombia";
+  }
+  for (const c of APOLLO_COUNTRIES) {
+    const label = c.label.toLowerCase();
+    const value = c.value.toLowerCase();
+    if (q.includes(label) || q.includes(value)) {
+      return c.value;
+    }
+  }
+  return country;
 }
 
 function pickKeyword(raw: string | undefined): string {
@@ -153,8 +179,23 @@ export function mapTitlesFromSuggestions(suggestions: string[]): string[] {
       matched.add("Chief Operating Officer");
       continue;
     }
-    if (norm.includes("innovaci")) {
+    if (norm.includes("transformaci") && norm.includes("digital")) {
+      matched.add("Director of Digital Transformation");
+      matched.add("Chief Digital Officer");
       matched.add("Director of Innovation");
+      matched.add("CTO");
+      continue;
+    }
+    if (norm.includes("formaci") || norm.includes("capacit") || norm.includes("entrenamiento")) {
+      matched.add("Director of Talent");
+      matched.add("Human Resources Director");
+      matched.add("Chief Human Resources Officer");
+      matched.add("Director of Innovation");
+      continue;
+    }
+    if (norm.includes("lider") || norm.includes("líder") || norm.includes("leader")) {
+      matched.add("Director of Innovation");
+      matched.add("IT Director");
       continue;
     }
     if (
@@ -197,18 +238,46 @@ export function mapTitlesFromSuggestions(suggestions: string[]): string[] {
   return [...matched];
 }
 
+/** Prioriza cargos más alineados con la consulta y limita cantidad para Apollo. */
+export function rankAndLimitTitles(titles: string[], userQuery: string): string[] {
+  const q = userQuery.toLowerCase();
+  const unique = normalizeJobTitles(titles);
+  const scoreTitle = (title: string): number => {
+    const t = title.toLowerCase();
+    let score = 0;
+    if (q.includes("ia") || q.includes("inteligencia artificial")) {
+      if (t.includes("artificial intelligence") || t.includes("data science") || t === "cto") score += 5;
+    }
+    if (q.includes("automatiz") && t.includes("automation")) score += 5;
+    if (q.includes("transformaci") && t.includes("digital")) score += 6;
+    if (q.includes("formaci") || q.includes("talento") || q.includes("rrhh")) {
+      if (t.includes("human resources") || t.includes("talent")) score += 5;
+    }
+    if (q.includes("demanda") || q.includes("inventario")) {
+      if (t.includes("demand") || t.includes("supply")) score += 5;
+    }
+    if (q.includes("director") && t.includes("director")) score += 2;
+    if (q.includes("tecnolog") && (t.includes("technology") || t.includes("it "))) score += 3;
+    return score;
+  };
+
+  return [...unique]
+    .sort((a, b) => scoreTitle(b) - scoreTitle(a))
+    .slice(0, MAX_SMART_TITLES);
+}
+
 /** Combina mapeo por reglas con cargos libres válidos para Apollo. */
 export function coerceJobTitles(suggestions: string[], fallbackQuery?: string): string[] {
   const mapped = mapTitlesFromSuggestions(suggestions);
   const merged = normalizeJobTitles([...mapped, ...suggestions]);
-  if (merged.length) return merged;
+  const base = merged.length ? merged : [];
 
   const fromQuery = fallbackQuery
     ? normalizeJobTitles([...mapTitlesFromSuggestions([fallbackQuery]), fallbackQuery])
     : [];
-  if (fromQuery.length) return fromQuery;
 
-  return [...DEFAULT_SEARCH.titles];
+  const combined = base.length ? base : fromQuery.length ? fromQuery : [...DEFAULT_SEARCH.titles];
+  return fallbackQuery ? rankAndLimitTitles(combined, fallbackQuery) : combined.slice(0, MAX_SMART_TITLES);
 }
 
 function sanitizeCompany(raw: string | undefined): string {
@@ -229,6 +298,22 @@ function parseMistralJsonContent(content: string): Record<string, unknown> {
   }
 }
 
+function inferSeniorityFromQuery(query: string): string {
+  const q = query.toLowerCase();
+  if (q.includes("c-suite") || q.includes("c suite") || q.includes("ejecutiv")) return "c_suite";
+  if (q.includes("vp ") || q.includes("vicepresident")) return "vp";
+  if (q.includes("director") || q.includes("líder") || q.includes("lider")) return "director";
+  if (q.includes("gerente") || q.includes("manager")) return "manager";
+  if (q.includes("head ")) return "head";
+  return "";
+}
+
+function pickEmployeeRanges(raw: unknown, userQuery: string): string[] {
+  const fromAi = normalizeEmployeeRanges(raw);
+  if (fromAi.length) return fromAi;
+  return inferEmployeeRangesFromText(userQuery);
+}
+
 function buildFiltersFromParsed(
   parsed: Record<string, unknown>,
   userQuery: string,
@@ -241,19 +326,30 @@ function buildFiltersFromParsed(
       : [];
   const titles = coerceJobTitles(rawTitles, userQuery);
 
+  const seniorityFromAi = pickSeniority(String(parsed.seniority ?? ""));
+  const seniority = seniorityFromAi || inferSeniorityFromQuery(userQuery);
+  const employeeRanges = pickEmployeeRanges(
+    parsed.employee_ranges ?? parsed.employeeRanges,
+    userQuery
+  );
+
   const filters: SmartSearchFilters = {
-    country: pickCountry(String(parsed.country ?? "")),
+    country: enforceCountryFromQuery(pickCountry(String(parsed.country ?? "")), userQuery),
     titles,
     keyword: pickKeyword(String(parsed.keyword ?? "")),
-    seniority: pickSeniority(String(parsed.seniority ?? "")),
+    seniority,
     company: sanitizeCompany(String(parsed.company ?? "")),
+    employeeRanges,
     perPage: pickPerPage(parsed.per_page),
   };
 
   const aiSummary = String(parsed.summary ?? "").trim();
+  const sizeLabel = employeeRanges.length
+    ? APOLLO_EMPLOYEE_RANGES.find((r) => r.value === employeeRanges[0])?.label ?? employeeRanges[0]
+    : null;
   const summary = aiSummary
-    ? `Mistral IA: ${aiSummary}`
-    : `Mistral IA · ${filters.country} · ${filters.titles.join(", ")}${filters.company ? ` · ${filters.company}` : ""}`;
+    ? `Mistral IA: ${aiSummary}${sizeLabel ? ` · Tamaño: ${sizeLabel}` : ""}`
+    : `Mistral IA · ${filters.country} · ${filters.titles.join(", ")}${filters.company ? ` · ${filters.company}` : ""}${sizeLabel ? ` · ${sizeLabel}` : ""}`;
 
   return { filters, summary, source: "mistral", model };
 }
@@ -263,23 +359,23 @@ export function buildSmartSearchPrompt(userQuery: string): string {
 Analiza la intención y devuelve SOLO un JSON válido (sin markdown) con esta forma exacta:
 {
   "country": "valor exacto de país de la lista",
-  "titles": ["uno o más cargos: valor exacto de jobTitles o título libre válido en inglés"],
+  "titles": ["máximo 6 cargos más relevantes: valor exacto de jobTitles o título libre en inglés"],
   "keyword": "valor exacto de industria o cadena vacía",
   "seniority": "valor exacto de seniority o cadena vacía",
   "company": "nombre de empresa si la menciona, o cadena vacía",
+  "employee_ranges": ["uno o más rangos value de employeeRanges, o array vacío"],
   "per_page": número entre 5 y 25,
   "summary": "frase breve en español explicando qué buscará Apollo"
 }
 
 Reglas estrictas:
-- country, keyword y seniority deben ser valores "value" EXACTOS de las listas (copia literal).
-- titles: usa valores de jobTitles cuando aplique; si no hay coincidencia, un título libre en inglés válido para Apollo (ej. "Warehouse Manager").
+- country, keyword, seniority y employee_ranges[].value deben ser valores "value" EXACTOS de las listas (copia literal).
+- Si el usuario pide un país específico (ej. Colombia), country DEBE ser ese país. Nunca otro.
+- Si menciona "empresas medianas" → employee_ranges: ["51,500"]. Pequeñas → ["1,50"]. Grandes → ["501,5000"].
+- titles: máximo 6 cargos, los más alineados con la instrucción (no listes todos los cargos posibles).
+- Si habla de transformación digital, IA, automatización o formación de equipos → incluye cargos coherentes (CTO, Director of Innovation, Director of AI, HR/Talent si aplica).
+- Si menciona "líderes" o "directores" → seniority: "director" (o "c_suite" si es ejecutivo).
 - Si no menciona país → "Colombia".
-- Si no menciona industria → "".
-- Si no menciona seniority → "".
-- titles: mínimo 1 cargo; infiere el más cercano si el usuario habla en lenguaje natural.
-- Si menciona empresa (ej. Bancolombia, Éxito, Sura) → company con ese nombre.
-- per_page por defecto 10.
 
 Listas permitidas:
 ${JSON.stringify(FILTER_CATALOG, null, 2)}
@@ -454,13 +550,16 @@ function ruleBasedInterpret(userQuery: string): SmartSearchResult {
   }
 
   const titles = coerceJobTitles(titleHints.length ? titleHints : [userQuery], userQuery);
+  const employeeRanges = inferEmployeeRangesFromText(userQuery);
+  const resolvedSeniority = inferSeniorityFromQuery(userQuery) || seniority;
 
   const parts = [
     country,
     titles.join(", "),
     keyword || "todas las industrias",
     company ? `empresa ${company}` : null,
-    seniority || null,
+    resolvedSeniority || null,
+    employeeRanges.length ? `tamaño ${employeeRanges.join(",")}` : null,
   ].filter(Boolean);
 
   return {
@@ -468,8 +567,9 @@ function ruleBasedInterpret(userQuery: string): SmartSearchResult {
       country,
       titles,
       keyword,
-      seniority,
+      seniority: resolvedSeniority,
       company,
+      employeeRanges,
       perPage: DEFAULT_SEARCH.perPage,
     },
     summary: `Modo básico (sin IA): ${parts.join(" · ")}.`,
@@ -504,6 +604,7 @@ export function normalizeSmartFilters(raw: Partial<SmartSearchFilters>): SmartSe
     keyword: pickKeyword(raw.keyword),
     seniority: pickSeniority(raw.seniority),
     company: sanitizeCompany(raw.company),
+    employeeRanges: normalizeEmployeeRanges(raw.employeeRanges),
     perPage: pickPerPage(raw.perPage),
   };
 }
