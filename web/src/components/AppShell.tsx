@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useMounted } from "@/hooks/use-mounted";
+import { ProspeccionSessionProvider } from "@/contexts/prospeccion-session";
 
 const NAV = [
   { href: "/resumen", label: "Resumen" },
@@ -71,7 +72,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div
         className={`mx-auto flex w-full flex-1 gap-0 px-0 ${isWide ? "max-w-none" : "max-w-[1400px] lg:px-2"}`}
       >
-        {children}
+        <ProspeccionSessionProvider>{children}</ProspeccionSessionProvider>
       </div>
     </div>
   );

@@ -2,18 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { ApolloPerson } from "@/lib/types";
-import type { SmartSearchFilters, SmartSearchResult } from "@/lib/smart-search";
+import type { SmartSearchResult } from "@/lib/smart-search";
 import { ApolloSearchFilters } from "@/components/ApolloSearchFilters";
 import { SmartSearchPanel } from "@/components/SmartSearchPanel";
 import { ActionBanner, FeedbackAnchor } from "@/components/ui";
+import { useProspeccionSession } from "@/contexts/prospeccion-session";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
-import {
-  DEFAULT_SEARCH,
-  explainEmptySearchMessage,
-} from "@/lib/apollo-filters";
-
-type SearchStatus = "idle" | "loading" | "success" | "empty" | "error";
+import { explainEmptySearchMessage } from "@/lib/apollo-filters";
 
 type SearchParams = {
   country: string;
@@ -27,54 +22,41 @@ type SearchParams = {
 
 export default function ProspeccionPage() {
   const router = useRouter();
-  const [country, setCountry] = useState(DEFAULT_SEARCH.country);
-  const [company, setCompany] = useState(DEFAULT_SEARCH.company);
-  const [titles, setTitles] = useState<string[]>(DEFAULT_SEARCH.titles);
-  const [keyword, setKeyword] = useState(DEFAULT_SEARCH.keyword);
-  const [seniority, setSeniority] = useState(DEFAULT_SEARCH.seniority);
-  const [employeeRanges, setEmployeeRanges] = useState<string[]>(DEFAULT_SEARCH.employeeRanges);
-  const [perPage, setPerPage] = useState(DEFAULT_SEARCH.perPage);
+  const session = useProspeccionSession();
+  const {
+    country,
+    company,
+    titles,
+    keyword,
+    seniority,
+    employeeRanges,
+    perPage,
+    results,
+    selected,
+    status,
+    meta,
+    setCountry,
+    setCompany,
+    setTitles,
+    setKeyword,
+    setSeniority,
+    setPerPage,
+    setResults,
+    setSelectedIds,
+    setStatus,
+    setMeta,
+    toggleSelected,
+    selectAllResults,
+    removeResultsByIds,
+    clearSession,
+    applyFilters,
+  } = session;
 
-  const [results, setResults] = useState<ApolloPerson[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [status, setStatus] = useState<SearchStatus>("idle");
   const [saving, setSaving] = useState(false);
   const { feedback, showSuccess, showError, showWarning, showInfo, clear } = useActionFeedback();
-  const [meta, setMeta] = useState<{
-    total_entries: number;
-    with_contact_data?: number;
-    scanned_profiles?: number;
-    apollo_zero_results?: boolean;
-    webhook_configured?: boolean;
-    organization_name?: string;
-    industry_relaxed?: boolean;
-    credits_consumed?: number;
-    portfolio_skipped?: number;
-    country_rejected?: number;
-    employee_ranges?: string[];
-    enrich_stats?: {
-      candidates?: number;
-      matched?: number;
-      with_email?: number;
-      with_phone?: number;
-      with_both?: number;
-    };
-  } | null>(null);
 
   function toggleTitle(value: string) {
-    setTitles((prev) =>
-      prev.includes(value) ? prev.filter((t) => t !== value) : [...prev, value]
-    );
-  }
-
-  function applyFilters(filters: SmartSearchFilters) {
-    setCountry(filters.country);
-    setCompany(filters.company);
-    setTitles(filters.titles);
-    setKeyword(filters.keyword);
-    setSeniority(filters.seniority);
-    setEmployeeRanges(filters.employeeRanges ?? []);
-    setPerPage(filters.perPage);
+    setTitles(titles.includes(value) ? titles.filter((t) => t !== value) : [...titles, value]);
   }
 
   async function search(overrides?: Partial<SearchParams>) {
@@ -100,13 +82,11 @@ export default function ProspeccionPage() {
       setTitles(params.titles);
       setKeyword(params.keyword);
       setSeniority(params.seniority);
-      setEmployeeRanges(params.employeeRanges);
       setPerPage(params.perPage);
     }
 
     setStatus("loading");
     clear();
-    setResults([]);
 
     try {
       const res = await fetch("/api/apollo/search", {
@@ -128,10 +108,10 @@ export default function ProspeccionPage() {
         throw new Error(data.error ?? `Error del servidor (${res.status})`);
       }
 
-      const list: ApolloPerson[] = data.results ?? [];
+      const list = data.results ?? [];
       setResults(list);
       setMeta(data.meta ?? null);
-      setSelected(new Set());
+      setSelectedIds([]);
 
       if (list.length === 0) {
         setStatus("empty");
@@ -176,17 +156,6 @@ export default function ProspeccionPage() {
     await search(result.filters);
   }
 
-  function toggle(id: string) {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelected(next);
-  }
-
-  function selectAll() {
-    setSelected(new Set(results.map((r) => r.apollo_id)));
-  }
-
   async function save() {
     const toSave = results.filter((r) => selected.has(r.apollo_id));
     if (!toSave.length) {
@@ -203,13 +172,7 @@ export default function ProspeccionPage() {
       return;
     }
 
-    const fuente = [
-      country,
-      company.trim() || null,
-      titles.join(", "),
-      keyword || null,
-      seniority || null,
-    ]
+    const fuente = [country, company.trim() || null, titles.join(", "), keyword || null, seniority || null]
       .filter(Boolean)
       .join(" | ");
 
@@ -226,6 +189,9 @@ export default function ProspeccionPage() {
       if (data.error) {
         showError(data.error, "No se guardó en portafolio");
       } else {
+        const savedIds = toSave.map((r) => r.apollo_id);
+        removeResultsByIds(savedIds);
+
         const parts = [`${data.inserted} nuevo(s)`];
         if (data.updated) parts.push(`${data.updated} actualizado(s)`);
         if (data.skipped) parts.push(`${data.skipped} omitido(s)`);
@@ -233,7 +199,6 @@ export default function ProspeccionPage() {
           `${parts.join(", ")} con email y teléfono verificados. Se añadieron al final del portafolio.`,
           "Guardado en portafolio"
         );
-        setSelected(new Set());
         if (data.inserted > 0) {
           router.push("/portafolio?page=last");
         }
@@ -243,6 +208,12 @@ export default function ProspeccionPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function dismissResults() {
+    clearSession();
+    clear();
+    showInfo("Se eliminaron los resultados de la búsqueda actual.", "Búsqueda limpiada");
   }
 
   const filterProps = {
@@ -264,6 +235,7 @@ export default function ProspeccionPage() {
   };
 
   const busy = status === "loading" || saving;
+  const hasResults = results.length > 0;
 
   return (
     <div className="flex w-full flex-1">
@@ -273,8 +245,13 @@ export default function ProspeccionPage() {
       </aside>
 
       <main className="min-w-0 flex-1 p-5 lg:p-7">
-        <div className="page-header">
+        <div className="page-header flex flex-wrap items-center justify-between gap-3">
           <h1 className="page-title">Prospección</h1>
+          {hasResults && status !== "loading" && (
+            <button type="button" onClick={dismissResults} className="btn-secondary" disabled={busy}>
+              Limpiar resultados
+            </button>
+          )}
         </div>
 
         <div className="mt-4 lg:hidden">
@@ -299,7 +276,7 @@ export default function ProspeccionPage() {
           </div>
         )}
 
-        {status === "idle" && !feedback && (
+        {status === "idle" && !hasResults && !feedback && (
           <div className="mt-10 flex min-h-[240px] flex-col items-center justify-center text-center">
             <p className="text-body-strong mb-2">Listo para buscar</p>
             <p className="text-caption max-w-md">
@@ -309,13 +286,15 @@ export default function ProspeccionPage() {
           </div>
         )}
 
-        {results.length > 0 && status !== "loading" && (
+        {hasResults && status !== "loading" && (
           <>
             <div className="text-body mt-4 flex flex-wrap items-center gap-2">
               <span>{meta?.total_entries ?? results.length} en Apollo</span>
               <span className="text-[#C8D0D8]">·</span>
+              <span>{results.length} en esta sesión</span>
+              <span className="text-[#C8D0D8]">·</span>
               <span>{selected.size} seleccionados</span>
-              <button type="button" onClick={selectAll} className="btn-link" disabled={busy}>
+              <button type="button" onClick={selectAllResults} className="btn-link" disabled={busy}>
                 Seleccionar todos
               </button>
             </div>
@@ -338,7 +317,7 @@ export default function ProspeccionPage() {
                         <input
                           type="checkbox"
                           checked={selected.has(r.apollo_id)}
-                          onChange={() => toggle(r.apollo_id)}
+                          onChange={() => toggleSelected(r.apollo_id)}
                           disabled={busy}
                         />
                       </td>
