@@ -188,10 +188,6 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
         portfolioSkipped++;
         continue;
       }
-      if (countryFilter && !personMatchesCountry(person, countryFilter)) {
-        countryRejected++;
-        continue;
-      }
       freshRaw.push(person);
     }
 

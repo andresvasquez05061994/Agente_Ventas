@@ -175,35 +175,70 @@ export interface ValidatedSearchRequest {
 }
 
 const COUNTRY_LOCATION_ALIASES: Record<string, string[]> = {
-  Colombia: ["colombia", "bogota", "bogotá", "medellin", "medellín", "cali", "barranquilla", "cartagena"],
+  Colombia: [
+    "colombia",
+    "bogota",
+    "bogotá",
+    "medellin",
+    "medellín",
+    "barranquilla",
+    "cartagena",
+    "antioquia",
+    "cundinamarca",
+    "santander",
+    "valle del cauca",
+    "bucaramanga",
+    "pereira",
+    "manizales",
+    "cali",
+  ],
   Mexico: ["mexico", "méxico", "cdmx", "guadalajara", "monterrey", "ciudad de mexico"],
   Brazil: ["brazil", "brasil", "sao paulo", "são paulo", "rio de janeiro"],
   Argentina: ["argentina", "buenos aires", "córdoba", "cordoba"],
-  Chile: ["chile", "santiago"],
-  Peru: ["peru", "perú", "lima"],
+  Chile: ["chile", "santiago de chile", "santiago, chile"],
+  Peru: ["peru", "perú", "lima, peru", "lima peru"],
   Ecuador: ["ecuador", "quito", "guayaquil"],
   Panama: ["panama", "panamá", "ciudad de panama"],
-  "United States": ["united states", "usa", "u.s.", "new york", "california", "texas"],
+  "United States": ["united states", "usa", "u.s.a", "new york", "california", "texas"],
   Spain: ["spain", "españa", "espana", "madrid", "barcelona"],
 };
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function textIncludesAlias(text: string, alias: string): boolean {
+  const normalized = alias.trim();
+  if (!normalized) return false;
+  if (normalized.length <= 4 || normalized.includes(" ")) {
+    return new RegExp(`\\b${escapeRegex(normalized)}\\b`, "i").test(text);
+  }
+  return text.includes(normalized);
+}
+
 function normalizeLocationText(value: string): string {
-  return value
+  return ` ${value
     .toLowerCase()
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()} `;
 }
 
 function collectPersonLocationText(raw: Record<string, unknown>): string {
   const org = raw.organization as Record<string, unknown> | undefined;
+  const personLocations = Array.isArray(raw.person_locations)
+    ? raw.person_locations.map(String)
+    : [];
   const parts = [
     raw.country,
     raw.city,
     raw.state,
     raw.present_raw_address,
     raw.formatted_address,
+    raw.person_location,
+    raw.location,
+    ...personLocations,
     org?.country,
     org?.raw_address,
     org?.city,
@@ -213,21 +248,33 @@ function collectPersonLocationText(raw: Record<string, unknown>): string {
   return normalizeLocationText(parts.filter(Boolean).map(String).join(" "));
 }
 
-/** ¿El perfil está en el país solicitado? Filtro estricto post-Apollo. */
+function countryAliases(countryValue: string): string[] {
+  return COUNTRY_LOCATION_ALIASES[countryValue] ?? [normalizeLocationText(countryValue).trim()];
+}
+
+function textIndicatesCountry(text: string, countryValue: string): boolean {
+  return countryAliases(countryValue).some((alias) => textIncludesAlias(text, alias.trim()));
+}
+
+/**
+ * Apollo ya filtra con person_locations. Solo descartamos si hay señal clara de OTRO país.
+ * Sin datos de ubicación en el perfil → se acepta (confianza en Apollo).
+ */
 export function personMatchesCountry(
   raw: Record<string, unknown>,
   countryValue: string
 ): boolean {
   const text = collectPersonLocationText(raw);
-  if (!text) return false;
+  if (!text.trim()) return true;
 
-  const targetAliases = COUNTRY_LOCATION_ALIASES[countryValue] ?? [
-    normalizeLocationText(countryValue),
-  ];
-  const matchesTarget = targetAliases.some(
-    (alias) => alias.length >= 3 && text.includes(alias)
-  );
-  return matchesTarget;
+  if (textIndicatesCountry(text, countryValue)) return true;
+
+  for (const country of APOLLO_COUNTRIES) {
+    if (country.value === countryValue) continue;
+    if (textIndicatesCountry(text, country.value)) return false;
+  }
+
+  return true;
 }
 
 export function normalizeEmployeeRanges(raw: unknown): string[] {
@@ -449,8 +496,8 @@ export function explainEmptySearchMessage(
 
   if ((meta.country_rejected ?? 0) > 0 && scanned > 0 && (stats?.with_both ?? 0) === 0) {
     return (
-      `Apollo devolvió perfiles fuera del país solicitado (${meta.country_rejected} descartados por ubicación). ` +
-      "Verifica que el país en filtros sea el correcto."
+      `Se encontraron perfiles con ubicación en otro país (${meta.country_rejected} descartados). ` +
+      "Ajusta el país en los filtros o amplía los cargos."
     );
   }
 

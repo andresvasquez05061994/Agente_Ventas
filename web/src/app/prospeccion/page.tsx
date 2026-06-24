@@ -129,9 +129,10 @@ export default function ProspeccionPage() {
         const skipped = data.meta?.portfolio_skipped
           ? ` ${data.meta.portfolio_skipped} perfil(es) ya en portafolio omitidos (sin gastar créditos).`
           : "";
-        const countryFiltered = data.meta?.country_rejected
-          ? ` ${data.meta.country_rejected} descartados por ubicación distinta a ${params.country}.`
-          : "";
+        const countryFiltered =
+          data.meta?.country_rejected && data.meta.country_rejected > 0
+            ? ` ${data.meta.country_rejected} descartados por ubicación en otro país.`
+            : "";
         showSuccess(
           `${list.length} contacto(s) con email y teléfono · ${data.meta?.total_entries ?? 0} coincidencias en Apollo` +
             (credits > 0 ? ` · ${credits} crédito(s) usados` : "") +
