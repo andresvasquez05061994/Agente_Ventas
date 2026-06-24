@@ -261,6 +261,129 @@ function countCompleteContacts(
   return complete;
 }
 
+function emptyEnrichStats(): EnrichStats {
+  return {
+    candidates: 0,
+    matched: 0,
+    with_email: 0,
+    with_phone: 0,
+    with_both: 0,
+    credits_consumed: 0,
+    match_errors: [],
+  };
+}
+
+/** Enriquece un solo perfil (email + teléfono). Evita gastar créditos en lotes innecesarios. */
+export async function enrichSinglePersonWithContacts(
+  raw: Record<string, unknown>,
+  options?: { deadlineMs?: number }
+): Promise<{ person: ApolloPerson | null; stats: EnrichStats }> {
+  if (!isContactableInSearch(raw)) {
+    const person = normalizePerson(raw);
+    const complete = Boolean(person.email && person.telefono);
+    return {
+      person: complete ? person : null,
+      stats: emptyEnrichStats(),
+    };
+  }
+
+  const id = resolveApolloPersonId(raw);
+  let merged: Record<string, unknown> = { ...raw };
+  let creditsConsumed = 0;
+  let apiMatched = 0;
+  const matchErrors: string[] = [];
+
+  const cachedPhones = await getPhoneCache([id]);
+  const cachedPhone = cachedPhones.get(id);
+  if (cachedPhone) {
+    merged = { ...merged, id, sanitized_phone: cachedPhone };
+  }
+
+  const cachedComplete = normalizePerson(merged);
+  if (cachedComplete.email && cachedComplete.telefono) {
+    return {
+      person: cachedComplete,
+      stats: {
+        candidates: 1,
+        matched: 0,
+        with_email: 1,
+        with_phone: 1,
+        with_both: 1,
+        credits_consumed: 0,
+        match_errors: [],
+      },
+    };
+  }
+
+  if (!hasTimeLeft(options?.deadlineMs)) {
+    return { person: null, stats: emptyEnrichStats() };
+  }
+
+  const detail = buildMatchDetail(raw);
+  if (!detail) {
+    return { person: null, stats: emptyEnrichStats() };
+  }
+
+  if (!extractEmail(merged)) {
+    const { byId, credits, error } = await bulkMatchPeople([detail], {
+      revealEmail: true,
+      revealPhone: false,
+    });
+    creditsConsumed += credits;
+    if (error) matchErrors.push(error);
+    const matched = byId.get(id);
+    if (matched) {
+      merged = { ...merged, ...matched };
+      apiMatched = 1;
+    }
+  }
+
+  if (
+    extractEmail(merged) &&
+    !extractPhone(merged) &&
+    hasTimeLeft(options?.deadlineMs)
+  ) {
+    if (webhookBaseUrl()) {
+      const phoneDetail = buildMatchDetail(merged);
+      if (phoneDetail) {
+        const { credits, error } = await bulkMatchPeople([phoneDetail], {
+          revealEmail: false,
+          revealPhone: true,
+        });
+        creditsConsumed += credits;
+        if (error) matchErrors.push(error);
+
+        const pollBudget = options?.deadlineMs
+          ? Math.max(800, Math.min(PHONE_POLL_MAX_MS, options.deadlineMs - Date.now()))
+          : PHONE_POLL_MAX_MS;
+        const polled = await pollPhones([id], pollBudget);
+        const phone = polled.get(id);
+        if (phone) merged = { ...merged, sanitized_phone: phone };
+      }
+    } else {
+      matchErrors.push("Webhook no configurado para revelar teléfonos móviles");
+    }
+  }
+
+  const person = normalizePerson(merged);
+  const withEmail = person.email ? 1 : 0;
+  const withPhone = person.telefono ? 1 : 0;
+  const withBoth = person.email && person.telefono ? 1 : 0;
+
+  return {
+    person: withBoth ? person : null,
+    stats: {
+      candidates: 1,
+      matched: apiMatched,
+      with_email: withEmail,
+      with_phone: withPhone,
+      with_both: withBoth,
+      credits_consumed: creditsConsumed,
+      match_errors: [...new Set(matchErrors)],
+    },
+  };
+}
+
 export async function enrichPeopleWithContacts(
   rawPeople: Record<string, unknown>[],
   options?: EnrichOptions

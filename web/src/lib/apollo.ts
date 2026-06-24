@@ -6,9 +6,11 @@ import {
   personMatchesCountry,
 } from "./apollo-filters";
 import {
-  enrichPeopleWithContacts,
+  enrichSinglePersonWithContacts,
   isApolloWebhookConfigured,
+  isContactableInSearch,
   resolveApolloPersonId,
+  type EnrichStats,
 } from "./apollo-enrich";
 import { getPortfolioApolloIds, recordProspeccionCredits } from "./db";
 
@@ -17,12 +19,20 @@ const BASE_URL =
 const SEARCH_URL = `${BASE_URL}/mixed_people/api_search`;
 const TIME_BUDGET_MS = 48000;
 
-function maxProfilesToScan(target: number) {
-  return Math.min(30, Math.max(target * 3, 12));
+function maxEnrichAttempts(target: number): number {
+  return Math.min(35, Math.max(target + 5, target * 3));
 }
 
-function enrichBatchSize(stillNeed: number, available: number): number {
-  return Math.min(available, Math.min(15, Math.max(stillNeed + 2, stillNeed * 3)));
+function mergeEnrichStats(acc: EnrichStats, next: EnrichStats): EnrichStats {
+  return {
+    candidates: acc.candidates + next.candidates,
+    matched: acc.matched + next.matched,
+    with_email: acc.with_email + next.with_email,
+    with_phone: acc.with_phone + next.with_phone,
+    with_both: acc.with_both + next.with_both,
+    credits_consumed: acc.credits_consumed + next.credits_consumed,
+    match_errors: [...new Set([...acc.match_errors, ...next.match_errors])],
+  };
 }
 
 function headers() {
@@ -151,6 +161,7 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
   let totalEntries = 0;
   let lastPage = input.page;
   let scanned = 0;
+  let enrichAttempts = 0;
   let companyRejected = 0;
   let countryRejected = 0;
   let portfolioSkipped = 0;
@@ -158,21 +169,20 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
   let timedOut = false;
   const started = Date.now();
   const deadlineMs = started + TIME_BUDGET_MS;
-  let enrichStats = {
+  const enrichLimit = maxEnrichAttempts(target);
+  let enrichStats: EnrichStats = {
     candidates: 0,
     matched: 0,
     with_email: 0,
     with_phone: 0,
     with_both: 0,
     credits_consumed: 0,
-    match_errors: [] as string[],
+    match_errors: [],
   };
-
-  const maxScan = maxProfilesToScan(target) + (portfolioIds.size > 0 ? 15 : 0);
 
   for (
     let page = input.page;
-    page < input.page + 5 && collected.length < target && scanned < maxScan;
+    page < input.page + 8 && collected.length < target && enrichAttempts < enrichLimit;
     page++
   ) {
     if (Date.now() > deadlineMs) {
@@ -190,78 +200,47 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
 
     if (!raw.length) break;
 
-    const freshRaw: Record<string, unknown>[] = [];
     for (const person of raw) {
+      if (collected.length >= target) break;
+      if (enrichAttempts >= enrichLimit) break;
+      if (Date.now() > deadlineMs) {
+        timedOut = true;
+        break;
+      }
+
       const id = resolveApolloPersonId(person);
-      if (id && portfolioIds.has(id)) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+
+      if (portfolioIds.has(id)) {
         portfolioSkipped++;
         continue;
       }
-      freshRaw.push(person);
-    }
 
-    const stillNeed = target - collected.length;
-    const toEnrich = enrichBatchSize(stillNeed, freshRaw.length);
-    const enrichInput = freshRaw.slice(0, toEnrich);
+      if (!isContactableInSearch(person)) continue;
 
-    const rawById = new Map<string, Record<string, unknown>>();
-    for (const person of enrichInput) {
-      const id = resolveApolloPersonId(person);
-      if (id) rawById.set(id, person);
-    }
+      enrichAttempts++;
+      const enriched = await enrichSinglePersonWithContacts(person, { deadlineMs });
+      enrichStats = mergeEnrichStats(enrichStats, enriched.stats);
 
-    const enriched =
-      enrichInput.length > 0
-        ? await enrichPeopleWithContacts(enrichInput, {
-            maxCandidates: toEnrich,
-            targetComplete: stillNeed,
-            deadlineMs,
-          })
-        : {
-            results: [],
-            stats: {
-              candidates: 0,
-              matched: 0,
-              with_email: 0,
-              with_phone: 0,
-              with_both: 0,
-              credits_consumed: 0,
-              match_errors: [] as string[],
-            },
-          };
-    enrichStats = {
-      candidates: enrichStats.candidates + enriched.stats.candidates,
-      matched: enrichStats.matched + enriched.stats.matched,
-      with_email: enrichStats.with_email + enriched.stats.with_email,
-      with_phone: enrichStats.with_phone + enriched.stats.with_phone,
-      with_both: enrichStats.with_both + enriched.stats.with_both,
-      credits_consumed:
-        enrichStats.credits_consumed + enriched.stats.credits_consumed,
-      match_errors: [
-        ...new Set([...enrichStats.match_errors, ...enriched.stats.match_errors]),
-      ],
-    };
-    for (const person of enriched.results) {
-      if (collected.length >= target) break;
-      if (seen.has(person.apollo_id)) continue;
-      if (!person.email || !person.telefono) continue;
+      if (!enriched.person) continue;
+
       if (
         countryFilter &&
-        !personMatchesCountry(rawById.get(person.apollo_id) ?? {}, countryFilter)
+        !personMatchesCountry(person, countryFilter)
       ) {
         countryRejected++;
         continue;
       }
-      if (companyFilter && !organizationMatches(person.empresa, companyFilter)) {
+      if (companyFilter && !organizationMatches(enriched.person.empresa, companyFilter)) {
         companyRejected++;
         continue;
       }
-      seen.add(person.apollo_id);
-      collected.push(person);
+
+      collected.push(enriched.person);
     }
 
-    if (Date.now() > deadlineMs) {
-      timedOut = true;
+    if (timedOut || collected.length >= target || enrichAttempts >= enrichLimit) {
       break;
     }
 
@@ -304,6 +283,7 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       webhook_configured: isApolloWebhookConfigured(),
       match_errors: enrichStats.match_errors,
       timed_out: timedOut || undefined,
+      enrich_attempts: enrichAttempts || undefined,
     },
   };
 }
