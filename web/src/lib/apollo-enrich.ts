@@ -4,9 +4,19 @@ import { getPhoneCache, savePhoneCache } from "./db";
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
 const BULK_MATCH_URL = `${BASE_URL}/people/bulk_match`;
-const PHONE_POLL_MS = 1500;
-const PHONE_POLL_MAX_MS = 20000;
+const PHONE_POLL_MS = 1200;
+const PHONE_POLL_MAX_MS = 12000;
 const BATCH_SIZE = 10;
+
+export interface EnrichOptions {
+  maxCandidates?: number;
+  targetComplete?: number;
+  deadlineMs?: number;
+}
+
+function hasTimeLeft(deadlineMs?: number): boolean {
+  return !deadlineMs || Date.now() < deadlineMs;
+}
 
 function apiHeaders() {
   const key = process.env.APOLLO_API_KEY;
@@ -220,12 +230,12 @@ async function bulkMatchPeople(
   return { byId, credits: Number.isFinite(credits) ? credits : 0 };
 }
 
-async function pollPhones(ids: string[]): Promise<Map<string, string>> {
+async function pollPhones(ids: string[], maxMs = PHONE_POLL_MAX_MS): Promise<Map<string, string>> {
   const found = new Map<string, string>();
   const pending = new Set(ids);
   const started = Date.now();
 
-  while (pending.size > 0 && Date.now() - started < PHONE_POLL_MAX_MS) {
+  while (pending.size > 0 && Date.now() - started < maxMs) {
     await sleep(PHONE_POLL_MS);
     const cached = await getPhoneCache([...pending]);
     for (const [id, phone] of cached) {
@@ -237,12 +247,29 @@ async function pollPhones(ids: string[]): Promise<Map<string, string>> {
   return found;
 }
 
+function countCompleteContacts(
+  candidates: Record<string, unknown>[],
+  enrichedMap: Map<string, Record<string, unknown>>
+): number {
+  let complete = 0;
+  for (const raw of candidates) {
+    const id = resolveApolloPersonId(raw);
+    const merged = enrichedMap.get(id) ?? raw;
+    const person = normalizePerson(merged);
+    if (person.email && person.telefono) complete++;
+  }
+  return complete;
+}
+
 export async function enrichPeopleWithContacts(
-  rawPeople: Record<string, unknown>[]
+  rawPeople: Record<string, unknown>[],
+  options?: EnrichOptions
 ): Promise<{ results: ApolloPerson[]; stats: EnrichStats }> {
+  const maxCandidates = options?.maxCandidates ?? rawPeople.length;
   const candidates = rawPeople
     .filter(isContactableInSearch)
-    .sort((a, b) => candidateScore(b) - candidateScore(a));
+    .sort((a, b) => candidateScore(b) - candidateScore(a))
+    .slice(0, maxCandidates);
 
   const enrichedMap = new Map<string, Record<string, unknown>>();
   const rawById = new Map<string, Record<string, unknown>>();
@@ -267,6 +294,7 @@ export async function enrichPeopleWithContacts(
 
   // Fase 1: email (sin teléfono — más fiable y rápido)
   for (let i = 0; i < details.length; i += BATCH_SIZE) {
+    if (!hasTimeLeft(options?.deadlineMs)) break;
     const batch = details.slice(i, i + BATCH_SIZE);
     const { byId, credits, error } = await bulkMatchPeople(batch, {
       revealEmail: true,
@@ -277,6 +305,12 @@ export async function enrichPeopleWithContacts(
     for (const [id, person] of byId) {
       enrichedMap.set(id, { ...(rawById.get(id) ?? {}), ...person });
       apiMatched++;
+    }
+    if (
+      options?.targetComplete &&
+      countCompleteContacts(candidates, enrichedMap) >= options.targetComplete
+    ) {
+      break;
     }
   }
 
@@ -292,19 +326,32 @@ export async function enrichPeopleWithContacts(
       .filter((d): d is Record<string, unknown> => d !== null);
 
     for (let i = 0; i < phoneDetails.length; i += BATCH_SIZE) {
+      if (!hasTimeLeft(options?.deadlineMs)) break;
       const batch = phoneDetails.slice(i, i + BATCH_SIZE);
+      const batchIds = batch
+        .map((d) => String(d.id ?? ""))
+        .filter(Boolean);
       const { credits, error } = await bulkMatchPeople(batch, {
         revealEmail: false,
         revealPhone: true,
       });
       creditsConsumed += credits;
       if (error) matchErrors.push(error);
-    }
 
-    const polled = await pollPhones(needPhone);
-    for (const [id, phone] of polled) {
-      const person = enrichedMap.get(id) ?? rawById.get(id) ?? { id };
-      enrichedMap.set(id, { ...person, sanitized_phone: phone });
+      const pollBudget = options?.deadlineMs
+        ? Math.max(800, Math.min(PHONE_POLL_MAX_MS, options.deadlineMs - Date.now()))
+        : PHONE_POLL_MAX_MS;
+      const polled = await pollPhones(batchIds, pollBudget);
+      for (const [id, phone] of polled) {
+        const person = enrichedMap.get(id) ?? rawById.get(id) ?? { id };
+        enrichedMap.set(id, { ...person, sanitized_phone: phone });
+      }
+      if (
+        options?.targetComplete &&
+        countCompleteContacts(candidates, enrichedMap) >= options.targetComplete
+      ) {
+        break;
+      }
     }
   } else if (needPhone.length && !webhookBaseUrl()) {
     matchErrors.push("Webhook no configurado para revelar teléfonos móviles");

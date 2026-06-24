@@ -15,10 +15,14 @@ import { getPortfolioApolloIds, recordProspeccionCredits } from "./db";
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
 const SEARCH_URL = `${BASE_URL}/mixed_people/api_search`;
-const TIME_BUDGET_MS = 55000;
+const TIME_BUDGET_MS = 48000;
 
 function maxProfilesToScan(target: number) {
-  return Math.min(50, Math.max(target * 5, 20));
+  return Math.min(30, Math.max(target * 3, 12));
+}
+
+function enrichBatchSize(stillNeed: number, available: number): number {
+  return Math.min(available, Math.min(15, Math.max(stillNeed + 2, stillNeed * 3)));
 }
 
 function headers() {
@@ -151,7 +155,9 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
   let countryRejected = 0;
   let portfolioSkipped = 0;
   let industryRelaxed = false;
+  let timedOut = false;
   const started = Date.now();
+  const deadlineMs = started + TIME_BUDGET_MS;
   let enrichStats = {
     candidates: 0,
     matched: 0,
@@ -162,14 +168,17 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
     match_errors: [] as string[],
   };
 
-  const maxScan = maxProfilesToScan(target) + (portfolioIds.size > 0 ? 30 : 0);
+  const maxScan = maxProfilesToScan(target) + (portfolioIds.size > 0 ? 15 : 0);
 
   for (
     let page = input.page;
-    page < input.page + 12 && collected.length < target && scanned < maxScan;
+    page < input.page + 5 && collected.length < target && scanned < maxScan;
     page++
   ) {
-    if (Date.now() - started > TIME_BUDGET_MS) break;
+    if (Date.now() > deadlineMs) {
+      timedOut = true;
+      break;
+    }
 
     const { data, industry_relaxed } = await fetchSearchPage(input, page);
     if (industry_relaxed) industryRelaxed = true;
@@ -191,15 +200,23 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       freshRaw.push(person);
     }
 
+    const stillNeed = target - collected.length;
+    const toEnrich = enrichBatchSize(stillNeed, freshRaw.length);
+    const enrichInput = freshRaw.slice(0, toEnrich);
+
     const rawById = new Map<string, Record<string, unknown>>();
-    for (const person of freshRaw) {
+    for (const person of enrichInput) {
       const id = resolveApolloPersonId(person);
       if (id) rawById.set(id, person);
     }
 
     const enriched =
-      freshRaw.length > 0
-        ? await enrichPeopleWithContacts(freshRaw)
+      enrichInput.length > 0
+        ? await enrichPeopleWithContacts(enrichInput, {
+            maxCandidates: toEnrich,
+            targetComplete: stillNeed,
+            deadlineMs,
+          })
         : {
             results: [],
             stats: {
@@ -243,6 +260,11 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       collected.push(person);
     }
 
+    if (Date.now() > deadlineMs) {
+      timedOut = true;
+      break;
+    }
+
     const totalPages =
       (data.pagination as { total_pages?: number } | undefined)?.total_pages ??
       Math.ceil(totalEntries / input.per_page);
@@ -281,6 +303,7 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
       apollo_zero_results: totalEntries === 0 && scanned === 0,
       webhook_configured: isApolloWebhookConfigured(),
       match_errors: enrichStats.match_errors,
+      timed_out: timedOut || undefined,
     },
   };
 }

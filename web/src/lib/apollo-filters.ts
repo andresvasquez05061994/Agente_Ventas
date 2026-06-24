@@ -421,6 +421,7 @@ export interface SearchEmptyMeta {
   company_rejected?: number;
   country_rejected?: number;
   portfolio_skipped?: number;
+  timed_out?: boolean;
   match_errors?: string[];
   enrich_stats?: {
     candidates?: number;

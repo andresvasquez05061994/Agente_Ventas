@@ -9,6 +9,7 @@ import { ActionBanner, FeedbackAnchor } from "@/components/ui";
 import { useProspeccionSession } from "@/contexts/prospeccion-session";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { explainEmptySearchMessage } from "@/lib/apollo-filters";
+import { parseApiResponse } from "@/lib/parse-api-response";
 
 type SearchParams = {
   country: string;
@@ -103,7 +104,18 @@ export default function ProspeccionPage() {
         }),
       });
 
-      const data = await res.json();
+      const { data, error: parseError } = await parseApiResponse<{
+        results?: typeof results;
+        meta?: typeof meta;
+        error?: string;
+      }>(res);
+
+      if (parseError) {
+        throw new Error(parseError);
+      }
+      if (!data) {
+        throw new Error(`Error del servidor (${res.status})`);
+      }
       if (!res.ok || data.error) {
         throw new Error(data.error ?? `Error del servidor (${res.status})`);
       }
@@ -139,7 +151,10 @@ export default function ProspeccionPage() {
             org +
             skipped +
             countryFiltered +
-            relaxed,
+            relaxed +
+            (data.meta?.timed_out
+              ? " Tiempo límite alcanzado; muestra resultados parciales. Reduce cantidad si necesitas más."
+              : ""),
           "Búsqueda completada"
         );
       }

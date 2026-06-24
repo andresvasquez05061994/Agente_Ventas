@@ -24,6 +24,7 @@ export type ProspeccionSearchMeta = {
   credits_consumed?: number;
   portfolio_skipped?: number;
   country_rejected?: number;
+  timed_out?: boolean;
   employee_ranges?: string[];
   enrich_stats?: {
     candidates?: number;
