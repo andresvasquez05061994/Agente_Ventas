@@ -61,7 +61,7 @@ async function testStats() {
   console.log("\n3. Estadísticas");
   const { res, data } = await fetchJson("/api/stats");
   if (res.ok && typeof data?.total === "number") {
-    pass("GET /api/stats", `${data.total} contactos, ${data.approved ?? 0} aprobados`);
+    pass("GET /api/stats", `${data.total} contactos, ${data.nuevo ?? 0} nuevos`);
   } else {
     fail("GET /api/stats", JSON.stringify(data));
   }

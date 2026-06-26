@@ -285,20 +285,20 @@ export async function getStats() {
   const [row] = await sql`
     SELECT
       COUNT(*)::int AS total,
-      COUNT(*) FILTER (WHERE lead_status = 'Aprobado para contacto')::int AS approved,
+      COUNT(*) FILTER (WHERE lead_status = 'Nuevo')::int AS nuevo,
       COUNT(*) FILTER (WHERE telefono IS NOT NULL AND telefono != '')::int AS with_phone,
       COUNT(*) FILTER (WHERE email IS NOT NULL AND email != '')::int AS with_email
     FROM leads
   `;
   const r = row as {
     total: number;
-    approved: number;
+    nuevo: number;
     with_phone: number;
     with_email: number;
   };
   return {
     total: r?.total ?? 0,
-    approved: r?.approved ?? 0,
+    nuevo: r?.nuevo ?? 0,
     with_phone: r?.with_phone ?? 0,
     with_email: r?.with_email ?? 0,
   };
