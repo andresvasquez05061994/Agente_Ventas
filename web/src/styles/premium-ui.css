@@ -26,6 +26,7 @@
   --text: var(--color-text-secondary);
 
   --sidebar-width: 240px;
+  --sidebar-logo-size: 72px;
   --sidebar-collapsed: 56px;
   --content-max: 1280px;
   --radius-card: 8px;
@@ -35,6 +36,7 @@
 }
 
 .dark {
+  --sidebar-logo-size: 108px;
   --color-bg-primary: #0a0a0a;
   --color-bg-secondary: #141414;
   --color-bg-tertiary: #1c1c1c;
@@ -277,10 +279,14 @@ body {
 }
 
 .app-sidebar__logo {
-  width: 72px;
-  height: 72px;
+  width: var(--sidebar-logo-size);
+  height: var(--sidebar-logo-size);
   flex-shrink: 0;
   object-fit: contain;
+}
+
+.dark .app-sidebar__brand {
+  padding: 22px 10px;
 }
 
 .app-sidebar__logo--placeholder {
