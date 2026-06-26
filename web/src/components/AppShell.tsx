@@ -54,15 +54,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Image
               src={logoSrc}
               alt="IAC"
-              width={100}
-              height={32}
-              className="h-8 w-auto"
+              width={36}
+              height={36}
+              className="app-sidebar__logo"
               priority
             />
           ) : (
-            <div className="h-8 w-24 rounded bg-[var(--color-bg-tertiary)]" />
+            <div className="app-sidebar__logo app-sidebar__logo--placeholder" />
           )}
-          <span className="app-sidebar__subtitle">Agente Ventas B2B</span>
+          <span className="app-sidebar__tagline">Ingeniería Asistida por Computador</span>
         </Link>
 
         <nav className="app-sidebar__nav">
