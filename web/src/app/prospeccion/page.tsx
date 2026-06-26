@@ -2,7 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Building2, Copy, Mail, Phone, Search } from "lucide-react";
 import type { SmartSearchResult } from "@/lib/smart-search";
+import type { ApolloPerson } from "@/lib/types";
 import { ApolloSearchFilters } from "@/components/ApolloSearchFilters";
 import { SmartSearchPanel } from "@/components/SmartSearchPanel";
 import { ActionBanner, FeedbackAnchor } from "@/components/ui";
@@ -253,16 +255,37 @@ export default function ProspeccionPage() {
   const busy = status === "loading" || saving;
   const hasResults = results.length > 0;
 
+  function initials(name: string) {
+    return name
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((p) => p[0])
+      .join("")
+      .toUpperCase();
+  }
+
+  function copyText(text: string) {
+    void navigator.clipboard.writeText(text);
+  }
+
   return (
     <div className="flex w-full flex-1">
-      <aside className="filter-sidebar hidden w-[280px] shrink-0 border-r border-[#E2E6EA] bg-[#FAFBFC] dark:border-[#2A3544] dark:bg-[#151B23] lg:block">
+      <aside className="filter-sidebar hidden w-full max-w-[400px] shrink-0 border-r lg:block lg:w-[min(40%,400px)]">
         <SmartSearchPanel disabled={busy} onApply={handleSmartApply} />
         <ApolloSearchFilters {...filterProps} />
       </aside>
 
-      <main className="min-w-0 flex-1 p-5 lg:p-7">
+      <main className="min-w-0 flex-1 p-5 lg:p-6">
         <div className="page-header flex flex-wrap items-center justify-between gap-3">
-          <h1 className="page-title">Prospección</h1>
+          <div>
+            <h1 className="page-title">Prospección</h1>
+            <p className="text-micro mt-1">Motor de búsqueda Apollo + IA</p>
+          </div>
+          {meta?.credits_consumed != null && status !== "loading" && (
+            <span className="ui-badge ui-badge--accent">
+              ~{meta.credits_consumed} créditos usados
+            </span>
+          )}
           {hasResults && status !== "loading" && (
             <button type="button" onClick={dismissResults} className="btn-secondary" disabled={busy}>
               Limpiar resultados
@@ -282,22 +305,24 @@ export default function ProspeccionPage() {
         )}
 
         {status === "loading" && (
-          <div className="mt-10 flex flex-col items-center gap-3 text-center">
-            <div className="h-7 w-7 animate-spin rounded-full border-2 border-[#003A70] border-t-transparent dark:border-[#4A8FD4] dark:border-t-transparent" />
-            <p className="text-caption">
-              Buscando en Apollo y enriqueciendo email/teléfono…
-              <br />
-              <span className="text-micro">Puede tardar hasta 1 minuto.</span>
-            </p>
+          <div className="mt-10 flex flex-col items-center gap-4">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--color-accent)] border-t-transparent" />
+            <p className="text-caption">Buscando en Apollo…</p>
+            <div className="w-full max-w-md space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="kpi-skeleton h-20" />
+              ))}
+            </div>
           </div>
         )}
 
         {status === "idle" && !hasResults && !feedback && (
-          <div className="mt-10 flex min-h-[240px] flex-col items-center justify-center text-center">
-            <p className="text-body-strong mb-2">Listo para buscar</p>
-            <p className="text-caption max-w-md">
-              Usa búsqueda inteligente por texto o voz, indica una empresa opcional, o ajusta
-              los filtros manualmente. Solo verás contactos con email y teléfono confirmados.
+          <div className="empty-state mt-6">
+            <Search className="empty-state__icon" size={48} strokeWidth={1.5} aria-hidden />
+            <p className="empty-state__title">Configura tu búsqueda</p>
+            <p className="empty-state__desc">
+              Describe tu prospecto ideal, usa voz o ajusta filtros. Solo verás contactos con email y
+              teléfono confirmados.
             </p>
           </div>
         )}
@@ -305,53 +330,65 @@ export default function ProspeccionPage() {
         {hasResults && status !== "loading" && (
           <>
             <div className="text-body mt-4 flex flex-wrap items-center gap-2">
-              <span>{meta?.total_entries ?? results.length} en Apollo</span>
-              <span className="text-[#C8D0D8]">·</span>
-              <span>{results.length} en esta sesión</span>
-              <span className="text-[#C8D0D8]">·</span>
-              <span>{selected.size} seleccionados</span>
+              <span className="ui-badge ui-badge--neutral">{meta?.total_entries ?? results.length} en Apollo</span>
+              <span className="ui-badge ui-badge--accent">{results.length} en sesión</span>
+              <span className="ui-badge ui-badge--neutral">{selected.size} seleccionados</span>
               <button type="button" onClick={selectAllResults} className="btn-link" disabled={busy}>
                 Seleccionar todos
               </button>
             </div>
-            <div className="mt-3 overflow-x-auto rounded border border-[#E2E6EA] dark:border-[#2A3544]">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Sel.</th>
-                    <th>Nombre</th>
-                    <th>Cargo</th>
-                    <th>Empresa</th>
-                    <th>Email</th>
-                    <th>Teléfono</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.map((r) => (
-                    <tr key={r.apollo_id}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={selected.has(r.apollo_id)}
-                          onChange={() => toggleSelected(r.apollo_id)}
-                          disabled={busy}
-                        />
-                      </td>
-                      <td className="cell-strong">{r.nombre}</td>
-                      <td>{r.cargo ?? "—"}</td>
-                      <td>{r.empresa ?? "—"}</td>
-                      <td>{r.email}</td>
-                      <td>{r.telefono}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ul className="mt-4 flex flex-col gap-3">
+              {results.map((r: ApolloPerson) => (
+                <li key={r.apollo_id} className="prospect-card">
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      className="mt-2"
+                      checked={selected.has(r.apollo_id)}
+                      onChange={() => toggleSelected(r.apollo_id)}
+                      disabled={busy}
+                      aria-label={`Seleccionar ${r.nombre}`}
+                    />
+                    <div className="prospect-avatar" aria-hidden>
+                      {initials(r.nombre)}
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[16px] font-semibold text-[var(--color-text-primary)]">{r.nombre}</p>
+                    <p className="text-caption">{r.cargo ?? "—"}</p>
+                    <p className="text-caption mt-1 flex items-center gap-1.5">
+                      <Building2 size={14} strokeWidth={1.5} aria-hidden />
+                      {r.empresa ?? "—"}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-3 text-[13px]">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]"
+                        onClick={() => copyText(r.email ?? "")}
+                      >
+                        <Mail size={14} strokeWidth={1.5} aria-hidden />
+                        {r.email}
+                        <Copy size={12} strokeWidth={1.5} aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]"
+                        onClick={() => copyText(r.telefono ?? "")}
+                      >
+                        <Phone size={14} strokeWidth={1.5} aria-hidden />
+                        {r.telefono}
+                        <Copy size={12} strokeWidth={1.5} aria-hidden />
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
             <button
               type="button"
               onClick={() => void save()}
               disabled={busy || selected.size === 0}
-              className="btn-primary mt-4 disabled:opacity-60"
+              className="btn-primary mt-6 w-full sm:w-auto"
             >
               {saving
                 ? "Guardando en portafolio…"

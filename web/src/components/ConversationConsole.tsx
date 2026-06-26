@@ -28,12 +28,12 @@ function WhatsAppIcon({ className }: { className?: string }) {
 
 function LiveDot() {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-[#0D6E6E] dark:text-[#5EC4C4]">
+    <span className="inline-flex items-center gap-2 text-[11px] font-medium text-[var(--color-success)]">
       <span className="relative flex h-2 w-2">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#0D6E6E] opacity-40" />
-        <span className="relative inline-flex h-2 w-2 rounded-full bg-[#0D6E6E]" />
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-success)] opacity-40" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--color-success)]" />
       </span>
-      En vivo
+      Actualización automática
     </span>
   );
 }
@@ -176,7 +176,11 @@ export function ConversationConsole() {
 
           <div className="conv-inbox__list">
             {showListLoading && threads.length === 0 ? (
-              <p className="text-caption p-4">Cargando bandeja…</p>
+              <div className="space-y-2 p-4">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="kpi-skeleton h-16" />
+                ))}
+              </div>
             ) : threads.length === 0 ? (
               <div className="conv-empty-inbox">
                 <WhatsAppIcon className="h-10 w-10 text-[#25D366] opacity-60" />

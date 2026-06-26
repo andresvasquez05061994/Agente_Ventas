@@ -1,79 +1,111 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useTheme } from "next-themes";
-import { useMounted } from "@/hooks/use-mounted";
+import { useEffect, useState } from "react";
+import {
+  BarChart3,
+  Coins,
+  MessageSquare,
+  Plus,
+  Search,
+  Users,
+} from "lucide-react";
 import { ProspeccionSessionProvider } from "@/contexts/prospeccion-session";
 
 const NAV = [
-  { href: "/resumen", label: "Resumen" },
-  { href: "/prospeccion", label: "Prospección" },
-  { href: "/portafolio", label: "Portafolio" },
-  { href: "/conversaciones", label: "Conversaciones" },
-];
+  { href: "/resumen", label: "Resumen", icon: BarChart3 },
+  { href: "/prospeccion", label: "Prospección", icon: Search },
+  { href: "/portafolio", label: "Portafolio", icon: Users },
+  { href: "/conversaciones", label: "Conversaciones", icon: MessageSquare },
+] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { theme, setTheme } = useTheme();
-  const mounted = useMounted();
+  const [creditsMonth, setCreditsMonth] = useState<number | null>(null);
 
-  const isDark = theme === "dark";
-  const logoSrc = isDark ? "/logos/logo-iac-white.png" : "/logos/logo-iac.png";
-  const isConsole = pathname.startsWith("/conversaciones");
-  const isWide = isConsole || pathname.startsWith("/portafolio");
+  const isWide =
+    pathname.startsWith("/conversaciones") || pathname.startsWith("/portafolio");
+  const isProspeccion = pathname.startsWith("/prospeccion");
+
+  useEffect(() => {
+    fetch("/api/stats")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d.error) setCreditsMonth(d.apollo?.credits_this_month ?? 0);
+      })
+      .catch(() => {});
+  }, []);
 
   return (
-    <div className="flex min-h-screen flex-col bg-white text-[#6B7C93] dark:bg-[#0F1419] dark:text-[#B8C5D3]">
-      <header className="sticky top-0 z-50 border-b border-[#E2E6EA] bg-white dark:border-[#2A3544] dark:bg-[#0F1419]">
-        <div className="mx-auto flex h-[50px] max-w-[1400px] items-center gap-4 px-4 lg:px-6">
-          <Link href="/resumen" className="flex shrink-0 items-center gap-2.5">
-            {mounted ? (
-              <Image src={logoSrc} alt="IAC" width={100} height={32} className="h-8 w-auto" priority />
-            ) : (
-              <div className="h-8 w-20 rounded bg-[#003A70]" />
-            )}
-            <span className="hidden text-[9px] font-semibold uppercase tracking-[0.12em] text-[#8A97A8] sm:block">
-              Agente Ventas B2B
-            </span>
+    <div className="app-shell">
+      <aside className="app-sidebar" aria-label="Navegación principal">
+        <div className="app-sidebar__brand">
+          <div className="app-sidebar__logo" aria-hidden>
+            IAC
+          </div>
+          <span className="app-sidebar__title">Agente</span>
+        </div>
+
+        <nav className="app-sidebar__nav">
+          {NAV.map((item) => {
+            const active = pathname.startsWith(item.href);
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`app-nav-item${active ? " app-nav-item--active" : ""}`}
+              >
+                <Icon size={16} strokeWidth={1.5} aria-hidden />
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className="app-sidebar__footer space-y-3">
+          <Link href="/prospeccion" className="btn-primary w-full">
+            <Plus size={16} strokeWidth={1.5} aria-hidden />
+            Nueva búsqueda
           </Link>
-
-          <nav className="flex flex-1 justify-center gap-0">
-            {NAV.map((item) => {
-              const active = pathname.startsWith(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`border-b-2 px-4 py-3 text-[12px] transition-colors ${
-                    active
-                      ? "border-[#003A70] font-semibold text-[#051C2C] dark:border-[#4A8FD4] dark:text-[#E8EEF4]"
-                      : "border-transparent font-medium text-[#6B7C93] hover:text-[#051C2C] dark:hover:text-[#E8EEF4]"
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-
-          <div className="flex shrink-0 items-center gap-2">
-            <button type="button" onClick={() => setTheme(isDark ? "light" : "dark")} className="btn-secondary">
-              {mounted ? (isDark ? "Claro" : "Oscuro") : "···"}
-            </button>
-            <Link href="/prospeccion" className="btn-primary px-2.5 py-1.5">
-              Nueva búsqueda
-            </Link>
+          <div className="app-credits-pill" title="Créditos Apollo este mes">
+            <Coins size={14} strokeWidth={1.5} className="text-[var(--color-accent)]" aria-hidden />
+            <span>
+              Apollo: <strong>{creditsMonth ?? "—"}</strong> créd. / mes
+            </span>
           </div>
         </div>
-      </header>
+      </aside>
 
-      <div
-        className={`mx-auto flex w-full flex-1 gap-0 px-0 ${isWide ? "max-w-none" : "max-w-[1400px] lg:px-2"}`}
-      >
-        <ProspeccionSessionProvider>{children}</ProspeccionSessionProvider>
+      <div className={`app-main${isWide ? "" : ""}`}>
+        <div className={`${isWide || isProspeccion ? "w-full" : "app-content"}`}>
+          <ProspeccionSessionProvider>{children}</ProspeccionSessionProvider>
+        </div>
       </div>
+
+      <nav className="app-mobile-nav" aria-label="Navegación móvil">
+        {NAV.map((item) => {
+          const active = pathname.startsWith(item.href);
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`app-mobile-nav__item${active ? " app-mobile-nav__item--active" : ""}`}
+            >
+              <Icon size={20} strokeWidth={1.5} aria-hidden />
+              <span>{item.label.split(" ")[0]}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      {!pathname.startsWith("/prospeccion") && (
+        <Link href="/prospeccion" className="app-mobile-cta" aria-label="Nueva búsqueda">
+          <Plus size={22} strokeWidth={2} />
+        </Link>
+      )}
     </div>
   );
 }

@@ -638,7 +638,7 @@ function PortafolioContent() {
         </div>
 
         {selected.size > 0 && (
-          <div className="mt-4 flex flex-wrap items-center gap-2 rounded border border-[#E2E6EA] bg-[#FAFBFC] p-3 dark:border-[#2A3544] dark:bg-[#151B23]">
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3">
             <span className="text-caption">{selected.size} seleccionado(s)</span>
             <select
               className="input-field py-1"
@@ -667,7 +667,11 @@ function PortafolioContent() {
         )}
 
         {showLoading ? (
-          <p className="text-body mt-8">Cargando...</p>
+          <div className="mt-8 grid gap-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="kpi-skeleton h-12" />
+            ))}
+          </div>
         ) : total === 0 ? (
           <div className="mt-8">
             <EmptyState message="Sin contactos en el portafolio" href="/prospeccion" cta="Ir a Prospección" />

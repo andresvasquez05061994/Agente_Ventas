@@ -90,7 +90,7 @@ export function PageSubtitle({ children }: { children: React.ReactNode }) {
   return <p className="page-subtitle">{children}</p>;
 }
 
-export type KpiAccent = "blue" | "teal" | "coral" | "gray";
+export type KpiAccent = "blue" | "teal" | "coral" | "gray" | "amber";
 
 export function KpiCard({
   label,
@@ -164,11 +164,37 @@ export function SectionBlock({
 
 export function EmptyState({ message, href, cta }: { message: string; href: string; cta: string }) {
   return (
-    <div className="flex min-h-[360px] flex-col items-center justify-center text-center">
-      <p className="text-caption mb-6">{message}</p>
+    <div className="empty-state">
+      <svg
+        className="empty-state__icon"
+        width="64"
+        height="64"
+        viewBox="0 0 64 64"
+        fill="none"
+        aria-hidden
+      >
+        <rect x="8" y="12" width="48" height="40" rx="6" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M20 24h24M20 32h16M20 40h20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+      <p className="empty-state__title">Sin datos aún</p>
+      <p className="empty-state__desc">{message}</p>
       <a href={href} className="btn-primary px-6 py-2.5">
         {cta}
       </a>
+    </div>
+  );
+}
+
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <div className={`skeleton-block ${className}`.trim()} aria-hidden />;
+}
+
+export function SkeletonLines({ count = 3 }: { count?: number }) {
+  return (
+    <div className="space-y-3" aria-hidden>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="skeleton-line" style={{ width: `${100 - i * 12}%` }} />
+      ))}
     </div>
   );
 }
