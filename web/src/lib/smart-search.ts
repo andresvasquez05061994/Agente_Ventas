@@ -110,6 +110,42 @@ function pickKeyword(raw: string | undefined): string {
   return byLabel?.value ?? "";
 }
 
+/** Industria a partir del texto del usuario (flores, agro, etc.). */
+function inferKeywordFromQuery(query: string): string {
+  const q = query.toLowerCase();
+  if (
+    /flor|agro|agricol|horticult|ganader|agroindustr|cultivo|exportaci[oó]n de (flor|frut|caf[eé])/.test(
+      q
+    )
+  ) {
+    return "agriculture";
+  }
+  for (const k of APOLLO_KEYWORDS) {
+    if (!k.value) continue;
+    if (q.includes(k.label.toLowerCase()) || q.includes(k.value.toLowerCase())) {
+      return k.value;
+    }
+  }
+  return "";
+}
+
+function userMentionedCompanySize(query: string): boolean {
+  const q = query.toLowerCase();
+  return /mediana|medianas|pequeña|pequeñas|grande|grandes|enterprise|pyme|startup|empleados|tamaño|tamano|\b1-50\b|\b51-/.test(
+    q
+  );
+}
+
+function userMentionedSeniorityLevel(query: string): boolean {
+  const q = query.toLowerCase();
+  if (q.includes("decisiones") || q.includes("decisor") || q.includes("quien decide")) {
+    return false;
+  }
+  return /c-suite|c suite|vicepresident|\bvp\b|\bdirector\b|\bgerente\b|manager|head of|\bejecutiv/.test(
+    q
+  );
+}
+
 function pickSeniority(raw: string | undefined): string {
   if (!raw?.trim()) return "";
   const norm = raw.toLowerCase().trim();
@@ -131,6 +167,24 @@ function pickPerPage(raw: unknown): number {
 export function mapTitlesFromSuggestions(suggestions: string[]): string[] {
   const matched = new Set<string>();
   const tokens = suggestions.flatMap((s) => s.split(/[,;/|]+/).map((t) => t.trim())).filter(Boolean);
+  const fullText = suggestions.join(" ").toLowerCase();
+
+  if (/flor|agro|exportaci[oó]n/.test(fullText)) {
+    matched.add("General Manager");
+    matched.add("CEO");
+    matched.add("Chief Operating Officer");
+  }
+  if (/\berp\b|software a medida|sistema de gesti/.test(fullText)) {
+    matched.add("CIO");
+    matched.add("IT Director");
+    matched.add("Chief Financial Officer");
+    matched.add("General Manager");
+  }
+  if (/decision|decisor|encargad/.test(fullText)) {
+    matched.add("CEO");
+    matched.add("General Manager");
+    matched.add("Chief Operating Officer");
+  }
 
   for (const token of tokens) {
     const norm = token.toLowerCase();
@@ -222,6 +276,22 @@ export function mapTitlesFromSuggestions(suggestions: string[]): string[] {
       matched.add("Sales Director");
     }
     if (norm.includes("finanz") || norm.includes("cfo")) matched.add("Chief Financial Officer");
+    if (norm.includes("erp") || norm.includes("sistema de gesti")) {
+      matched.add("CIO");
+      matched.add("IT Director");
+      matched.add("Chief Financial Officer");
+      matched.add("General Manager");
+    }
+    if (
+      norm.includes("decision") ||
+      norm.includes("decisor") ||
+      norm.includes("encargad") ||
+      norm.includes("responsable de")
+    ) {
+      matched.add("CEO");
+      matched.add("General Manager");
+      matched.add("Chief Operating Officer");
+    }
 
     for (const t of APOLLO_PRESET_JOB_TITLES) {
       const val = t.value.toLowerCase();
@@ -258,6 +328,16 @@ export function rankAndLimitTitles(titles: string[], userQuery: string): string[
     }
     if (q.includes("director") && t.includes("director")) score += 2;
     if (q.includes("tecnolog") && (t.includes("technology") || t.includes("it "))) score += 3;
+    if (q.includes("erp") || q.includes("sistema")) {
+      if (t.includes("cio") || t.includes("it director") || t.includes("chief financial")) score += 5;
+      if (t.includes("general manager") || t === "ceo") score += 4;
+    }
+    if (q.includes("decision") || q.includes("decisor")) {
+      if (t === "ceo" || t.includes("general manager") || t.includes("operating officer")) score += 5;
+    }
+    if (q.includes("flor") || q.includes("agro") || q.includes("exportaci")) {
+      if (t.includes("general manager") || t === "ceo" || t.includes("operating officer")) score += 3;
+    }
     return score;
   };
 
@@ -300,6 +380,7 @@ function parseMistralJsonContent(content: string): Record<string, unknown> {
 
 function inferSeniorityFromQuery(query: string): string {
   const q = query.toLowerCase();
+  if (q.includes("decisiones") || q.includes("decisor")) return "";
   if (q.includes("c-suite") || q.includes("c suite") || q.includes("ejecutiv")) return "c_suite";
   if (q.includes("vp ") || q.includes("vicepresident")) return "vp";
   if (q.includes("director") || q.includes("líder") || q.includes("lider")) return "director";
@@ -309,6 +390,7 @@ function inferSeniorityFromQuery(query: string): string {
 }
 
 function pickEmployeeRanges(raw: unknown, userQuery: string): string[] {
+  if (!userMentionedCompanySize(userQuery)) return [];
   const fromAi = normalizeEmployeeRanges(raw);
   if (fromAi.length) return fromAi;
   return inferEmployeeRangesFromText(userQuery);
@@ -327,7 +409,10 @@ function buildFiltersFromParsed(
   const titles = coerceJobTitles(rawTitles, userQuery);
 
   const seniorityFromAi = pickSeniority(String(parsed.seniority ?? ""));
-  const seniority = seniorityFromAi || inferSeniorityFromQuery(userQuery);
+  const inferredSeniority = inferSeniorityFromQuery(userQuery);
+  const seniority = userMentionedSeniorityLevel(userQuery)
+    ? seniorityFromAi || inferredSeniority
+    : "";
   const employeeRanges = pickEmployeeRanges(
     parsed.employee_ranges ?? parsed.employeeRanges,
     userQuery
@@ -336,7 +421,7 @@ function buildFiltersFromParsed(
   const filters: SmartSearchFilters = {
     country: enforceCountryFromQuery(pickCountry(String(parsed.country ?? "")), userQuery),
     titles,
-    keyword: pickKeyword(String(parsed.keyword ?? "")),
+    keyword: pickKeyword(String(parsed.keyword ?? "")) || inferKeywordFromQuery(userQuery),
     seniority,
     company: sanitizeCompany(String(parsed.company ?? "")),
     employeeRanges,
@@ -371,10 +456,13 @@ Analiza la intención y devuelve SOLO un JSON válido (sin markdown) con esta fo
 Reglas estrictas:
 - country, keyword, seniority y employee_ranges[].value deben ser valores "value" EXACTOS de las listas (copia literal).
 - Si el usuario pide un país específico (ej. Colombia), country DEBE ser ese país. Nunca otro.
+- employee_ranges: SOLO si el usuario menciona explícitamente tamaño (pequeña, mediana, grande, pyme, empleados). Si no lo menciona → [].
 - Si menciona "empresas medianas" → employee_ranges: ["51,500"]. Pequeñas → ["1,50"]. Grandes → ["501,5000"].
-- titles: máximo 6 cargos, los más alineados con la instrucción (no listes todos los cargos posibles).
-- Si habla de transformación digital, IA, automatización o formación de equipos → incluye cargos coherentes (CTO, Director of Innovation, Director of AI, HR/Talent si aplica).
-- Si menciona "líderes" o "directores" → seniority: "director" (o "c_suite" si es ejecutivo).
+- seniority: SOLO si pide nivel explícito (director, gerente, C-suite, VP). "Quien toma decisiones" NO implica seniority.
+- Floricultura, agro, exportación agrícola → keyword: "agriculture".
+- titles: máximo 6 cargos alineados con la consulta (no listes todos los posibles).
+- ERP o software a medida → CIO, IT Director, CFO, General Manager o CEO según contexto.
+- Si habla de transformación digital, IA o automatización → cargos coherentes (CTO, Director of Innovation, etc.).
 - Si no menciona país → "Colombia".
 
 Listas permitidas:
@@ -550,13 +638,17 @@ function ruleBasedInterpret(userQuery: string): SmartSearchResult {
   }
 
   const titles = coerceJobTitles(titleHints.length ? titleHints : [userQuery], userQuery);
-  const employeeRanges = inferEmployeeRangesFromText(userQuery);
-  const resolvedSeniority = inferSeniorityFromQuery(userQuery) || seniority;
+  const employeeRanges = userMentionedCompanySize(userQuery)
+    ? inferEmployeeRangesFromText(userQuery)
+    : [];
+  const resolvedSeniority = userMentionedSeniorityLevel(userQuery)
+    ? inferSeniorityFromQuery(userQuery) || seniority
+    : "";
 
   const parts = [
     country,
     titles.join(", "),
-    keyword || "todas las industrias",
+    inferKeywordFromQuery(userQuery) || keyword || "todas las industrias",
     company ? `empresa ${company}` : null,
     resolvedSeniority || null,
     employeeRanges.length ? `tamaño ${employeeRanges.join(",")}` : null,
@@ -566,7 +658,7 @@ function ruleBasedInterpret(userQuery: string): SmartSearchResult {
     filters: {
       country,
       titles,
-      keyword,
+      keyword: inferKeywordFromQuery(userQuery) || keyword,
       seniority: resolvedSeniority,
       company,
       employeeRanges,

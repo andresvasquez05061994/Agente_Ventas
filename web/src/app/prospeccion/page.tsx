@@ -162,7 +162,13 @@ export default function ProspeccionPage() {
       }
     } catch (e) {
       setStatus("error");
-      showError(e instanceof Error ? e.message : "Error de búsqueda", "Búsqueda fallida");
+      const raw = e instanceof Error ? e.message : "Error de búsqueda";
+      const friendly = /failed to fetch|networkerror|load failed|network request failed/i.test(
+        raw
+      )
+        ? "La búsqueda se interrumpió (tiempo de espera o red). Prueba con 5 resultados, quita el filtro de tamaño de empresa y vuelve a ejecutar."
+        : raw;
+      showError(friendly, "Búsqueda fallida");
       setResults([]);
       setMeta(null);
     }

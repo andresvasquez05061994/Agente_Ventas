@@ -122,6 +122,11 @@ export const APOLLO_KEYWORDS = [
   { label: "Telecomunicaciones", value: "telecommunications", searchTerms: ["telecommunications", "telecom"] },
   { label: "Energía", value: "energy", searchTerms: ["energy", "oil", "utilities"] },
   { label: "Educación", value: "education", searchTerms: ["education", "university", "edtech"] },
+  {
+    label: "Agricultura / Agroexportación",
+    value: "agriculture",
+    searchTerms: ["agriculture", "agribusiness", "floral", "flowers", "horticulture", "farming", "crop"],
+  },
 ] as const;
 
 export const APOLLO_SENIORITIES = [
@@ -415,6 +420,7 @@ export function getIndustrySearchStrategies(
 export interface SearchEmptyMeta {
   scanned_profiles?: number;
   total_entries?: number;
+  employee_ranges?: string[];
   apollo_zero_results?: boolean;
   webhook_configured?: boolean;
   organization_name?: string;
@@ -481,10 +487,16 @@ export function explainEmptySearchMessage(
   }
 
   if (meta.apollo_zero_results) {
+    const sizeHint =
+      meta.employee_ranges?.length
+        ? " Quita el filtro de tamaño de empresa,"
+        : "";
     return (
       "Apollo no tiene perfiles para esta combinación (país + cargos + industria" +
       (meta.organization_name ? " + empresa" : "") +
-      "). Prueba «Todas las industrias», otro nombre de empresa o menos cargos."
+      ")." +
+      sizeHint +
+      " prueba «Todas las industrias», otro nombre de empresa o menos cargos."
     );
   }
 
