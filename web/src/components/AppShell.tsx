@@ -1,16 +1,21 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useTheme } from "next-themes";
 import {
   BarChart3,
   Coins,
   MessageSquare,
+  Moon,
   Plus,
   Search,
+  Sun,
   Users,
 } from "lucide-react";
+import { useMounted } from "@/hooks/use-mounted";
 import { ProspeccionSessionProvider } from "@/contexts/prospeccion-session";
 
 const NAV = [
@@ -22,11 +27,15 @@ const NAV = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { theme, setTheme } = useTheme();
+  const mounted = useMounted();
   const [creditsMonth, setCreditsMonth] = useState<number | null>(null);
 
+  const isDark = theme === "dark";
+  const logoSrc = isDark ? "/logos/logo-iac-white.png" : "/logos/logo-iac.png";
+  const isProspeccion = pathname.startsWith("/prospeccion");
   const isWide =
     pathname.startsWith("/conversaciones") || pathname.startsWith("/portafolio");
-  const isProspeccion = pathname.startsWith("/prospeccion");
 
   useEffect(() => {
     fetch("/api/stats")
@@ -40,12 +49,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-shell">
       <aside className="app-sidebar" aria-label="Navegación principal">
-        <div className="app-sidebar__brand">
-          <div className="app-sidebar__logo" aria-hidden>
-            IAC
-          </div>
-          <span className="app-sidebar__title">Agente</span>
-        </div>
+        <Link href="/resumen" className="app-sidebar__brand">
+          {mounted ? (
+            <Image
+              src={logoSrc}
+              alt="IAC"
+              width={100}
+              height={32}
+              className="h-8 w-auto"
+              priority
+            />
+          ) : (
+            <div className="h-8 w-24 rounded bg-[var(--color-bg-tertiary)]" />
+          )}
+          <span className="app-sidebar__subtitle">Agente Ventas B2B</span>
+        </Link>
 
         <nav className="app-sidebar__nav">
           {NAV.map((item) => {
@@ -69,8 +87,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Plus size={16} strokeWidth={1.5} aria-hidden />
             Nueva búsqueda
           </Link>
+          <button
+            type="button"
+            onClick={() => setTheme(isDark ? "light" : "dark")}
+            className="btn-secondary w-full"
+            aria-label={isDark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+          >
+            {mounted ? (
+              isDark ? (
+                <Sun size={16} strokeWidth={1.5} aria-hidden />
+              ) : (
+                <Moon size={16} strokeWidth={1.5} aria-hidden />
+              )
+            ) : null}
+            {mounted ? (isDark ? "Modo claro" : "Modo oscuro") : "···"}
+          </button>
           <div className="app-credits-pill" title="Créditos Apollo este mes">
-            <Coins size={14} strokeWidth={1.5} className="text-[var(--color-accent)]" aria-hidden />
+            <Coins
+              size={14}
+              strokeWidth={1.5}
+              className="text-[var(--color-accent)]"
+              aria-hidden
+            />
             <span>
               Apollo: <strong>{creditsMonth ?? "—"}</strong> créd. / mes
             </span>
@@ -78,7 +116,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      <div className={`app-main${isWide ? "" : ""}`}>
+      <div className="app-main">
         <div className={`${isWide || isProspeccion ? "w-full" : "app-content"}`}>
           <ProspeccionSessionProvider>{children}</ProspeccionSessionProvider>
         </div>
@@ -106,6 +144,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Plus size={22} strokeWidth={2} />
         </Link>
       )}
+
+      <button
+        type="button"
+        className="app-theme-toggle-mobile"
+        onClick={() => setTheme(isDark ? "light" : "dark")}
+        aria-label={isDark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+      >
+        {mounted ? (
+          isDark ? (
+            <Sun size={18} strokeWidth={1.5} aria-hidden />
+          ) : (
+            <Moon size={18} strokeWidth={1.5} aria-hidden />
+          )
+        ) : null}
+      </button>
     </div>
   );
 }

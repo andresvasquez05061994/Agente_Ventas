@@ -1,6 +1,40 @@
-/* ── IAC Agente Ventas — Design System (dark only) ── */
+/* ── IAC Agente Ventas — Design System (claro + oscuro) ── */
 
 :root {
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f8f9fb;
+  --color-bg-tertiary: #f0f2f5;
+  --color-border: #e2e6ea;
+  --color-border-hover: #c8d0d8;
+  --color-text-primary: #051c2c;
+  --color-text-secondary: #6b7c93;
+  --color-text-muted: #8a97a8;
+  --color-accent: #003a70;
+  --color-accent-hover: #002244;
+  --color-accent-subtle: rgba(0, 58, 112, 0.08);
+  --color-success: #16a34a;
+  --color-warning: #ca8a04;
+  --color-error: #dc2626;
+  --color-info: #2563eb;
+
+  --iac-text: var(--color-text-primary);
+  --iac-text-muted: var(--color-text-secondary);
+  --iac-text-faint: var(--color-text-muted);
+  --iac-accent: var(--color-accent);
+  --navy: var(--color-accent);
+  --bg: var(--color-bg-primary);
+  --text: var(--color-text-secondary);
+
+  --sidebar-width: 240px;
+  --sidebar-collapsed: 56px;
+  --content-max: 1280px;
+  --radius-card: 8px;
+  --radius-control: 6px;
+  --radius-modal: 12px;
+  --transition: 150ms ease;
+}
+
+.dark {
   --color-bg-primary: #0a0a0a;
   --color-bg-secondary: #141414;
   --color-bg-tertiary: #1c1c1c;
@@ -24,17 +58,13 @@
   --navy: var(--color-accent);
   --bg: var(--color-bg-primary);
   --text: var(--color-text-secondary);
-
-  --sidebar-width: 240px;
-  --sidebar-collapsed: 56px;
-  --content-max: 1280px;
-  --radius-card: 8px;
-  --radius-control: 6px;
-  --radius-modal: 12px;
-  --transition: 150ms ease;
 }
 
 html {
+  color-scheme: light;
+}
+
+html.dark {
   color-scheme: dark;
 }
 
@@ -149,8 +179,12 @@ body {
   padding: 10px 16px;
   font-size: 13px;
   font-weight: 600;
-  color: #0a0a0a;
+  color: #ffffff;
   transition: background var(--transition), transform var(--transition);
+}
+
+.dark .btn-primary {
+  color: #0a0a0a;
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -231,30 +265,24 @@ body {
 
 .app-sidebar__brand {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   padding: 20px 16px;
   border-bottom: 1px solid var(--color-border);
+  text-decoration: none;
 }
 
-.app-sidebar__logo {
-  display: flex;
-  height: 32px;
-  width: 32px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-control);
-  background: var(--color-accent-subtle);
-  color: var(--color-accent);
-  font-size: 14px;
-  font-weight: 700;
+.app-sidebar__brand:hover {
+  opacity: 0.95;
 }
 
-.app-sidebar__title {
-  font-size: 16px;
+.app-sidebar__subtitle {
+  font-size: 9px;
   font-weight: 600;
-  color: var(--color-text-primary);
-  letter-spacing: -0.01em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
 }
 
 .app-sidebar__nav {
@@ -393,8 +421,34 @@ body {
   justify-content: center;
   border-radius: 50%;
   background: var(--color-accent);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.dark .app-mobile-cta {
   color: #0a0a0a;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.app-theme-toggle-mobile {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 45;
+  display: flex;
+  height: 40px;
+  width: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+}
+
+@media (min-width: 1024px) {
+  .app-theme-toggle-mobile {
+    display: none;
+  }
 }
 
 @media (min-width: 1024px) {
