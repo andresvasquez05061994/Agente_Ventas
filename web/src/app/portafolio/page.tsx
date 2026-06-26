@@ -465,6 +465,7 @@ function PortafolioContent() {
           email: lead.email,
           notas: lead.notas,
           fuente: lead.fuente_busqueda,
+          linkedin_url: lead.linkedin_url,
         }),
       });
       const data = await res.json();

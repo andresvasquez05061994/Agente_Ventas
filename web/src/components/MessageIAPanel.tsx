@@ -40,6 +40,30 @@ function copyCallScript(result: ColdCallResult, lead: Lead) {
   void navigator.clipboard.writeText(text);
 }
 
+function PersonalizationBlock({
+  personalization,
+}: {
+  personalization: ColdCallResult["personalization"];
+}) {
+  return (
+    <section className="cold-call-block cold-call-block--tip">
+      <h3 className="cold-call-block__label">Contexto usado (IAC + prospecto)</h3>
+      <p className="cold-call-block__text">{personalization.company_insight}</p>
+      {personalization.iac_solutions.length > 0 && (
+        <ul className="cold-call-list">
+          {personalization.iac_solutions.map((s) => (
+            <li key={s}>{s}</li>
+          ))}
+        </ul>
+      )}
+      <p className="text-micro mt-2">
+        Fuentes: {personalization.intel_sources.join(" · ")}
+        {personalization.company_domain ? ` · ${personalization.company_domain}` : ""}
+      </p>
+    </section>
+  );
+}
+
 function copyEmailScript(result: ColdEmailResult, lead: Lead) {
   const body = [
     result.greeting,
@@ -163,7 +187,8 @@ export function MessageIAPanel({
               <div className="cold-call-modal__spinner" />
               <p>Generando {channelLabel}…</p>
               <span className="text-micro">
-                Personalizando enfoque para {lead.cargo || "el cargo"} en {lead.empresa || "la empresa"}
+                Analizando {lead.empresa || "la empresa"}
+                {lead.empresa ? " (web + portafolio IAC)" : ""} para {lead.cargo || "el cargo"}
               </span>
             </div>
           )}
@@ -189,6 +214,8 @@ export function MessageIAPanel({
                 <h3 className="cold-call-block__label">Enfoque recomendado</h3>
                 <p className="cold-call-block__hero-text">{callResult.headline}</p>
               </section>
+
+              <PersonalizationBlock personalization={callResult.personalization} />
 
               <section className="cold-call-block">
                 <h3 className="cold-call-block__label">Apertura sugerida</h3>
@@ -239,6 +266,8 @@ export function MessageIAPanel({
                 <h3 className="cold-call-block__label">Enfoque del correo</h3>
                 <p className="cold-call-block__hero-text">{emailResult.headline}</p>
               </section>
+
+              <PersonalizationBlock personalization={emailResult.personalization} />
 
               <div className="cold-call-grid">
                 <section className="cold-call-block">

@@ -5,6 +5,8 @@ import {
   type OutreachChannel,
 } from "@/lib/commercial-outreach";
 
+export const maxDuration = 60;
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Record<string, unknown>;
@@ -19,6 +21,7 @@ export async function POST(req: Request) {
         email: body.email != null ? String(body.email) : null,
         notas: body.notas != null ? String(body.notas) : null,
         fuente: body.fuente != null ? String(body.fuente) : null,
+        linkedin_url: body.linkedin_url != null ? String(body.linkedin_url) : null,
       },
       channel as OutreachChannel
     );

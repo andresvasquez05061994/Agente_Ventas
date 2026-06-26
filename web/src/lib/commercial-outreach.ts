@@ -1,15 +1,20 @@
 import { getMistralModel, isMistralConfigured } from "./smart-search";
+import { formatPortfolioForPrompt, IAC_COMPANY_PROFILE } from "./iac-portfolio-knowledge";
+import {
+  formatProspectContextBlock,
+  gatherProspectContext,
+  type ProspectContext,
+  type ProspectInput,
+} from "./prospect-context";
 
 export type OutreachChannel = "call" | "email";
+export type OutreachInput = ProspectInput;
 
-export type OutreachInput = {
-  nombre: string;
-  cargo?: string | null;
-  empresa?: string | null;
-  pais?: string | null;
-  email?: string | null;
-  notas?: string | null;
-  fuente?: string | null;
+export type OutreachPersonalization = {
+  company_insight: string;
+  iac_solutions: string[];
+  intel_sources: string[];
+  company_domain: string | null;
 };
 
 export type ColdCallResult = {
@@ -21,6 +26,7 @@ export type ColdCallResult = {
   discovery_question: string;
   closing: string;
   objection_tip: string;
+  personalization: OutreachPersonalization;
   source: "mistral" | "rules";
   model?: string;
 };
@@ -36,6 +42,7 @@ export type ColdEmailResult = {
   body_close: string;
   cta: string;
   ps_line: string;
+  personalization: OutreachPersonalization;
   source: "mistral" | "rules";
   model?: string;
 };
@@ -52,121 +59,158 @@ export class OutreachError extends Error {
   }
 }
 
-const IAC_CONTEXT = `IAC SAS es una empresa B2B en Colombia/LATAM. Ofrece:
-- Automatización de procesos operativos y comerciales (menos trabajo manual, más velocidad)
-- Adopción práctica de IA en equipos de negocio (no teoría: casos de uso reales)
-- Predicción de demanda y analítica para compras, inventario y decisiones comerciales`;
-
 const COMMERCIAL_RULES = `Reglas comerciales (obligatorias):
 - Español profesional, directo y cercano. Sin hype ni promesas irreales.
-- Personaliza SIEMPRE con cargo, empresa y país del contacto.
-- Incluye al menos un dato o cifra orientativa (%, tiempo ahorrado, volumen de decisiones) sin inventar casos nombrados ni resultados verificados de clientes reales.
-- Conecta el mensaje con el dolor típico del cargo (operaciones, ventas, logística, TI, finanzas, etc.).
-- Prioriza automatización, IA aplicada o predicción de demanda según encaje con el rol.
-- Sé breve: cada bloque debe poder leerse en segundos.
-- No inventes noticias de la empresa ni datos financieros del prospecto.`;
+- Personaliza con cargo, empresa, país y AL MENOS UNA observación concreta del sitio web o sector del prospecto (si hay datos).
+- Menciona EXPLÍCITAMENTE 1-2 soluciones IAC del portafolio recomendado, con métricas orientativas del portafolio (no inventes casos de clientes nombrados).
+- Conecta el dolor típico del cargo con la solución IAC más relevante.
+- Si no hay datos web, sé específico con el rol y la empresa; no uses frases genéricas tipo "ayudamos a empresas como la suya".
+- No inventes noticias, financieros ni proyectos internos del prospecto.
+- Firma mentalmente como ${IAC_COMPANY_PROFILE.contact.consultant}, ${IAC_COMPANY_PROFILE.name} (${IAC_COMPANY_PROFILE.contact.web}).`;
 
-function contactBlock(input: OutreachInput): string {
-  return `- Nombre: ${input.nombre}
-- Cargo: ${input.cargo || "No especificado"}
-- Empresa: ${input.empresa || "No especificada"}
-- País: ${input.pais || "Colombia/LATAM"}
-${input.email ? `- Email: ${input.email}` : ""}
-${input.notas ? `- Notas internas del vendedor: ${input.notas}` : ""}
-${input.fuente ? `- Contexto de prospección: ${input.fuente}` : ""}`;
+function buildPersonalization(
+  context: ProspectContext,
+  companyHook?: string
+): OutreachPersonalization {
+  const insight =
+    companyHook?.trim() ||
+    (context.company_web_summary
+      ? context.company_web_summary.slice(0, 280)
+      : context.company_web_title
+        ? `Sitio corporativo: ${context.company_web_title}`
+        : "Sin sitio web analizado; enfoque basado en cargo y sector.");
+
+  return {
+    company_insight: insight,
+    iac_solutions: context.recommended_solutions.map((s) => s.name),
+    intel_sources: context.intel_sources,
+    company_domain: context.company_domain,
+  };
 }
 
-function buildCallPrompt(input: OutreachInput): string {
-  return `Eres un director comercial B2B experto en llamadas en frío para IAC SAS.
+function buildCallPrompt(input: OutreachInput, context: ProspectContext): string {
+  return `Eres ${IAC_COMPANY_PROFILE.contact.consultant}, consultor comercial senior de ${IAC_COMPANY_PROFILE.name}.
 
-${IAC_CONTEXT}
+PORTAFOLIO IAC (oferta real — úsala como base, no inventes servicios fuera de esto):
+${formatPortfolioForPrompt(context.recommended_solutions)}
 
-Genera un guion de PRIMERA llamada en frío para:
-${contactBlock(input)}
+CONTEXTO DEL PROSPECTO:
+${formatProspectContextBlock(input, context)}
+
+Genera un guion de PRIMERA llamada en frío ultra personalizado.
 
 Responde SOLO JSON válido (sin markdown):
 {
-  "headline": "enfoque comercial en máx 10 palabras, mencionando empresa o sector si aplica",
-  "opening_line": "apertura de 2-3 oraciones: saludo con nombre, motivo de la llamada y gancho concreto para su cargo en su empresa",
-  "why_now": "1-2 oraciones: por qué este perfil debería escuchar ahora (urgencia operativa o competitiva, sin alarmismo)",
-  "value_points": ["beneficio 1 con dato o impacto cuantificable orientativo", "beneficio 2 ligado al cargo", "beneficio 3 sobre IA/automatización/demanda"],
-  "discovery_question": "pregunta abierta para calificar dolor o prioridad",
-  "closing": "cierre suave para agendar 15 min (1-2 oraciones)",
-  "objection_tip": "respuesta breve si dice 'no tengo tiempo' o 'ya tenemos proveedor'"
+  "company_hook": "1 oración con observación específica sobre la empresa (web, sector o rol). Si no hay web, menciona su cargo/empresa con detalle concreto.",
+  "headline": "enfoque comercial en máx 12 palabras, mencionando empresa o dolor detectado",
+  "opening_line": "apertura 2-3 oraciones: saludo con nombre, referencia a la observación de empresa_hook, y puente hacia una solución IAC concreta",
+  "why_now": "1-2 oraciones: urgencia operativa ligada a su sector o a lo visto en su web",
+  "value_points": ["beneficio 1 citando solución IAC + métrica del portafolio", "beneficio 2 ligado a su cargo", "beneficio 3 conectado con su empresa o sector"],
+  "discovery_question": "pregunta abierta que demuestre que investigaste su contexto",
+  "closing": "cierre para agendar 15 min con ${IAC_COMPANY_PROFILE.contact.consultant} (1-2 oraciones)",
+  "objection_tip": "respuesta breve si dice 'no tengo tiempo' o 'ya tenemos proveedor', mencionando complemento con IAC"
 }
 
 ${COMMERCIAL_RULES}
-- opening_line + closing: máximo 90 palabras combinadas.`;
+- opening_line debe incluir referencia explícita a company_hook o al sector de la empresa.`;
 }
 
-function buildEmailPrompt(input: OutreachInput): string {
-  return `Eres un director comercial B2B experto en cold email de alta conversión para IAC SAS.
+function buildEmailPrompt(input: OutreachInput, context: ProspectContext): string {
+  return `Eres ${IAC_COMPANY_PROFILE.contact.consultant}, consultor comercial senior de ${IAC_COMPANY_PROFILE.name}.
 
-${IAC_CONTEXT}
+PORTAFOLIO IAC (oferta real):
+${formatPortfolioForPrompt(context.recommended_solutions)}
 
-Genera un correo electrónico en frío para:
-${contactBlock(input)}
+CONTEXTO DEL PROSPECTO:
+${formatProspectContextBlock(input, context)}
+
+Genera un correo en frío ultra personalizado.
 
 Responde SOLO JSON válido (sin markdown):
 {
-  "subject_line": "asunto personalizado, máx 8 palabras, sin clickbait",
-  "preview_text": "texto preheader 45-70 caracteres que complemente el asunto",
-  "headline": "enfoque interno del mensaje en máx 10 palabras",
-  "greeting": "saludo con nombre (1 línea)",
-  "hook": "2 oraciones: por qué escribes ahora y qué problema del cargo/empresa abordas",
-  "value_bullets": ["bullet 1 con beneficio + dato orientativo", "bullet 2 personalizado al rol", "bullet 3 sobre resultado medible"],
-  "body_close": "1-2 oraciones que conecten valor con siguiente paso, tono consultivo",
-  "cta": "CTA claro y de baja fricción (ej. responder con disponibilidad o 15 min)",
-  "ps_line": "línea P.S. breve con urgencia suave o recordatorio del beneficio principal"
+  "company_hook": "1 oración con observación específica sobre la empresa (web, sector o rol)",
+  "subject_line": "asunto personalizado con empresa o dolor, máx 9 palabras, sin clickbait",
+  "preview_text": "preheader 45-80 caracteres",
+  "headline": "enfoque interno en máx 12 palabras",
+  "greeting": "saludo con nombre",
+  "hook": "2 oraciones: company_hook + problema del cargo enlazado a solución IAC concreta",
+  "value_bullets": ["bullet con solución IAC + métrica portafolio", "bullet personalizado al rol", "bullet conectado a su empresa"],
+  "body_close": "1-2 oraciones consultivas antes del CTA",
+  "cta": "CTA de baja fricción (15 min con ${IAC_COMPANY_PROFILE.contact.consultant})",
+  "ps_line": "P.S. breve con beneficio IAC principal o referencia a su sector"
 }
 
 ${COMMERCIAL_RULES}
-- Cuerpo total (hook + bullets + body_close + cta): máximo 130 palabras.
-- Formato escaneable: frases cortas, sin párrafos densos.`;
+- El hook debe integrar company_hook de forma natural.`;
 }
 
-function ruleBasedCall(input: OutreachInput): ColdCallResult {
+function ruleBasedCall(input: OutreachInput, context: ProspectContext): ColdCallResult {
   const firstName = input.nombre.split(/\s+/)[0] || input.nombre;
   const company = input.empresa?.trim() || "su empresa";
   const role = input.cargo?.trim() || "su área";
+  const primary = context.recommended_solutions[0];
+  const secondary = context.recommended_solutions[1];
+  const webRef = context.company_web_title
+    ? `Revisé ${context.company_domain ?? "su sitio"} y vi que se posicionan en «${context.company_web_title}». `
+    : "";
+
+  const personalization = buildPersonalization(
+    context,
+    webRef || `Perfil de ${role} en ${company} en ${input.pais || "LATAM"}.`
+  );
 
   return {
     channel: "call",
-    headline: `Eficiencia operativa en ${company}`,
-    opening_line: `Hola ${firstName}, soy de IAC SAS. Vi su rol como ${role} en ${company} y quise una conversación breve: ayudamos a equipos como el suyo a reducir hasta un 30% el tiempo en tareas manuales y a tomar decisiones de demanda con datos, no solo intuición.`,
-    why_now: `En ${input.pais || "la región"}, perfiles como el suyo están priorizando automatización e IA práctica para liberar capacidad del equipo sin proyectos de años.`,
+    headline: `${primary?.name?.split("(")[0]?.trim() ?? "Automatización"} para ${company}`,
+    opening_line: `Hola ${firstName}, soy ${IAC_COMPANY_PROFILE.contact.consultant} de ${IAC_COMPANY_PROFILE.name}. ${webRef}Como ${role}, muchos equipos en su sector están priorizando ${primary?.talking_points[0]?.toLowerCase() ?? "automatización"} — justo donde ayudamos con ${primary?.name ?? "nuestro Centro de Automatización"}.`,
+    why_now: `En ${input.pais || "la región"}, perfiles como el suyo buscan resultados en semanas: ${primary?.metrics[0] ?? "menos tiempo operativo"} sin proyectos eternos.`,
     value_points: [
-      `Automatizar procesos críticos de ${role.toLowerCase()} en ${company}`,
-      "Capacitar al equipo en IA aplicada a su operación diaria",
-      "Mejorar proyecciones de demanda para compras, inventario o ventas",
+      `${primary?.name ?? "Automatización"}: ${primary?.metrics[0] ?? "hasta 70% menos tiempo operativo"}`,
+      secondary
+        ? `${secondary.name}: ${secondary.metrics[0]}`
+        : `Formación consultiva en IA para que ${role} adopte casos de uso reales`,
+      `Integración con ERP/CRM que ya usan en ${company}`,
     ],
-    discovery_question: `¿Qué proceso manual o decisión sin datos les está costando más tiempo hoy en ${company}?`,
-    closing: `¿Le funcionaría una llamada de 15 minutos esta semana para ver si tiene sentido para ustedes? Puedo adaptarme a martes o jueves por la mañana.`,
-    objection_tip: `Si no tiene tiempo: "Entiendo, son solo 2 minutos para validar si vale una conversación de 15 minutos." Si ya tienen proveedor: "Perfecto, muchos nos usan para complementar automatización o analítica que ya tienen."`,
+    discovery_question: webRef
+      ? `¿Qué proceso en ${company} les está consumiendo más horas manuales hoy, considerando lo que hacen en su operación?`
+      : `¿Cuál es hoy el cuello de botella operativo más costoso para usted como ${role}?`,
+    closing: `¿Le funcionaría 15 minutos esta semana conmigo para ver si ${primary?.name ?? "automatización IAC"} encaja? Puedo martes o jueves en la mañana.`,
+    objection_tip: `Si no tiene tiempo: "Son 2 minutos para validar si vale una conversación de 15." Si ya tienen proveedor: "Muchos nos complementan en RPA, predicción de demanda o agentes IA donde otros no llegan."`,
+    personalization,
     source: "rules",
   };
 }
 
-function ruleBasedEmail(input: OutreachInput): ColdEmailResult {
+function ruleBasedEmail(input: OutreachInput, context: ProspectContext): ColdEmailResult {
   const firstName = input.nombre.split(/\s+/)[0] || input.nombre;
   const company = input.empresa?.trim() || "su empresa";
   const role = input.cargo?.trim() || "su área";
+  const primary = context.recommended_solutions[0];
+  const secondary = context.recommended_solutions[1];
+  const webRef = context.company_web_summary
+    ? context.company_web_summary.slice(0, 120)
+    : context.company_web_title
+      ? `su enfoque en «${context.company_web_title}»`
+      : `su rol como ${role}`;
+
+  const personalization = buildPersonalization(context, webRef);
 
   return {
     channel: "email",
-    subject_line: `${company}: eficiencia en ${role.split(" ")[0] || "operación"}`,
-    preview_text: `Idea breve para ${firstName} sobre automatización e IA en ${company}`,
-    headline: `Valor concreto para ${role} en ${company}`,
+    subject_line: `${company}: ${primary?.name?.split("(")[0]?.trim().slice(0, 20) ?? "eficiencia"} para ${role.split(" ")[0]}`,
+    preview_text: `Idea para ${firstName} — ${primary?.talking_points[0]?.slice(0, 40) ?? "automatización IAC"}`,
+    headline: `${primary?.name ?? "Solución IAC"} para ${company}`,
     greeting: `Hola ${firstName},`,
-    hook: `Le escribo porque en ${company} los perfiles de ${role} suelen perder horas en tareas repetitivas y decisiones sin datos claros. En IAC SAS ayudamos a equipos B2B a automatizar esos procesos y usar IA con resultados en semanas, no en meses.`,
+    hook: `Le escribo porque, al revisar ${webRef}, veo una oportunidad clara para ${role} en ${company}: ${primary?.summary ?? "automatizar procesos críticos con IA y RPA"} con resultados medibles en semanas.`,
     value_bullets: [
-      `Reducir trabajo manual en procesos clave de ${company}`,
-      "Adoptar IA práctica sin curva de aprendizaje eterna",
-      "Anticipar demanda para compras, inventario o ventas con mayor precisión",
+      `${primary?.name}: ${primary?.metrics[0] ?? "impacto operativo medible"}`,
+      secondary ? `${secondary.name}: ${secondary.metrics[0]}` : "Entrenamiento consultivo en IA para su equipo",
+      `${IAC_COMPANY_PROFILE.experience} — integración con ERP/CRM existente`,
     ],
-    body_close: `No busco venderle en este correo: solo validar si este enfoque encaja con una prioridad actual de su equipo.`,
-    cta: `¿Le funciona una llamada de 15 minutos esta semana? Puede responder con un horario que le quede bien.`,
-    ps_line: `P.D.: Si prefiere, puedo enviarle primero un ejemplo de 3 líneas de cómo aplicaríamos esto a ${company}.`,
+    body_close: `No busco vender en este correo: solo validar si este enfoque encaja con una prioridad actual de ${company}.`,
+    cta: `¿Le funciona 15 minutos con ${IAC_COMPANY_PROFILE.contact.consultant}? Responda con un horario y preparo un ejemplo aplicado a ${company}.`,
+    ps_line: `P.D.: Puedo compartir en 3 líneas cómo aplicaríamos ${primary?.name ?? "automatización IAC"} a su operación.`,
+    personalization,
     source: "rules",
   };
 }
@@ -184,13 +228,13 @@ async function callMistral(prompt: string, systemExtra: string): Promise<string>
     },
     body: JSON.stringify({
       model,
-      temperature: 0.32,
-      max_tokens: 1100,
+      temperature: 0.38,
+      max_tokens: 1400,
       response_format: { type: "json_object" },
       messages: [
         {
           role: "system",
-          content: `Eres un asesor comercial senior de IAC SAS. Respondes únicamente JSON válido en español. ${systemExtra}`,
+          content: `Eres ${IAC_COMPANY_PROFILE.contact.consultant}, asesor comercial de ${IAC_COMPANY_PROFILE.name}. Respondes únicamente JSON válido en español. ${systemExtra}`,
         },
         { role: "user", content: prompt },
       ],
@@ -224,11 +268,15 @@ function parseJson(raw: string): Record<string, unknown> {
   }
 }
 
-function parseCallJson(raw: string): Omit<ColdCallResult, "source" | "model" | "channel"> {
+function parseCallJson(
+  raw: string,
+  context: ProspectContext
+): Omit<ColdCallResult, "source" | "model" | "channel"> {
   const parsed = parseJson(raw);
   const valuePoints = Array.isArray(parsed.value_points)
     ? parsed.value_points.map(String).filter(Boolean).slice(0, 4)
     : [];
+  const companyHook = String(parsed.company_hook ?? "").trim();
 
   return {
     headline: String(parsed.headline ?? "Guion de llamada en frío").trim(),
@@ -236,18 +284,23 @@ function parseCallJson(raw: string): Omit<ColdCallResult, "source" | "model" | "
     why_now: String(parsed.why_now ?? "").trim(),
     value_points: valuePoints.length
       ? valuePoints
-      : ["Automatización de procesos", "IA aplicada al rol", "Predicción de demanda"],
+      : context.recommended_solutions.map((s) => `${s.name}: ${s.metrics[0]}`),
     discovery_question: String(parsed.discovery_question ?? "").trim(),
     closing: String(parsed.closing ?? "").trim(),
     objection_tip: String(parsed.objection_tip ?? "").trim(),
+    personalization: buildPersonalization(context, companyHook),
   };
 }
 
-function parseEmailJson(raw: string): Omit<ColdEmailResult, "source" | "model" | "channel"> {
+function parseEmailJson(
+  raw: string,
+  context: ProspectContext
+): Omit<ColdEmailResult, "source" | "model" | "channel"> {
   const parsed = parseJson(raw);
   const bullets = Array.isArray(parsed.value_bullets)
     ? parsed.value_bullets.map(String).filter(Boolean).slice(0, 4)
     : [];
+  const companyHook = String(parsed.company_hook ?? "").trim();
 
   return {
     subject_line: String(parsed.subject_line ?? "Idea breve para su equipo").trim(),
@@ -257,10 +310,11 @@ function parseEmailJson(raw: string): Omit<ColdEmailResult, "source" | "model" |
     hook: String(parsed.hook ?? "").trim(),
     value_bullets: bullets.length
       ? bullets
-      : ["Automatización operativa", "IA práctica", "Decisiones con datos"],
+      : context.recommended_solutions.map((s) => `${s.name}: ${s.metrics[0]}`),
     body_close: String(parsed.body_close ?? "").trim(),
     cta: String(parsed.cta ?? "").trim(),
     ps_line: String(parsed.ps_line ?? "").trim(),
+    personalization: buildPersonalization(context, companyHook),
   };
 }
 
@@ -271,22 +325,24 @@ export async function generateOutreachMessage(
   const nombre = input.nombre?.trim();
   if (!nombre) throw new OutreachError("Nombre del contacto requerido.");
 
+  const context = await gatherProspectContext(input);
+
   if (!isMistralConfigured()) {
-    return channel === "email" ? ruleBasedEmail(input) : ruleBasedCall(input);
+    return channel === "email" ? ruleBasedEmail(input, context) : ruleBasedCall(input, context);
   }
 
   const model = getMistralModel();
   if (channel === "email") {
     const content = await callMistral(
-      buildEmailPrompt(input),
-      "Escribes cold emails B2B concisos, personalizados y orientados a respuesta."
+      buildEmailPrompt(input, context),
+      "Escribes cold emails B2B con datos del prospecto y soluciones concretas del portafolio IAC."
     );
-    return { channel: "email", ...parseEmailJson(content), source: "mistral", model };
+    return { channel: "email", ...parseEmailJson(content, context), source: "mistral", model };
   }
 
   const content = await callMistral(
-    buildCallPrompt(input),
-    "Escribes guiones de llamada en frío B2B concisos, personalizados y orientados a agendar."
+    buildCallPrompt(input, context),
+    "Escribes guiones de llamada B2B con investigación del prospecto y soluciones concretas del portafolio IAC."
   );
-  return { channel: "call", ...parseCallJson(content), source: "mistral", model };
+  return { channel: "call", ...parseCallJson(content, context), source: "mistral", model };
 }
