@@ -44,6 +44,7 @@ export default function ProspeccionPage() {
     setKeyword,
     setSeniority,
     setPerPage,
+    setEmployeeRanges,
     setResults,
     setSelectedIds,
     setStatus,
@@ -52,6 +53,7 @@ export default function ProspeccionPage() {
     selectAllResults,
     removeResultsByIds,
     clearSession,
+    applyInterpretedFilters,
     applyFilters,
   } = session;
 
@@ -63,13 +65,14 @@ export default function ProspeccionPage() {
   }
 
   async function search(overrides?: Partial<SearchParams>) {
+    const fromInterpretation = Boolean(overrides);
     const params: SearchParams = {
       country: overrides?.country ?? country,
       titles: overrides?.titles ?? titles,
       keyword: overrides?.keyword ?? keyword,
       seniority: overrides?.seniority ?? seniority,
       company: overrides?.company ?? company,
-      employeeRanges: overrides?.employeeRanges ?? employeeRanges,
+      employeeRanges: fromInterpretation ? (overrides?.employeeRanges ?? []) : [],
       perPage: overrides?.perPage ?? perPage,
     };
 
@@ -80,6 +83,7 @@ export default function ProspeccionPage() {
     }
 
     if (!overrides) {
+      setEmployeeRanges([]);
       setCountry(params.country);
       setCompany(params.company);
       setTitles(params.titles);
@@ -175,9 +179,9 @@ export default function ProspeccionPage() {
   }
 
   async function handleSmartApply(result: SmartSearchResult) {
-    applyFilters(result.filters);
+    applyInterpretedFilters(result.filters);
     showInfo(result.summary, "Filtros interpretados");
-    await search(result.filters);
+    await search({ ...result.filters });
   }
 
   async function save() {

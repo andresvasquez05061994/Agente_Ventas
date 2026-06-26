@@ -156,12 +156,12 @@ const ALLOWED_EMPLOYEE_RANGE_VALUES = new Set<string>(
 
 export const DEFAULT_SEARCH = {
   country: "Colombia",
-  titles: ["IT Director"] as string[],
+  titles: [] as string[],
   keyword: "",
   seniority: "",
   company: "",
   employeeRanges: [] as string[],
-  perPage: 10,
+  perPage: 5,
 };
 
 const COUNTRY_VALUES = new Set(APOLLO_COUNTRIES.map((c) => c.value));

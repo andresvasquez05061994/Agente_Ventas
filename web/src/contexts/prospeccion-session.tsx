@@ -67,6 +67,15 @@ type ProspeccionSessionContextValue = ProspeccionSessionState & {
   clearSelected: () => void;
   removeResultsByIds: (ids: string[]) => void;
   clearSession: () => void;
+  applyInterpretedFilters: (filters: {
+    country: string;
+    company: string;
+    titles: string[];
+    keyword: string;
+    seniority: string;
+    employeeRanges?: string[];
+    perPage: number;
+  }) => void;
   applyFilters: (filters: {
     country: string;
     company: string;
@@ -184,7 +193,7 @@ export function ProspeccionSessionProvider({ children }: { children: ReactNode }
     setState(createInitialState());
   }, []);
 
-  const applyFilters = useCallback(
+  const applyInterpretedFilters = useCallback(
     (filters: {
       country: string;
       company: string;
@@ -197,16 +206,22 @@ export function ProspeccionSessionProvider({ children }: { children: ReactNode }
       setState((s) => ({
         ...s,
         country: filters.country,
-        company: filters.company,
-        titles: filters.titles,
-        keyword: filters.keyword,
-        seniority: filters.seniority,
+        company: filters.company || "",
+        titles: [...filters.titles],
+        keyword: filters.keyword || "",
+        seniority: filters.seniority || "",
         employeeRanges: filters.employeeRanges ?? [],
         perPage: filters.perPage,
+        results: [],
+        selectedIds: [],
+        meta: null,
+        status: "idle",
       }));
     },
     []
   );
+
+  const applyFilters = applyInterpretedFilters;
 
   const value = useMemo<ProspeccionSessionContextValue>(
     () => ({
@@ -228,6 +243,7 @@ export function ProspeccionSessionProvider({ children }: { children: ReactNode }
       clearSelected,
       removeResultsByIds,
       clearSession,
+      applyInterpretedFilters,
       applyFilters,
     }),
     [
@@ -249,6 +265,7 @@ export function ProspeccionSessionProvider({ children }: { children: ReactNode }
       clearSelected,
       removeResultsByIds,
       clearSession,
+      applyInterpretedFilters,
       applyFilters,
     ]
   );

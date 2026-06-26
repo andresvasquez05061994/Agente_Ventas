@@ -155,12 +155,62 @@ function pickSeniority(raw: string | undefined): string {
   return byLabel?.value ?? "";
 }
 
-function pickPerPage(raw: unknown): number {
+function pickPerPage(raw: unknown, userQuery?: string): number {
+  if (userQuery) {
+    const fromQuery = inferPerPageFromQuery(userQuery);
+    if (fromQuery !== null) return fromQuery;
+    if (!userMentionedResultCount(userQuery)) return DEFAULT_SEARCH.perPage;
+  }
   const n = Number(raw);
   if (APOLLO_PER_PAGE_OPTIONS.includes(n as (typeof APOLLO_PER_PAGE_OPTIONS)[number])) {
     return n;
   }
   return DEFAULT_SEARCH.perPage;
+}
+
+function userMentionedResultCount(query: string): boolean {
+  return (
+    /\b\d{1,2}\s*(resultados?|contactos?|leads?|perfiles?)\b/i.test(query) ||
+    /\b(?:quiero|busca|trae|muéstrame|muestra|necesito|dame)\s+\d{1,2}\b/i.test(query)
+  );
+}
+
+function inferPerPageFromQuery(query: string): number | null {
+  const patterns = [
+    /\b(\d{1,2})\s*(?:resultados?|contactos?|leads?|perfiles?)\b/i,
+    /\b(?:quiero|busca|trae|muéstrame|muestra|necesito|dame)\s+(\d{1,2})\b/i,
+  ];
+  for (const re of patterns) {
+    const m = query.match(re);
+    if (!m) continue;
+    const n = Number(m[1]);
+    if (APOLLO_PER_PAGE_OPTIONS.includes(n as (typeof APOLLO_PER_PAGE_OPTIONS)[number])) {
+      return n;
+    }
+    if (n >= 1 && n <= 25) {
+      return [...APOLLO_PER_PAGE_OPTIONS].sort(
+        (a, b) => Math.abs(a - n) - Math.abs(b - n)
+      )[0];
+    }
+  }
+  return null;
+}
+
+function userMentionedCountry(query: string): boolean {
+  const q = query.toLowerCase();
+  if (q.includes("colombian") || q.includes(" en colombia") || q.endsWith("colombia")) {
+    return true;
+  }
+  return APOLLO_COUNTRIES.some(
+    (c) => q.includes(c.label.toLowerCase()) || q.includes(c.value.toLowerCase())
+  );
+}
+
+function resolveCountry(parsedCountry: string, userQuery: string): string {
+  if (userMentionedCountry(userQuery)) {
+    return enforceCountryFromQuery(pickCountry(parsedCountry), userQuery);
+  }
+  return DEFAULT_SEARCH.country;
 }
 
 /** Mapea sugerencias de IA a cargos permitidos en Apollo. */
@@ -356,7 +406,8 @@ export function coerceJobTitles(suggestions: string[], fallbackQuery?: string): 
     ? normalizeJobTitles([...mapTitlesFromSuggestions([fallbackQuery]), fallbackQuery])
     : [];
 
-  const combined = base.length ? base : fromQuery.length ? fromQuery : [...DEFAULT_SEARCH.titles];
+  const combined = base.length ? base : fromQuery;
+  if (!combined.length) return [];
   return fallbackQuery ? rankAndLimitTitles(combined, fallbackQuery) : combined.slice(0, MAX_SMART_TITLES);
 }
 
@@ -396,6 +447,31 @@ function pickEmployeeRanges(raw: unknown, userQuery: string): string[] {
   return inferEmployeeRangesFromText(userQuery);
 }
 
+/** Normaliza filtros interpretados: solo lo inferido de la consulta, sin arrastrar valores previos. */
+export function finalizeSmartFilters(
+  filters: SmartSearchFilters,
+  userQuery: string
+): SmartSearchFilters {
+  const titles = rankAndLimitTitles(coerceJobTitles(filters.titles, userQuery), userQuery);
+  if (!titles.length) {
+    throw new SmartSearchError(
+      "No identifiqué cargos en tu consulta. Indica el rol objetivo (ej. CEO, director de TI, gerente general)."
+    );
+  }
+
+  return {
+    country: resolveCountry(filters.country, userQuery),
+    titles,
+    keyword: pickKeyword(filters.keyword) || inferKeywordFromQuery(userQuery),
+    seniority: userMentionedSeniorityLevel(userQuery)
+      ? pickSeniority(filters.seniority) || inferSeniorityFromQuery(userQuery)
+      : "",
+    company: sanitizeCompany(filters.company),
+    employeeRanges: pickEmployeeRanges(filters.employeeRanges, userQuery),
+    perPage: pickPerPage(filters.perPage, userQuery),
+  };
+}
+
 function buildFiltersFromParsed(
   parsed: Record<string, unknown>,
   userQuery: string,
@@ -418,23 +494,27 @@ function buildFiltersFromParsed(
     userQuery
   );
 
-  const filters: SmartSearchFilters = {
-    country: enforceCountryFromQuery(pickCountry(String(parsed.country ?? "")), userQuery),
-    titles,
-    keyword: pickKeyword(String(parsed.keyword ?? "")) || inferKeywordFromQuery(userQuery),
-    seniority,
-    company: sanitizeCompany(String(parsed.company ?? "")),
-    employeeRanges,
-    perPage: pickPerPage(parsed.per_page),
-  };
+  const filters = finalizeSmartFilters(
+    {
+      country: pickCountry(String(parsed.country ?? "")),
+      titles,
+      keyword: pickKeyword(String(parsed.keyword ?? "")) || inferKeywordFromQuery(userQuery),
+      seniority,
+      company: sanitizeCompany(String(parsed.company ?? "")),
+      employeeRanges,
+      perPage: pickPerPage(parsed.per_page, userQuery),
+    },
+    userQuery
+  );
 
   const aiSummary = String(parsed.summary ?? "").trim();
-  const sizeLabel = employeeRanges.length
-    ? APOLLO_EMPLOYEE_RANGES.find((r) => r.value === employeeRanges[0])?.label ?? employeeRanges[0]
+  const sizeLabel = filters.employeeRanges.length
+    ? APOLLO_EMPLOYEE_RANGES.find((r) => r.value === filters.employeeRanges[0])?.label ??
+      filters.employeeRanges[0]
     : null;
   const summary = aiSummary
-    ? `Mistral IA: ${aiSummary}${sizeLabel ? ` · Tamaño: ${sizeLabel}` : ""}`
-    : `Mistral IA · ${filters.country} · ${filters.titles.join(", ")}${filters.company ? ` · ${filters.company}` : ""}${sizeLabel ? ` · ${sizeLabel}` : ""}`;
+    ? `Mistral IA: ${aiSummary}${sizeLabel ? ` · Tamaño: ${sizeLabel}` : ""} · ${filters.perPage} resultados`
+    : `Mistral IA · ${filters.country} · ${filters.titles.join(", ")}${filters.company ? ` · ${filters.company}` : ""}${sizeLabel ? ` · ${sizeLabel}` : ""} · ${filters.perPage} resultados`;
 
   return { filters, summary, source: "mistral", model };
 }
@@ -449,7 +529,7 @@ Analiza la intención y devuelve SOLO un JSON válido (sin markdown) con esta fo
   "seniority": "valor exacto de seniority o cadena vacía",
   "company": "nombre de empresa si la menciona, o cadena vacía",
   "employee_ranges": ["uno o más rangos value de employeeRanges, o array vacío"],
-  "per_page": número entre 5 y 25,
+  "per_page": número entre 5 y 25 (usa 5 salvo que el usuario pida otra cantidad explícita),
   "summary": "frase breve en español explicando qué buscará Apollo"
 }
 
@@ -464,6 +544,8 @@ Reglas estrictas:
 - ERP o software a medida → CIO, IT Director, CFO, General Manager o CEO según contexto.
 - Si habla de transformación digital, IA o automatización → cargos coherentes (CTO, Director of Innovation, etc.).
 - Si no menciona país → "Colombia".
+- per_page: 5 por defecto. Solo otro valor si el usuario pide cantidad (ej. "10 contactos", "quiero 15 resultados").
+- No inventes filtros: campos vacíos si el usuario no los mencionó (keyword "", seniority "", employee_ranges [], company "").
 
 Listas permitidas:
 ${JSON.stringify(FILTER_CATALOG, null, 2)}
@@ -652,18 +734,24 @@ function ruleBasedInterpret(userQuery: string): SmartSearchResult {
     company ? `empresa ${company}` : null,
     resolvedSeniority || null,
     employeeRanges.length ? `tamaño ${employeeRanges.join(",")}` : null,
+    `${pickPerPage(undefined, userQuery)} resultados`,
   ].filter(Boolean);
 
-  return {
-    filters: {
+  const filters = finalizeSmartFilters(
+    {
       country,
       titles,
       keyword: inferKeywordFromQuery(userQuery) || keyword,
       seniority: resolvedSeniority,
       company,
       employeeRanges,
-      perPage: DEFAULT_SEARCH.perPage,
+      perPage: pickPerPage(undefined, userQuery),
     },
+    userQuery
+  );
+
+  return {
+    filters,
     summary: `Modo básico (sin IA): ${parts.join(" · ")}.`,
     source: "rules",
   };
@@ -685,18 +773,22 @@ export async function interpretSmartSearch(userQuery: string): Promise<SmartSear
   return ruleBasedInterpret(trimmed);
 }
 
-export function normalizeSmartFilters(raw: Partial<SmartSearchFilters>): SmartSearchFilters {
+export function normalizeSmartFilters(
+  raw: Partial<SmartSearchFilters>,
+  userQuery?: string
+): SmartSearchFilters {
   const titles = normalizeJobTitles([
     ...mapTitlesFromSuggestions(raw.titles ?? []),
     ...(raw.titles ?? []),
   ]);
-  return {
+  const base: SmartSearchFilters = {
     country: pickCountry(raw.country),
-    titles: titles.length ? titles : [...DEFAULT_SEARCH.titles],
+    titles,
     keyword: pickKeyword(raw.keyword),
     seniority: pickSeniority(raw.seniority),
     company: sanitizeCompany(raw.company),
     employeeRanges: normalizeEmployeeRanges(raw.employeeRanges),
-    perPage: pickPerPage(raw.perPage),
+    perPage: pickPerPage(raw.perPage, userQuery),
   };
+  return userQuery ? finalizeSmartFilters(base, userQuery) : base;
 }
