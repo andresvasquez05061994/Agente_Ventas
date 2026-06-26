@@ -53,16 +53,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {mounted ? (
             <Image
               src={logoSrc}
-              alt="IAC"
-              width={36}
-              height={36}
+              alt="IAC — Ingeniería Asistida por Computador"
+              width={72}
+              height={72}
               className="app-sidebar__logo"
               priority
             />
           ) : (
             <div className="app-sidebar__logo app-sidebar__logo--placeholder" />
           )}
-          <span className="app-sidebar__tagline">Ingeniería Asistida por Computador</span>
         </Link>
 
         <nav className="app-sidebar__nav">
