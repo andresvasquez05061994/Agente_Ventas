@@ -13,6 +13,12 @@ export type IACSolution = {
   talking_points: string[];
 };
 
+export type SolutionMatch = {
+  solution: IACSolution;
+  score: number;
+  reasons: string[];
+};
+
 export const IAC_COMPANY_PROFILE = {
   name: "IAC SAS",
   tagline: "Hacemos sus procesos más rentables",
@@ -27,6 +33,7 @@ export const IAC_COMPANY_PROFILE = {
     "Retail",
     "BPO",
     "Supermercados",
+    "Agroexportación",
   ],
   contact: {
     consultant: "Andrés Zapata",
@@ -59,15 +66,29 @@ export const IAC_SOLUTIONS: IACSolution[] = [
       "cio",
       "cto",
       "director de ti",
+      "general manager",
+      "ceo",
+      "cfo",
       "process",
       "procesos",
       "rpa",
+      "erp",
     ],
-    industries: ["manufactura", "bpo", "retail", "construcción", "logística"],
+    industries: [
+      "manufactura",
+      "bpo",
+      "retail",
+      "construcción",
+      "logística",
+      "agricultura",
+      "agroexportación",
+      "floricultura",
+      "exportación",
+    ],
     talking_points: [
       "Eliminar trabajo manual repetitivo en ERP/CRM",
+      "Integración y extensión de ERP existente sin reemplazarlo",
       "Operación 24/7 con menos errores humanos",
-      "Integración con sistemas que ya usan",
     ],
   },
   {
@@ -169,11 +190,32 @@ export const IAC_SOLUTIONS: IACSolution[] = [
   },
 ];
 
-const ROLE_SOLUTION_PRIORITY: Record<string, string[]> = {
-  operations: ["automation-center", "demand-forecast", "agentic-ai"],
-  sales: ["agentic-ai", "automation-center", "ai-training"],
-  data: ["demand-forecast", "automation-center", "agentic-ai"],
-  default: ["automation-center", "agentic-ai", "demand-forecast", "ai-training"],
+/** Señales de necesidad explícitas por solución (mayor peso = mayor coincidencia). */
+const NEED_SIGNALS: Record<string, Array<{ re: RegExp; weight: number; label: string }>> = {
+  "automation-center": [
+    { re: /\berp\b|software a medida|sistema de gesti[oó]n|desarrollo a medida/, weight: 14, label: "ERP / software a medida" },
+    { re: /\brpa\b|automatiz|proceso(s)? manual|back.?office|integraci[oó]n/, weight: 11, label: "automatización de procesos" },
+    { re: /flor|agro|exportaci[oó]n|agricult|horticult|manufactur|construcc|log[ií]stic/, weight: 8, label: "sector operativo" },
+    { re: /cio|cto|it director|director de ti|sistemas|tecnolog[ií]a/, weight: 6, label: "liderazgo TI/operaciones" },
+    { re: /general manager|gerente general|\bceo\b|coo|cfo/, weight: 5, label: "dirección general" },
+  ],
+  "demand-forecast": [
+    { re: /predicci[oó]n de demanda|demand planning|forecast|planeaci[oó]n de invent/, weight: 14, label: "predicción de demanda" },
+    { re: /inventario|quiebre de stock|sobre.?inventario|\bsku\b|rotaci[oó]n de stock/, weight: 11, label: "gestión de inventarios" },
+    { re: /supply chain|cadena de suministro|compras|procurement/, weight: 7, label: "cadena de suministro" },
+    { re: /retail|supermercado|distribuci[oó]n masiva/, weight: 5, label: "retail / distribución" },
+  ],
+  "agentic-ai": [
+    { re: /outbound|inbound|prospecci[oó]n comercial|pipeline de ventas/, weight: 12, label: "ventas automatizadas" },
+    { re: /cobranza|collections|recuperaci[oó]n de cartera/, weight: 10, label: "cobranzas" },
+    { re: /retenci[oó]n|churn|atenci[oó]n al cliente|servicio al cliente/, weight: 9, label: "retención y servicio" },
+    { re: /ventas|comercial|marketing|crm|revenue/, weight: 7, label: "área comercial" },
+  ],
+  "ai-training": [
+    { re: /formaci[oó]n|capacitaci[oó]n|entrenamiento|upskilling|reskilling/, weight: 13, label: "formación de equipos" },
+    { re: /adopci[oó]n de ia|cultura digital|alfabetizaci[oó]n/, weight: 10, label: "adopción de IA" },
+    { re: /innovaci[oó]n|transformaci[oó]n digital/, weight: 6, label: "innovación / transformación" },
+  ],
 };
 
 function normalizeToken(value: string): string {
@@ -184,46 +226,85 @@ function normalizeToken(value: string): string {
     .trim();
 }
 
-function detectRoleBucket(cargo: string | null | undefined): keyof typeof ROLE_SOLUTION_PRIORITY {
-  const c = normalizeToken(cargo ?? "");
-  if (
-    /supply|cadena|demand|demanda|inventario|compras|planific|analytics|data|cdo|bi/.test(c)
-  ) {
-    return "data";
+function scoreSolution(solution: IACSolution, combined: string): SolutionMatch {
+  let score = 0;
+  const reasons: string[] = [];
+
+  for (const signal of NEED_SIGNALS[solution.id] ?? []) {
+    if (signal.re.test(combined)) {
+      score += signal.weight;
+      reasons.push(signal.label);
+    }
   }
-  if (/ventas|sales|comercial|marketing|customer|cliente|cobranza|crm|revenue|cro/.test(c)) {
-    return "sales";
+
+  for (const role of solution.fit_roles) {
+    if (combined.includes(normalizeToken(role))) {
+      score += 2;
+    }
   }
-  if (/operac|automat|rpa|process|proceso|coo|cio|cto|ti|it/.test(c)) {
-    return "operations";
+
+  for (const industry of solution.industries) {
+    if (industry === "todos los sectores B2B") continue;
+    if (combined.includes(normalizeToken(industry))) {
+      score += 3;
+      reasons.push(`sector ${industry}`);
+    }
   }
-  return "default";
+
+  if (solution.id === "demand-forecast") {
+    const hasDemandNeed = NEED_SIGNALS["demand-forecast"].some(
+      (s) => s.weight >= 7 && s.re.test(combined)
+    );
+    if (!hasDemandNeed) score -= 25;
+  }
+
+  return { solution, score: Math.max(0, score), reasons: [...new Set(reasons)] };
+}
+
+export function rankSolutionsForProspect(
+  cargo: string | null | undefined,
+  hints = ""
+): SolutionMatch[] {
+  const combined = normalizeToken(`${cargo ?? ""} ${hints}`);
+
+  const ranked = IAC_SOLUTIONS.map((solution) => scoreSolution(solution, combined)).sort(
+    (a, b) => b.score - a.score
+  );
+
+  if (ranked[0]?.score === 0) {
+    const cargoNorm = normalizeToken(cargo ?? "");
+    const fallbackId =
+      /ventas|sales|comercial|marketing|crm/.test(cargoNorm)
+        ? "agentic-ai"
+        : /supply|inventario|compras|demand|data|analytics/.test(cargoNorm)
+          ? "demand-forecast"
+          : /innov|talent|hr|formaci/.test(cargoNorm)
+            ? "ai-training"
+            : "automation-center";
+
+    const fallback = IAC_SOLUTIONS.find((s) => s.id === fallbackId)!;
+    const rest = IAC_SOLUTIONS.filter((s) => s.id !== fallbackId);
+    return [
+      {
+        solution: fallback,
+        score: 1,
+        reasons: ["coincidencia por cargo (sin señales explícitas en contexto)"],
+      },
+      ...rest.map((solution) => ({ solution, score: 0, reasons: [] as string[] })),
+    ];
+  }
+
+  return ranked;
 }
 
 export function pickSolutionsForProspect(
   cargo: string | null | undefined,
   hints = ""
 ): IACSolution[] {
-  const combined = normalizeToken(`${cargo ?? ""} ${hints}`);
-  const bucket = detectRoleBucket(cargo);
-  const priority = ROLE_SOLUTION_PRIORITY[bucket];
-
-  const scored = IAC_SOLUTIONS.map((solution) => {
-    let score = priority.indexOf(solution.id);
-    if (score < 0) score = 10;
-    for (const role of solution.fit_roles) {
-      if (combined.includes(normalizeToken(role))) score -= 3;
-    }
-    for (const industry of solution.industries) {
-      if (combined.includes(normalizeToken(industry))) score -= 2;
-    }
-    return { solution, score };
-  });
-
-  return scored
-    .sort((a, b) => a.score - b.score)
+  return rankSolutionsForProspect(cargo, hints)
+    .filter((m) => m.score > 0)
     .slice(0, 2)
-    .map((s) => s.solution);
+    .map((m) => m.solution);
 }
 
 export function formatPortfolioForPrompt(solutions: IACSolution[]): string {
@@ -232,16 +313,41 @@ ${IAC_COMPANY_PROFILE.experience}. ${IAC_COMPANY_PROFILE.scale}.
 Sectores: ${IAC_COMPANY_PROFILE.sectors.join(", ")}.
 Web: ${IAC_COMPANY_PROFILE.contact.web}`;
 
-  const blocks = solutions.map((s) => {
-    return `### ${s.name}
+  const primary = solutions[0];
+  const secondary = solutions[1];
+
+  const blocks = solutions.map((s, index) => {
+    const role =
+      index === 0
+        ? "SOLUCIÓN PRINCIPAL — eje obligatorio del mensaje"
+        : "SOLUCIÓN COMPLEMENTARIA — mencionar solo brevemente si aporta valor";
+    return `### ${s.name} (${role})
 ${s.summary}
-Métricas de referencia (usar solo como orientación, no inventar casos nombrados): ${s.metrics.join("; ")}
+Métricas de referencia (orientación, no inventar casos nombrados): ${s.metrics.join("; ")}
 Ángulos de conversación: ${s.talking_points.join("; ")}`;
   });
 
-  return `${header}\n\nSOLUCIONES IAC A PRIORIZAR EN ESTE MENSAJE:\n${blocks.join("\n\n")}`;
+  const guardrails = `REGLAS DE ENFOQUE:
+- El mensaje debe girar en torno a «${primary?.name ?? "la solución principal"}».
+- NO mencionar Predicción de Demanda salvo que sea la solución principal o complementaria listada abajo.
+- No ofrecer soluciones del portafolio IAC que no aparezcan en esta lista.
+${secondary ? `- Máximo una mención breve de «${secondary.name}» si refuerza el argumento.` : "- No hace falta segunda solución."}`;
+
+  return `${header}\n\n${guardrails}\n\n${blocks.join("\n\n")}`;
 }
 
 export function formatSolutionNames(solutions: IACSolution[]): string[] {
   return solutions.map((s) => s.name);
+}
+
+export function formatMatchExplanation(matches: SolutionMatch[]): string {
+  const top = matches.filter((m) => m.score > 0).slice(0, 2);
+  if (!top.length) return "Sin señales fuertes; se usó coincidencia por cargo.";
+  return top
+    .map((m, i) => {
+      const role = i === 0 ? "Principal" : "Complementaria";
+      const why = m.reasons.length ? m.reasons.join(", ") : "perfil del cargo";
+      return `${role}: ${m.solution.name} (${why})`;
+    })
+    .join(" · ");
 }

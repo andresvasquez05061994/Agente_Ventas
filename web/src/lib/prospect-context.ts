@@ -1,7 +1,8 @@
 import { searchApolloOrganizations } from "./apollo-organizations";
 import {
+  formatMatchExplanation,
   formatSolutionNames,
-  pickSolutionsForProspect,
+  rankSolutionsForProspect,
   type IACSolution,
 } from "./iac-portfolio-knowledge";
 
@@ -18,6 +19,7 @@ export type ProspectInput = {
 
 export type ProspectContext = {
   recommended_solutions: IACSolution[];
+  solution_match_explanation: string;
   company_domain: string | null;
   company_web_title: string | null;
   company_web_summary: string | null;
@@ -148,7 +150,9 @@ export async function gatherProspectContext(input: ProspectInput): Promise<Prosp
   let company_domain: string | null = null;
   let company_web_title: string | null = null;
   let company_web_summary: string | null = null;
-  let hints = [input.notas, input.fuente, input.pais].filter(Boolean).join(" ");
+  let hints = [input.cargo, input.empresa, input.notas, input.fuente, input.pais]
+    .filter(Boolean)
+    .join(" ");
 
   if (input.empresa?.trim()) {
     company_domain = await resolveCompanyDomain(input.empresa, input.pais);
@@ -179,10 +183,14 @@ export async function gatherProspectContext(input: ProspectInput): Promise<Prosp
     hints = `${hints} linkedin`;
   }
 
-  const recommended_solutions = pickSolutionsForProspect(input.cargo, hints);
+  const ranked = rankSolutionsForProspect(input.cargo, hints);
+  const matched = ranked.filter((m) => m.score > 0).slice(0, 2).map((m) => m.solution);
+  const recommended_solutions = matched.length ? matched : ranked[0] ? [ranked[0].solution] : [];
+  const solution_match_explanation = formatMatchExplanation(ranked);
 
   return {
     recommended_solutions,
+    solution_match_explanation,
     company_domain,
     company_web_title,
     company_web_summary,
@@ -215,9 +223,15 @@ export function formatProspectContextBlock(
     lines.push("- Sin datos públicos del sitio web; personaliza con cargo, sector y país.");
   }
   lines.push(`- Fuentes usadas: ${context.intel_sources.join(", ")}`);
+  lines.push(`- Coincidencia portafolio IAC: ${context.solution_match_explanation}`);
   lines.push(
-    `- Soluciones IAC recomendadas: ${formatSolutionNames(context.recommended_solutions).join(" · ")}`
+    `- Solución principal para el mensaje: ${formatSolutionNames(context.recommended_solutions)[0] ?? "Centro de Automatización"}`
   );
+  if (context.recommended_solutions[1]) {
+    lines.push(
+      `- Solución complementaria (opcional): ${formatSolutionNames(context.recommended_solutions)[1]}`
+    );
+  }
 
   return lines.join("\n");
 }

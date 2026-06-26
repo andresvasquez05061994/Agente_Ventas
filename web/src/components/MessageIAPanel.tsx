@@ -51,8 +51,10 @@ function PersonalizationBlock({
       <p className="cold-call-block__text">{personalization.company_insight}</p>
       {personalization.iac_solutions.length > 0 && (
         <ul className="cold-call-list">
-          {personalization.iac_solutions.map((s) => (
-            <li key={s}>{s}</li>
+          {personalization.iac_solutions.map((s, index) => (
+            <li key={s}>
+              {index === 0 ? `★ ${s} (principal)` : `${s} (complementaria)`}
+            </li>
           ))}
         </ul>
       )}

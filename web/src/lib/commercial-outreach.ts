@@ -61,10 +61,13 @@ export class OutreachError extends Error {
 
 const COMMERCIAL_RULES = `Reglas comerciales (obligatorias):
 - Español profesional, directo y cercano. Sin hype ni promesas irreales.
-- Personaliza con cargo, empresa, país y AL MENOS UNA observación concreta del sitio web o sector del prospecto (si hay datos).
-- Menciona EXPLÍCITAMENTE 1-2 soluciones IAC del portafolio recomendado, con métricas orientativas del portafolio (no inventes casos de clientes nombrados).
-- Conecta el dolor típico del cargo con la solución IAC más relevante.
-- Si no hay datos web, sé específico con el rol y la empresa; no uses frases genéricas tipo "ayudamos a empresas como la suya".
+- Personaliza con cargo, empresa, país y AL MENOS UNA observación concreta del sitio web, notas o contexto de prospección.
+- El eje del mensaje DEBE ser la SOLUCIÓN PRINCIPAL indicada en el portafolio recomendado (primera de la lista). No cambies de solución por iniciativa propia.
+- NO mencionar «Predicción de Demanda» salvo que aparezca como solución principal o complementaria en el portafolio recomendado para este prospecto.
+- Menciona 1-2 soluciones SOLO de la lista recomendada, con métricas orientativas del portafolio (no inventes casos de clientes nombrados).
+- Conecta el dolor detectado en el contexto del prospecto (cargo, sector, web, fuente de búsqueda) con esa solución principal.
+- Si el contexto habla de ERP, software a medida, procesos o automatización → prioriza Centro de Automatización, no predicción de demanda.
+- Si no hay datos web, sé específico con el rol, la empresa y el contexto de prospección; evita frases genéricas.
 - No inventes noticias, financieros ni proyectos internos del prospecto.
 - Firma mentalmente como ${IAC_COMPANY_PROFILE.contact.consultant}, ${IAC_COMPANY_PROFILE.name} (${IAC_COMPANY_PROFILE.contact.web}).`;
 
@@ -105,7 +108,7 @@ Responde SOLO JSON válido (sin markdown):
   "headline": "enfoque comercial en máx 12 palabras, mencionando empresa o dolor detectado",
   "opening_line": "apertura 2-3 oraciones: saludo con nombre, referencia a la observación de empresa_hook, y puente hacia una solución IAC concreta",
   "why_now": "1-2 oraciones: urgencia operativa ligada a su sector o a lo visto en su web",
-  "value_points": ["beneficio 1 citando solución IAC + métrica del portafolio", "beneficio 2 ligado a su cargo", "beneficio 3 conectado con su empresa o sector"],
+  "value_points": ["beneficio 1 citando la SOLUCIÓN PRINCIPAL + métrica del portafolio", "beneficio 2 ligado a su cargo y contexto", "beneficio 3 conectado con su empresa o sector"],
   "discovery_question": "pregunta abierta que demuestre que investigaste su contexto",
   "closing": "cierre para agendar 15 min con ${IAC_COMPANY_PROFILE.contact.consultant} (1-2 oraciones)",
   "objection_tip": "respuesta breve si dice 'no tengo tiempo' o 'ya tenemos proveedor', mencionando complemento con IAC"
@@ -134,7 +137,7 @@ Responde SOLO JSON válido (sin markdown):
   "headline": "enfoque interno en máx 12 palabras",
   "greeting": "saludo con nombre",
   "hook": "2 oraciones: company_hook + problema del cargo enlazado a solución IAC concreta",
-  "value_bullets": ["bullet con solución IAC + métrica portafolio", "bullet personalizado al rol", "bullet conectado a su empresa"],
+  "value_bullets": ["bullet con la SOLUCIÓN PRINCIPAL + métrica portafolio", "bullet personalizado al rol y contexto", "bullet conectado a su empresa"],
   "body_close": "1-2 oraciones consultivas antes del CTA",
   "cta": "CTA de baja fricción (15 min con ${IAC_COMPANY_PROFILE.contact.consultant})",
   "ps_line": "P.S. breve con beneficio IAC principal o referencia a su sector"
@@ -175,7 +178,7 @@ function ruleBasedCall(input: OutreachInput, context: ProspectContext): ColdCall
       ? `¿Qué proceso en ${company} les está consumiendo más horas manuales hoy, considerando lo que hacen en su operación?`
       : `¿Cuál es hoy el cuello de botella operativo más costoso para usted como ${role}?`,
     closing: `¿Le funcionaría 15 minutos esta semana conmigo para ver si ${primary?.name ?? "automatización IAC"} encaja? Puedo martes o jueves en la mañana.`,
-    objection_tip: `Si no tiene tiempo: "Son 2 minutos para validar si vale una conversación de 15." Si ya tienen proveedor: "Muchos nos complementan en RPA, predicción de demanda o agentes IA donde otros no llegan."`,
+    objection_tip: `Si no tiene tiempo: "Son 2 minutos para validar si vale una conversación de 15." Si ya tienen proveedor: "Muchos nos complementan en ${primary?.name?.split("(")[0]?.trim() ?? "automatización y RPA"} donde otros no llegan."`,
     personalization,
     source: "rules",
   };
@@ -335,14 +338,14 @@ export async function generateOutreachMessage(
   if (channel === "email") {
     const content = await callMistral(
       buildEmailPrompt(input, context),
-      "Escribes cold emails B2B con datos del prospecto y soluciones concretas del portafolio IAC."
+      "Escribes cold emails B2B. Usa la solución principal del portafolio recomendado como eje. No ofrezcas Predicción de Demanda si no está en la lista recomendada."
     );
     return { channel: "email", ...parseEmailJson(content, context), source: "mistral", model };
   }
 
   const content = await callMistral(
     buildCallPrompt(input, context),
-    "Escribes guiones de llamada B2B con investigación del prospecto y soluciones concretas del portafolio IAC."
+    "Escribes guiones de llamada B2B. Usa la solución principal del portafolio recomendado como eje. No ofrezcas Predicción de Demanda si no está en la lista recomendada."
   );
   return { channel: "call", ...parseCallJson(content, context), source: "mistral", model };
 }
