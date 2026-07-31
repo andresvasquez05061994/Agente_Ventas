@@ -13,11 +13,15 @@ export const APOLLO_COUNTRIES = [
   { label: "España", value: "Spain" },
 ] as const;
 
-/** Cargos orientados a automatización de procesos, IA y predicción de demanda. */
+/** Cargos orientados a automatización, IA, transformación digital y proyectos. */
 export const APOLLO_JOB_TITLES = [
   { label: "Director de Operaciones / COO", value: "Chief Operating Officer" },
   { label: "Director de Automatización", value: "Director of Automation" },
   { label: "Director de Innovación", value: "Director of Innovation" },
+  { label: "Director de Transformación Digital", value: "Director of Digital Transformation" },
+  { label: "Chief Digital Officer (CDO)", value: "Chief Digital Officer" },
+  { label: "Director / Líder de Proyectos", value: "Project Manager" },
+  { label: "Program Manager", value: "Program Manager" },
   { label: "Director de TI / IT Director", value: "IT Director" },
   { label: "CTO", value: "CTO" },
   { label: "CIO", value: "CIO" },
@@ -146,6 +150,8 @@ export const APOLLO_EMPLOYEE_RANGES = [
   { label: "Micro / pequeña (1-50)", value: "1,50" },
   { label: "Mediana (51-200)", value: "51,200" },
   { label: "Mediana (51-500)", value: "51,500" },
+  { label: "Más de 100 empleados", value: "101,10000" },
+  { label: "Más de 200 empleados", value: "201,10000" },
   { label: "Grande (501-5.000)", value: "501,5000" },
   { label: "Enterprise (5.000+)", value: "5001,10000" },
 ] as const;
@@ -296,29 +302,38 @@ export function normalizeEmployeeRanges(raw: unknown): string[] {
 }
 
 export function inferEmployeeRangesFromText(text: string): string[] {
-  const q = text.toLowerCase();
+  const q = text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+
+  const numeric =
+    q.match(
+      /(?:mas de|mayor(?:es)? (?:a|de)|arriba de|from|over|>)\s*(\d{2,5})\s*(?:empleados?|personas?|colaboradores?)?/
+    ) ??
+    q.match(/empresas?\s+(?:de\s+)?(?:mas de|con mas de)\s+(\d{2,5})/) ??
+    q.match(/(\d{2,5})\s*\+\s*(?:empleados?|personas?)?/) ??
+    q.match(/al menos\s+(\d{2,5})\s*(?:empleados?|personas?)?/);
+
+  if (numeric?.[1]) {
+    const n = Number(numeric[1]);
+    if (n >= 5000) return ["5001,10000"];
+    if (n >= 500) return ["501,5000"];
+    if (n >= 200) return ["201,10000"];
+    if (n >= 100) return ["101,10000"];
+    if (n >= 50) return ["51,500"];
+    if (n >= 1) return ["1,50"];
+  }
+
   if (
     q.includes("mediana") ||
     q.includes("medianas") ||
     q.includes("mid-market") ||
     q.includes("mid market")
   ) {
-    return q.includes("pequeña") || q.includes("pequeñas") ? ["11,200"] : ["51,500"];
+    return q.includes("pequena") || q.includes("pequenas") ? ["1,50"] : ["51,500"];
   }
-  if (
-    q.includes("pequeña") ||
-    q.includes("pequeñas") ||
-    q.includes("pyme") ||
-    q.includes("startup")
-  ) {
+  if (q.includes("pequena") || q.includes("pequenas") || q.includes("pyme") || q.includes("startup")) {
     return ["1,50"];
   }
-  if (
-    q.includes("grande") ||
-    q.includes("grandes") ||
-    q.includes("enterprise") ||
-    q.includes("corporativ")
-  ) {
+  if (q.includes("grande") || q.includes("grandes") || q.includes("enterprise") || q.includes("corporativ")) {
     return ["501,5000"];
   }
   return [];

@@ -120,6 +120,13 @@ function inferKeywordFromQuery(query: string): string {
   ) {
     return "agriculture";
   }
+  if (
+    /\bia\b|inteligencia artificial|machine learning|proyectos? de ia|soluciones? ia|implementaci[oó]n de (soluciones? )?ia|transformaci[oó]n digital/.test(
+      q
+    )
+  ) {
+    return "software";
+  }
   for (const k of APOLLO_KEYWORDS) {
     if (!k.value) continue;
     if (q.includes(k.label.toLowerCase()) || q.includes(k.value.toLowerCase())) {
@@ -130,8 +137,8 @@ function inferKeywordFromQuery(query: string): string {
 }
 
 function userMentionedCompanySize(query: string): boolean {
-  const q = query.toLowerCase();
-  return /mediana|medianas|pequeña|pequeñas|grande|grandes|enterprise|pyme|startup|empleados|tamaño|tamano|\b1-50\b|\b51-/.test(
+  const q = query.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  return /mediana|medianas|pequena|pequenas|grande|grandes|enterprise|pyme|startup|empleados|personas|colaboradores|tamano|tamaño|\b1-50\b|\b51-|mas de\s*\d|mayor(?:es)? (?:a|de)\s*\d|\d+\s*\+|al menos\s*\d/.test(
     q
   );
 }
@@ -216,7 +223,11 @@ function resolveCountry(parsedCountry: string, userQuery: string): string {
 /** Mapea sugerencias de IA a cargos permitidos en Apollo. */
 export function mapTitlesFromSuggestions(suggestions: string[]): string[] {
   const matched = new Set<string>();
-  const tokens = suggestions.flatMap((s) => s.split(/[,;/|]+/).map((t) => t.trim())).filter(Boolean);
+  const tokens = suggestions
+    .flatMap((s) =>
+      s.split(/[,;/|]+|\s+o\s+|\s+ó\s+|\s+u\s+|\s+y\s+/i).map((t) => t.trim())
+    )
+    .filter(Boolean);
   const fullText = suggestions.join(" ").toLowerCase();
 
   if (/flor|agro|exportaci[oó]n/.test(fullText)) {
@@ -230,7 +241,35 @@ export function mapTitlesFromSuggestions(suggestions: string[]): string[] {
     matched.add("Chief Financial Officer");
     matched.add("General Manager");
   }
-  if (/decision|decisor|encargad/.test(fullText)) {
+  if (/lider(es)? de proyectos|jefe(s)? de proyecto|project manager|program manager|gestor(es)? de proyectos/.test(fullText)) {
+    matched.add("Project Manager");
+    matched.add("Program Manager");
+    matched.add("Director of Innovation");
+  }
+  if (/transformaci[oó]n digital|digital transformation|chief digital/.test(fullText)) {
+    matched.add("Director of Digital Transformation");
+    matched.add("Chief Digital Officer");
+    matched.add("Director of Innovation");
+    matched.add("CTO");
+  }
+  if (
+    /lider(es)? de tecnolog|tecnolog[ií]a|sistemas|it leader|head of (it|technology)/.test(fullText)
+  ) {
+    matched.add("IT Director");
+    matched.add("CTO");
+    matched.add("CIO");
+  }
+  if (
+    /\bia\b|inteligencia artificial|machine learning|proyectos? de ia|soluciones? ia|implementaci[oó]n.*(ia|inteligencia)/.test(
+      fullText
+    )
+  ) {
+    matched.add("Director of Artificial Intelligence");
+    matched.add("Director of Data Science");
+    matched.add("CTO");
+    matched.add("Director of Digital Transformation");
+  }
+  if (/decision|decisor|encargad/.test(fullText) && !/encargad[oa]s? de la implementaci/.test(fullText)) {
     matched.add("CEO");
     matched.add("General Manager");
     matched.add("Chief Operating Officer");
@@ -250,10 +289,8 @@ export function mapTitlesFromSuggestions(suggestions: string[]): string[] {
     }
     if (
       norm.includes("inteligencia artificial") ||
-      norm.includes(" entrenamiento") ||
       /\bia\b/.test(norm) ||
-      norm.includes("machine learning") ||
-      norm.includes(" aprendizaje")
+      norm.includes("machine learning")
     ) {
       matched.add("Director of Artificial Intelligence");
       matched.add("Director of Data Science");
@@ -283,11 +320,16 @@ export function mapTitlesFromSuggestions(suggestions: string[]): string[] {
       matched.add("Chief Operating Officer");
       continue;
     }
-    if (norm.includes("transformaci") && norm.includes("digital")) {
+    if (norm.includes("transformaci") || norm.includes("digital")) {
       matched.add("Director of Digital Transformation");
       matched.add("Chief Digital Officer");
       matched.add("Director of Innovation");
       matched.add("CTO");
+      continue;
+    }
+    if (norm.includes("proyecto") || norm.includes("project") || norm.includes("program manager")) {
+      matched.add("Project Manager");
+      matched.add("Program Manager");
       continue;
     }
     if (norm.includes("formaci") || norm.includes("capacit") || norm.includes("entrenamiento")) {
@@ -295,11 +337,6 @@ export function mapTitlesFromSuggestions(suggestions: string[]): string[] {
       matched.add("Human Resources Director");
       matched.add("Chief Human Resources Officer");
       matched.add("Director of Innovation");
-      continue;
-    }
-    if (norm.includes("lider") || norm.includes("líder") || norm.includes("leader")) {
-      matched.add("Director of Innovation");
-      matched.add("IT Director");
       continue;
     }
     if (
@@ -332,16 +369,6 @@ export function mapTitlesFromSuggestions(suggestions: string[]): string[] {
       matched.add("Chief Financial Officer");
       matched.add("General Manager");
     }
-    if (
-      norm.includes("decision") ||
-      norm.includes("decisor") ||
-      norm.includes("encargad") ||
-      norm.includes("responsable de")
-    ) {
-      matched.add("CEO");
-      matched.add("General Manager");
-      matched.add("Chief Operating Officer");
-    }
 
     for (const t of APOLLO_PRESET_JOB_TITLES) {
       const val = t.value.toLowerCase();
@@ -367,9 +394,11 @@ export function rankAndLimitTitles(titles: string[], userQuery: string): string[
     let score = 0;
     if (q.includes("ia") || q.includes("inteligencia artificial")) {
       if (t.includes("artificial intelligence") || t.includes("data science") || t === "cto") score += 5;
+      if (t.includes("digital transformation")) score += 4;
     }
     if (q.includes("automatiz") && t.includes("automation")) score += 5;
     if (q.includes("transformaci") && t.includes("digital")) score += 6;
+    if (q.includes("proyecto") && (t.includes("project") || t.includes("program"))) score += 6;
     if (q.includes("formaci") || q.includes("talento") || q.includes("rrhh")) {
       if (t.includes("human resources") || t.includes("talent")) score += 5;
     }
@@ -377,7 +406,9 @@ export function rankAndLimitTitles(titles: string[], userQuery: string): string[
       if (t.includes("demand") || t.includes("supply")) score += 5;
     }
     if (q.includes("director") && t.includes("director")) score += 2;
-    if (q.includes("tecnolog") && (t.includes("technology") || t.includes("it "))) score += 3;
+    if (q.includes("tecnolog") && (t.includes("technology") || t.includes("it ") || t === "cto" || t === "cio")) {
+      score += 4;
+    }
     if (q.includes("erp") || q.includes("sistema")) {
       if (t.includes("cio") || t.includes("it director") || t.includes("chief financial")) score += 5;
       if (t.includes("general manager") || t === "ceo") score += 4;
@@ -536,16 +567,22 @@ Analiza la intención y devuelve SOLO un JSON válido (sin markdown) con esta fo
 Reglas estrictas:
 - country, keyword, seniority y employee_ranges[].value deben ser valores "value" EXACTOS de las listas (copia literal).
 - Si el usuario pide un país específico (ej. Colombia), country DEBE ser ese país. Nunca otro.
-- employee_ranges: SOLO si el usuario menciona explícitamente tamaño (pequeña, mediana, grande, pyme, empleados). Si no lo menciona → [].
+- employee_ranges: SOLO si el usuario menciona explícitamente tamaño (pequeña, mediana, grande, pyme, empleados, "más de N"). Si no lo menciona → [].
+- "más de 100 empleados" / "empresas de más de 100" → employee_ranges: ["101,10000"]. Más de 200 → ["201,10000"]. Más de 500 → ["501,5000"].
 - Si menciona "empresas medianas" → employee_ranges: ["51,500"]. Pequeñas → ["1,50"]. Grandes → ["501,5000"].
-- seniority: SOLO si pide nivel explícito (director, gerente, C-suite, VP). "Quien toma decisiones" NO implica seniority.
+- seniority: SOLO si pide nivel explícito (director, gerente, C-suite, VP). "Líder de X" NO implica seniority; se traduce a cargos titles.
 - Floricultura, agro, exportación agrícola → keyword: "agriculture".
-- titles: máximo 6 cargos alineados con la consulta (no listes todos los posibles).
+- IA, proyectos de IA, transformación digital, software → keyword: "software" salvo otra industria clara.
+- titles: máximo 6 cargos. Si el usuario dice "A o B o C", incluye los cargos equivalentes de cada uno.
+- "Líder de proyectos" → Project Manager / Program Manager. "Líder de transformación digital" → Director of Digital Transformation / Chief Digital Officer. "Líderes de tecnología" / implementación de IA → IT Director, CTO, CIO, Director of Artificial Intelligence.
 - ERP o software a medida → CIO, IT Director, CFO, General Manager o CEO según contexto.
-- Si habla de transformación digital, IA o automatización → cargos coherentes (CTO, Director of Innovation, etc.).
 - Si no menciona país → "Colombia".
 - per_page: 5 por defecto. Solo otro valor si el usuario pide cantidad (ej. "10 contactos", "quiero 15 resultados").
 - No inventes filtros: campos vacíos si el usuario no los mencionó (keyword "", seniority "", employee_ranges [], company "").
+
+Ejemplo de interpretación:
+Consulta: "Líder de proyectos o líder de transformación digital o líderes de tecnología encargados de la implementación de soluciones IA en sus empresas, empresas de más de 100 empleados en Colombia que tengan proyectos de IA"
+→ country: "Colombia", titles: ["Project Manager","Director of Digital Transformation","IT Director","CTO","Director of Artificial Intelligence","Program Manager"], keyword: "software", seniority: "", company: "", employee_ranges: ["101,10000"], per_page: 5
 
 Listas permitidas:
 ${JSON.stringify(FILTER_CATALOG, null, 2)}

@@ -65,14 +65,13 @@ export default function ProspeccionPage() {
   }
 
   async function search(overrides?: Partial<SearchParams>) {
-    const fromInterpretation = Boolean(overrides);
     const params: SearchParams = {
       country: overrides?.country ?? country,
       titles: overrides?.titles ?? titles,
       keyword: overrides?.keyword ?? keyword,
       seniority: overrides?.seniority ?? seniority,
       company: overrides?.company ?? company,
-      employeeRanges: fromInterpretation ? (overrides?.employeeRanges ?? []) : [],
+      employeeRanges: overrides?.employeeRanges ?? employeeRanges,
       perPage: overrides?.perPage ?? perPage,
     };
 
@@ -83,12 +82,12 @@ export default function ProspeccionPage() {
     }
 
     if (!overrides) {
-      setEmployeeRanges([]);
       setCountry(params.country);
       setCompany(params.company);
       setTitles(params.titles);
       setKeyword(params.keyword);
       setSeniority(params.seniority);
+      setEmployeeRanges(params.employeeRanges);
       setPerPage(params.perPage);
     }
 
@@ -256,6 +255,8 @@ export default function ProspeccionPage() {
     setKeyword,
     seniority,
     setSeniority,
+    employeeRanges,
+    setEmployeeRanges,
     perPage,
     setPerPage,
     loading: status === "loading" || saving,

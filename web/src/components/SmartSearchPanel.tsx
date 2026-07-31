@@ -119,7 +119,7 @@ export function SmartSearchPanel({ disabled, onApply }: SmartSearchPanelProps) {
 
       <textarea
         className="input-field smart-search-textarea resize-y"
-        placeholder="Describe a quién buscas en lenguaje natural (país, cargo, industria y empresa)"
+        placeholder="Ej: Líder de proyectos o transformación digital o líderes de tecnología para implementar IA; empresas de más de 100 empleados en Colombia"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}

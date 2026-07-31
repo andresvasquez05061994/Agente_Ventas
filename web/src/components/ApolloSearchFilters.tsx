@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   APOLLO_COUNTRIES,
+  APOLLO_EMPLOYEE_RANGES,
   APOLLO_JOB_TITLES,
   APOLLO_JOB_TITLES_OTHER,
   APOLLO_KEYWORDS,
@@ -28,6 +29,8 @@ export type ApolloSearchFiltersProps = {
   setKeyword: (v: string) => void;
   seniority: string;
   setSeniority: (v: string) => void;
+  employeeRanges: string[];
+  setEmployeeRanges: (v: string[]) => void;
   perPage: number;
   setPerPage: (v: number) => void;
   loading: boolean;
@@ -74,6 +77,8 @@ export function ApolloSearchFilters({
   setKeyword,
   seniority,
   setSeniority,
+  employeeRanges,
+  setEmployeeRanges,
   perPage,
   setPerPage,
   loading,
@@ -164,7 +169,7 @@ export function ApolloSearchFilters({
         </div>
       </div>
 
-      <p className="apollo-titles-group-label">IA, automatización y demanda</p>
+      <p className="apollo-titles-group-label">IA, automatización y transformación</p>
       <TitleCheckboxList
         items={APOLLO_JOB_TITLES}
         titles={titles}
@@ -265,6 +270,19 @@ export function ApolloSearchFilters({
         {APOLLO_SENIORITIES.map((s) => (
           <option key={s.label} value={s.value}>
             {s.label}
+          </option>
+        ))}
+      </select>
+
+      <FieldLabel>Tamaño de empresa</FieldLabel>
+      <select
+        className="input-field mb-3"
+        value={employeeRanges[0] ?? ""}
+        onChange={(e) => setEmployeeRanges(e.target.value ? [e.target.value] : [])}
+      >
+        {APOLLO_EMPLOYEE_RANGES.map((r) => (
+          <option key={r.label} value={r.value}>
+            {r.label}
           </option>
         ))}
       </select>
