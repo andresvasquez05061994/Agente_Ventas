@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
 import { ensureDb } from "@/lib/db";
 
+/** Sonda pública de disponibilidad. No devuelve leads ni secretos. */
 export async function GET() {
   const checks = {
     apollo_key: Boolean(process.env.APOLLO_API_KEY),

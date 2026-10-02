@@ -4,10 +4,14 @@ import {
   OutreachError,
   type OutreachChannel,
 } from "@/lib/commercial-outreach";
+import { requireTeamApi } from "@/lib/session";
 
 export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  const denied = await requireTeamApi();
+  if (denied) return denied;
   try {
     const body = (await req.json()) as Record<string, unknown>;
     const channel = body.channel === "email" ? "email" : "call";

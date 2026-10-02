@@ -4,8 +4,13 @@ import {
   interpretSmartSearch,
   verifyMistralHealth,
 } from "@/lib/smart-search";
+import { requireTeamApi } from "@/lib/session";
+
+export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const denied = await requireTeamApi();
+  if (denied) return denied;
   try {
     const health = await verifyMistralHealth();
     return NextResponse.json(health, { status: health.ok ? 200 : 503 });
@@ -16,6 +21,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await requireTeamApi();
+  if (denied) return denied;
   try {
     const body = await req.json();
     const query = String(body.query ?? "").trim();

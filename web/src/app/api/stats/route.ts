@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { getApolloProspeccionCredits, ensureDb, getStats } from "@/lib/db";
+import { requireTeamApi } from "@/lib/session";
+
+export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const denied = await requireTeamApi();
+  if (denied) return denied;
   try {
     await ensureDb();
     const [stats, apollo] = await Promise.all([

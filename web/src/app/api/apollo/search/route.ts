@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { ApolloApiError, searchApolloWithContacts } from "@/lib/apollo";
 import { validateSearchRequest } from "@/lib/apollo-filters";
 import { ensureDb } from "@/lib/db";
+import { requireTeamApi } from "@/lib/session";
 
 export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
+  const denied = await requireTeamApi();
+  if (denied) return denied;
   try {
     await ensureDb();
     const body = await req.json();

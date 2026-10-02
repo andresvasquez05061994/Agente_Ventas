@@ -4,7 +4,10 @@
  *      APP_URL=http://localhost:3000 node scripts/test-platform.mjs
  */
 
+import { appSessionHeaders } from "./app-session.mjs";
+
 const BASE = (process.env.APP_URL ?? "https://agente-ventas-three.vercel.app").replace(/\/$/, "");
+let sessionHeaders = {};
 
 const results = [];
 let failures = 0;
@@ -25,6 +28,7 @@ async function fetchJson(path, options = {}) {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...sessionHeaders,
       ...(options.headers ?? {}),
     },
   });
@@ -41,7 +45,7 @@ async function testPages() {
   console.log("\n1. Páginas (HTML)");
   const pages = ["/", "/prospeccion", "/portafolio", "/conversaciones", "/resumen"];
   for (const path of pages) {
-    const res = await fetch(`${BASE}${path}`, { redirect: "follow" });
+    const res = await fetch(`${BASE}${path}`, { redirect: "follow", headers: sessionHeaders });
     if (res.ok) pass(`${path}`, `HTTP ${res.status}`);
     else fail(`${path}`, `HTTP ${res.status}`);
   }
@@ -198,6 +202,7 @@ async function main() {
   console.log(`\n═══ Test de plataforma IAC ═══`);
   console.log(`Base: ${BASE}`);
   console.log(`Fecha: ${new Date().toISOString()}`);
+  sessionHeaders = await appSessionHeaders(BASE);
 
   await testPages();
   await testHealth();

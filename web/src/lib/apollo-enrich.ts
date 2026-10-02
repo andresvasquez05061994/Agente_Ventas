@@ -169,10 +169,17 @@ async function bulkMatchPeople(
 
   if (options.revealPhone) {
     const base = webhookBaseUrl();
-    if (!base) {
-      return { byId: new Map(), credits: 0, error: "Webhook no configurado (APOLLO_WEBHOOK_BASE_URL)" };
+    const secret = process.env.APOLLO_WEBHOOK_SECRET?.trim() ?? "";
+    if (!base || secret.length < 16) {
+      return {
+        byId: new Map(),
+        credits: 0,
+        error: "Webhook no configurado (APOLLO_WEBHOOK_BASE_URL y APOLLO_WEBHOOK_SECRET)",
+      };
     }
-    url.searchParams.set("webhook_url", `${base}/api/apollo/phone-webhook`);
+    const hook = new URL(`${base}/api/apollo/phone-webhook`);
+    hook.searchParams.set("token", secret);
+    url.searchParams.set("webhook_url", hook.toString());
   }
 
   let res: Response;

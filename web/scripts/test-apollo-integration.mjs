@@ -3,6 +3,14 @@
  * Uso: node --env-file=.env.local scripts/test-apollo-integration.mjs
  * O desde raíz: node --env-file=web/.env.local web/scripts/test-apollo-integration.mjs
  */
+import { appSessionHeaders } from "./app-session.mjs";
+
+function apolloPhoneWebhookUrl(base) {
+  const secret = process.env.APOLLO_WEBHOOK_SECRET?.trim();
+  const url = new URL(`${base}/api/apollo/phone-webhook`);
+  if (secret) url.searchParams.set("token", secret);
+  return url.toString();
+}
 const key = process.env.APOLLO_API_KEY;
 const webhook =
   process.env.APOLLO_WEBHOOK_BASE_URL?.replace(/\/$/, "") ??
@@ -117,7 +125,7 @@ if (!bulkEmailRes.ok) {
   if (webhook && email) {
     const bulkPhoneUrl =
       `${BASE}/people/bulk_match?reveal_personal_emails=false&reveal_phone_number=true` +
-      `&webhook_url=${encodeURIComponent(`${webhook}/api/apollo/phone-webhook`)}`;
+      `&webhook_url=${encodeURIComponent(apolloPhoneWebhookUrl(webhook))}`;
     const bulkPhoneRes = await fetch(bulkPhoneUrl, {
       method: "POST",
       headers,
@@ -137,9 +145,10 @@ if (!bulkEmailRes.ok) {
 // 4. App API (opcional)
 const appUrl = process.env.APP_TEST_URL ?? "https://agente-ventas-three.vercel.app";
 try {
+  const sessionHeaders = await appSessionHeaders(appUrl);
   const appRes = await fetch(`${appUrl}/api/apollo/search`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...sessionHeaders },
     body: JSON.stringify({
       country: "Colombia",
       titles: ["IT Director"],
