@@ -19,8 +19,12 @@ Plataforma B2B de prospección con Apollo.io y gestión de leads en Neon Postgre
 DATABASE_URL=postgresql://...
 APOLLO_API_KEY=...
 APOLLO_WEBHOOK_BASE_URL=https://tu-dominio.vercel.app   # opcional; en Vercel usa VERCEL_URL
-AUTH_SECRET=                # openssl rand -base64 32   (mínimo 32)
-TEAM_PASSWORD=              # openssl rand -base64 24   (mínimo 12)
+AUTH_SECRET=                # openssl rand -base64 32   (mínimo 32, siempre)
+TEAM_PASSWORD=              # opcional; mínimo 12. Si está vacía no hay formulario
+GOOGLE_CLIENT_ID=           # ID de cliente OAuth web
+GOOGLE_CLIENT_SECRET=       # secreto de ese cliente
+ALLOWED_EMAILS=             # ana@empresa.com,luis@empresa.com
+ALLOWED_EMAIL_DOMAINS=      # empresa.com  (sin @; basta una de las dos listas)
 APOLLO_WEBHOOK_SECRET=      # openssl rand -hex 32      (mínimo 16)
 WHATSAPP_APP_SECRET=        # App Secret de Meta        (mínimo 16)
 WHATSAPP_VERIFY_TOKEN=      # token que eliges tú       (mínimo 8)
@@ -32,7 +36,7 @@ Apollo requiere **créditos activos** para `people/bulk_match` (email y teléfon
 
 ### Acceso y webhooks (Vercel, después de merge)
 
-Sin `AUTH_SECRET` y `TEAM_PASSWORD` la app no abre datos: las páginas van a `/login` y las APIs de leads responden 401 o 503. No hace falta tocar la base de datos.
+Sin `AUTH_SECRET` y sin un método de acceso (Google o `TEAM_PASSWORD`) la app no abre datos: las páginas van a `/login` y las APIs de leads responden 401 o 503. No hace falta tocar la base de datos. Los webhooks de WhatsApp y Apollo siguen autenticándose con su firma o token, no con Google.
 
 1. Genera los valores (no los subas a git):
 
@@ -45,11 +49,34 @@ Sin `AUTH_SECRET` y `TEAM_PASSWORD` la app no abre datos: las páginas van a `/l
 
    `WHATSAPP_APP_SECRET` se copia de Meta → App Dashboard → Settings → Basic → App Secret.
 
-2. Vercel → proyecto → **Settings → Environment Variables**. Añade las cinco variables en **Production** y **Preview**.
+2. Vercel → proyecto → **Settings → Environment Variables**. Añade `AUTH_SECRET`, `APOLLO_WEBHOOK_SECRET`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN` y, si quieres el respaldo, `TEAM_PASSWORD`, en **Production** y **Preview**. Google va en la sección de abajo.
 3. **Deployments → Redeploy** del deployment que quieras actualizar. Guardar la variable no redespliega solo.
-4. Entra en `/login` con `TEAM_PASSWORD`. La sesión dura 7 días (cookie `av_session`, HttpOnly).
+4. Entra en `/login`. Si `TEAM_PASSWORD` está definida verás el formulario de respaldo. La sesión dura 7 días (cookie `av_session`, HttpOnly).
 5. En Meta, webhook Callback URL `https://agente-ventas-three.vercel.app/api/whatsapp/webhook` y el mismo verify token. Los `POST` sin `X-Hub-Signature-256` válido se rechazan.
 6. El webhook de teléfonos de Apollo lleva `?token=` armado por el servidor. No lo construyas en el navegador. Llamadas ya encoladas sin ese token fallan con 401.
+
+### Acceso con Google
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → crea o elige un proyecto.
+2. **APIs y servicios → Pantalla de consentimiento de OAuth**.
+   - Workspace de la empresa: tipo **Interno**.
+   - Si no, tipo **Externo** en modo **Pruebas** y añade cada correo en **Usuarios de prueba**. En Pruebas, Google bloquea a quien no esté ahí, además de nuestra lista.
+   - Nombre: `Agente Ventas IAC`. Alcances del login: `openid`, `email`, `profile`.
+3. **Credenciales → Crear credenciales → ID de cliente de OAuth → Aplicación web**.
+4. Orígenes autorizados de JavaScript, sin ruta y sin barra final:
+   - `https://agente-ventas-three.vercel.app`
+   - `http://localhost:3000`
+   - `https://<host-del-preview>.vercel.app` por cada preview
+5. URI de redirección autorizados, exactos (Google no admite `*`):
+   - `https://agente-ventas-three.vercel.app/api/auth/google/callback`
+   - `http://localhost:3000/api/auth/google/callback`
+   - `https://<host-del-preview>.vercel.app/api/auth/google/callback`
+   - Con dominio propio: `https://<tu-dominio>/api/auth/google/callback`
+6. En Vercel, Production y Preview: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, y al menos `ALLOWED_EMAILS` o `ALLOWED_EMAIL_DOMAINS` (dominios sin `@`).
+7. **Deployments → Redeploy.**
+8. En `/login`, **Continuar con Google**. Un correo que no esté en la lista vuelve con el aviso de que no está autorizado y no entra. La lista se vuelve a comprobar en cada request.
+
+`TEAM_PASSWORD` es opcional. Si la quitas y redespliegas, desaparece el formulario y solo queda Google. Quien conozca la contraseña entra aunque su correo no esté en la lista: úsala solo mientras el equipo migra.
 
 Los scripts `test:platform`, `test:mistral` y `test:apollo` siguen apuntando a producción. Si defines `TEAM_PASSWORD` en el entorno, envían la cookie de sesión. No los ejecutes contra producción si no quieres modificar datos reales.
 

@@ -5,8 +5,14 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  assessGoogleProfile,
+  emailAllowed,
+  isAllowedGoogleRedirect,
+  loginErrorMessage,
   passwordMatches,
+  readOAuthTransaction,
   sessionStatus,
+  signOAuthTransaction,
   signSession,
   type AuthEnv,
 } from "../src/lib/team-auth.ts";
@@ -21,6 +27,19 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const env: AuthEnv = {
   authSecret: "a".repeat(32),
   teamPassword: "clave-equipo-segura",
+  googleClientId: "",
+  googleClientSecret: "",
+  allowedEmails: [],
+  allowedDomains: [],
+};
+
+const googleEnv: AuthEnv = {
+  authSecret: "a".repeat(32),
+  teamPassword: "",
+  googleClientId: "client-id.apps.googleusercontent.com",
+  googleClientSecret: "google-client-secret-value",
+  allowedEmails: ["andres@iac.com"],
+  allowedDomains: ["empresa.com"],
 };
 
 test("la sesión firmada se acepta y caduca", () => {
@@ -52,8 +71,59 @@ test("rotar la contraseña invalida la sesión", () => {
 });
 
 test("sin secretos suficientes la auth queda cerrada", () => {
-  assert.equal(sessionStatus("x", { authSecret: "short", teamPassword: "short" }), "misconfigured");
-  assert.throws(() => signSession({ authSecret: "short", teamPassword: env.teamPassword }));
+  assert.equal(sessionStatus("x", { ...env, authSecret: "short", teamPassword: "short" }), "misconfigured");
+  assert.throws(() => signSession({ ...env, authSecret: "short" }));
+});
+
+test("Google solo acepta correos o dominios de la lista", () => {
+  const now = 1_700_000_000_000;
+  const token = signSession(googleEnv, now, { method: "google", email: "Andres@IAC.com" });
+  assert.equal(sessionStatus(token, googleEnv, now + 1000), "ok");
+  assert.equal(
+    sessionStatus(token, { ...googleEnv, allowedEmails: [], allowedDomains: ["otra.com"] }, now + 1000),
+    "unauthenticated"
+  );
+
+  const domainToken = signSession(googleEnv, now, { method: "google", email: "ana@empresa.com" });
+  assert.equal(sessionStatus(domainToken, googleEnv, now + 1000), "ok");
+  assert.throws(() => signSession(googleEnv, now, { method: "google", email: "otro@gmail.com" }));
+  assert.equal(emailAllowed("otro@gmail.com", { ...googleEnv, allowedEmails: [], allowedDomains: [] }), false);
+  assert.equal(sessionStatus(signSession(env, now), googleEnv, now + 1000), "unauthenticated");
+  assert.throws(() => signSession(googleEnv, now));
+
+  assert.deepEqual(assessGoogleProfile({ email: "Andres@IAC.com", email_verified: true }, googleEnv), {
+    ok: true,
+    email: "andres@iac.com",
+  });
+  assert.equal(assessGoogleProfile({ email: "andres@iac.com", email_verified: false }, googleEnv).ok, false);
+  assert.equal(assessGoogleProfile({ email: "andres@iac.com", email_verified: "true" }, googleEnv).ok, true);
+  assert.deepEqual(
+    assessGoogleProfile({ email: "x@gmail.com", email_verified: true }, googleEnv),
+    { ok: false, reason: "not_allowed" }
+  );
+});
+
+test("el state de Google va firmado y caduca", () => {
+  const redirect = "http://localhost:3000/api/auth/google/callback";
+  const raw = signOAuthTransaction(googleEnv, "state-123", redirect, 1_000);
+  assert.deepEqual(readOAuthTransaction(raw, googleEnv, 1_000), {
+    state: "state-123",
+    redirectUri: redirect,
+  });
+  assert.equal(readOAuthTransaction(raw, googleEnv, 1_000 + 11 * 60 * 1000), null);
+  assert.equal(
+    isAllowedGoogleRedirect("https://agente-ventas-three.vercel.app/api/auth/google/callback"),
+    true
+  );
+  assert.equal(isAllowedGoogleRedirect("http://localhost:3000/api/auth/google/callback"), true);
+  assert.equal(isAllowedGoogleRedirect("https://evil.example/api/auth/google/callback?x=1"), false);
+  assert.equal(isAllowedGoogleRedirect("http://evil.example/api/auth/google/callback"), false);
+});
+
+test("el mensaje de cuenta no autorizada no refleja HTML", () => {
+  assert.match(loginErrorMessage("not_allowed", "ana@empresa.com") ?? "", /ana@empresa.com/);
+  assert.equal(loginErrorMessage("not_allowed", "<script>")?.includes("script"), false);
+  assert.equal(loginErrorMessage("inyectado", "ana@empresa.com"), null);
 });
 
 test("la contraseña coincide en tiempo constante y rechaza vacías o enormes", () => {
@@ -112,6 +182,8 @@ test("cada route handler de datos exige sesión y los públicos no", () => {
     "src/app/api/health/route.ts",
     "src/app/api/auth/login/route.ts",
     "src/app/api/auth/logout/route.ts",
+    "src/app/api/auth/google/route.ts",
+    "src/app/api/auth/google/callback/route.ts",
     "src/app/api/whatsapp/webhook/route.ts",
     "src/app/api/apollo/phone-webhook/route.ts",
   ]);
@@ -153,6 +225,19 @@ test("cada route handler de datos exige sesión y los públicos no", () => {
 
   const apollo = fs.readFileSync(path.join(root, "src/app/api/apollo/phone-webhook/route.ts"), "utf8");
   assert.match(apollo, /verifySharedToken/);
+
+  const googleStart = fs.readFileSync(path.join(root, "src/app/api/auth/google/route.ts"), "utf8");
+  assert.match(googleStart, /googleAuthorizationUrl/);
+  const googleOauth = fs.readFileSync(path.join(root, "src/lib/google-oauth.ts"), "utf8");
+  assert.match(googleOauth, /accounts\.google\.com/);
+  assert.match(googleOauth, /jwtVerify/);
+  const googleCallback = fs.readFileSync(
+    path.join(root, "src/app/api/auth/google/callback/route.ts"),
+    "utf8"
+  );
+  assert.match(googleCallback, /assessGoogleProfile/);
+  const passwordLogin = fs.readFileSync(path.join(root, "src/app/api/auth/login/route.ts"), "utf8");
+  assert.match(passwordLogin, /isPasswordEnabled/);
 
   const layout = fs.readFileSync(path.join(root, "src/app/(app)/layout.tsx"), "utf8");
   assert.match(layout, /currentSessionStatus/);

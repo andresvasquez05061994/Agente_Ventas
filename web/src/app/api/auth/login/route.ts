@@ -4,6 +4,7 @@ import {
   SESSION_MAX_AGE_SEC,
   authEnvFromProcess,
   isAuthConfigured,
+  isPasswordEnabled,
   passwordMatches,
   sessionCookieOptions,
   signSession,
@@ -18,6 +19,9 @@ export async function POST(req: NextRequest) {
       { error: "Autenticación no configurada en el servidor" },
       { status: 503 }
     );
+  }
+  if (!isPasswordEnabled(env)) {
+    return NextResponse.json({ error: "El acceso por contraseña no está activo" }, { status: 403 });
   }
 
   let password = "";
