@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { clearAllLeads, ensureDb, getLeads, saveLeads } from "@/lib/db";
+import { requireTeamApi } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  const denied = await requireTeamApi();
+  if (denied) return denied;
   try {
     await ensureDb();
     const { searchParams } = new URL(req.url);
@@ -28,6 +31,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await requireTeamApi();
+  if (denied) return denied;
   try {
     await ensureDb();
     const body = await req.json();
@@ -70,6 +75,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const denied = await requireTeamApi();
+  if (denied) return denied;
   try {
     const confirm = req.nextUrl.searchParams.get("confirm");
     if (confirm !== "true") {

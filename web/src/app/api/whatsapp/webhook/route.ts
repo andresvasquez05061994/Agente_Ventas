@@ -6,15 +6,60 @@ import {
   updateLeadConversationId,
   updateLeadWhatsAppStatus,
 } from "@/lib/db";
+import { verifyMetaSignature, verifySubscribeHandshake } from "@/lib/webhook-auth";
+
+export const dynamic = "force-dynamic";
 
 /**
- * Webhook entrante de WhatsApp (Meta / Twilio / pruebas).
- * Body: { telefono: string, mensaje: string, conversation_id?: string }
+ * Verificación del webhook (Meta): hub.mode, hub.verify_token, hub.challenge.
+ * El challenge se devuelve en texto plano, sin JSON.
+ */
+export async function GET(req: NextRequest) {
+  const challenge = verifySubscribeHandshake(
+    req.nextUrl.searchParams.get("hub.mode"),
+    req.nextUrl.searchParams.get("hub.verify_token"),
+    req.nextUrl.searchParams.get("hub.challenge"),
+    process.env.WHATSAPP_VERIFY_TOKEN?.trim() ?? ""
+  );
+  if (!challenge) {
+    return NextResponse.json({ error: "Verificación rechazada" }, { status: 403 });
+  }
+  return new NextResponse(challenge, {
+    status: 200,
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
+}
+
+/**
+ * Mensaje entrante. Solo se procesa si `X-Hub-Signature-256` coincide con
+ * el HMAC-SHA256 del cuerpo crudo y `WHATSAPP_APP_SECRET`.
+ * Body aceptado tras la firma: { telefono, mensaje | message, conversation_id? }.
  */
 export async function POST(req: NextRequest) {
+  const raw = await req.text();
+  const valid = verifyMetaSignature(
+    raw,
+    req.headers.get("x-hub-signature-256"),
+    process.env.WHATSAPP_APP_SECRET?.trim() ?? ""
+  );
+  if (!valid) {
+    return NextResponse.json({ error: "Firma de WhatsApp inválida" }, { status: 401 });
+  }
+
+  let body: {
+    telefono?: unknown;
+    mensaje?: unknown;
+    message?: unknown;
+    conversation_id?: unknown;
+  };
+  try {
+    body = JSON.parse(raw) as typeof body;
+  } catch {
+    return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  }
+
   try {
     await ensureDb();
-    const body = await req.json();
     const telefono = String(body.telefono ?? "").trim();
     const mensaje = String(body.mensaje ?? body.message ?? "").trim();
 
@@ -40,7 +85,6 @@ export async function POST(req: NextRequest) {
       await updateLeadConversationId(lead.id, String(body.conversation_id));
     }
 
-    // La respuesta del agente Mistral se integrará en el worker de Fase 3.
     return NextResponse.json({
       ok: true,
       lead_id: lead.id,

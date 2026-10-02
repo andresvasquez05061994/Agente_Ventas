@@ -15,11 +15,40 @@ Plataforma de prospección y gestión de leads (Fase 1).
 1. **Sube el repo a GitHub** (ver abajo).
 2. En [vercel.com](https://vercel.com) → **Add New Project** → importa el repo.
 3. **Root Directory:** `web`
-4. **Variables de entorno:**
+4. **Variables de entorno** (Production y Preview). Los valores no van al repositorio.
    - `APOLLO_API_KEY` — tu key de Apollo.io
    - `DATABASE_URL` — conexión [Neon](https://neon.tech) (gratis, integración nativa con Vercel)
-5. Deploy. La tabla `leads` se crea automáticamente en el primer request.
-6. Verifica: `https://agente-ventas-three.vercel.app/api/health` debe responder `{"status":"ok",...}`.
+   - `AUTH_SECRET` y `TEAM_PASSWORD` — acceso del equipo (obligatorias; sin ellas la app no muestra datos)
+   - `APOLLO_WEBHOOK_SECRET` — para recibir teléfonos de Apollo
+   - `WHATSAPP_APP_SECRET` y `WHATSAPP_VERIFY_TOKEN` — para el webhook de Meta
+5. **Redeploy** después de guardar las variables. Un deployment ya activo no las toma solo.
+6. La tabla `leads` se crea automáticamente en el primer request autenticado.
+7. Verifica la sonda pública: `https://agente-ventas-three.vercel.app/api/health` debe responder `{"status":"ok",...}`. El resto de `/api/*` de datos responde 401 hasta iniciar sesión en `/login`.
+
+### Acceso del equipo (después de merge)
+
+La app es privada. Cada página y cada ruta que lee o modifica leads exige una sesión. Pasos en Vercel, en este orden:
+
+1. En tu máquina, genera secretos y **no** los pegues en git:
+
+   ```bash
+   openssl rand -base64 32   # AUTH_SECRET (mínimo 32 caracteres)
+   openssl rand -base64 24   # TEAM_PASSWORD (mínimo 12; puede ser una frase)
+   openssl rand -hex 32      # APOLLO_WEBHOOK_SECRET (mínimo 16)
+   openssl rand -hex 16      # WHATSAPP_VERIFY_TOKEN (lo eliges tú; mínimo 8)
+   ```
+
+   `WHATSAPP_APP_SECRET` no se genera: es el **App Secret** de Meta (App Dashboard → Settings → Basic).
+
+2. Vercel → proyecto **agente-ventas** → **Settings → Environment Variables**.
+3. Crea `AUTH_SECRET`, `TEAM_PASSWORD`, `APOLLO_WEBHOOK_SECRET`, `WHATSAPP_APP_SECRET` y `WHATSAPP_VERIFY_TOKEN` para **Production** y **Preview**.
+4. **Deployments → ⋯ del último deployment → Redeploy**. Sin este paso el sitio sigue en la versión anterior.
+5. Abre `https://agente-ventas-three.vercel.app`. Debe ir a `/login`. Entra con `TEAM_PASSWORD`.
+6. Meta → WhatsApp → Configuration → Webhook:
+   - Callback URL: `https://agente-ventas-three.vercel.app/api/whatsapp/webhook`
+   - Verify token: el mismo `WHATSAPP_VERIFY_TOKEN`
+   - El App Secret de esa app debe ser el mismo `WHATSAPP_APP_SECRET`
+7. No cambies una URL a mano en Apollo. En cada enriquecimiento la app envía `webhook_url` con `?token=`. Las entregas que Apollo ya haya encolado hacia la URL antigua (sin token) serán rechazadas.
 
 ### Neon (base de datos)
 
@@ -43,8 +72,8 @@ Esta plataforma usa Apollo **solo para prospección interna** del equipo IAC, co
 
 ```bash
 cd web
-cp .env.example .env.local
-# Edita APOLLO_API_KEY y DATABASE_URL
+cp ../.env.example .env.local
+# Edita APOLLO_API_KEY, DATABASE_URL, AUTH_SECRET y TEAM_PASSWORD
 npm install
 npm run dev
 ```

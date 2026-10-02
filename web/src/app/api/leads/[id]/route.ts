@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deleteLead, ensureDb, updateLeadNotes, updateLeadStatus } from "@/lib/db";
+import { requireTeamApi } from "@/lib/session";
 import { isLeadStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -8,6 +9,8 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = await requireTeamApi();
+  if (denied) return denied;
   try {
     await ensureDb();
     const { id } = await params;
@@ -43,6 +46,8 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = await requireTeamApi();
+  if (denied) return denied;
   try {
     await ensureDb();
     const { id } = await params;

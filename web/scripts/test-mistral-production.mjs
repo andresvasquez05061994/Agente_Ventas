@@ -3,11 +3,14 @@
  * Uso: node scripts/test-mistral-production.mjs
  */
 
+import { appSessionHeaders } from "./app-session.mjs";
+
 const BASE = process.env.APP_URL ?? "https://agente-ventas-three.vercel.app";
 
 async function main() {
+  const headers = await appSessionHeaders(BASE);
   console.log("GET", `${BASE}/api/prospeccion/smart-search`);
-  const health = await fetch(`${BASE}/api/prospeccion/smart-search`);
+  const health = await fetch(`${BASE}/api/prospeccion/smart-search`, { headers });
   const healthData = await health.json();
   console.log("Health:", health.status, healthData);
 
@@ -21,7 +24,7 @@ async function main() {
   console.log("\nPOST interpretación:", query);
   const res = await fetch(`${BASE}/api/prospeccion/smart-search`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify({ query }),
   });
   const data = await res.json();

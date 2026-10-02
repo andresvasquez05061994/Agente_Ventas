@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { generateOutreachMessage, OutreachError } from "@/lib/commercial-outreach";
+import { requireTeamApi } from "@/lib/session";
 
 /** @deprecated Usar /api/portafolio/outreach */
+export const dynamic = "force-dynamic";
+
 export async function POST(req: Request) {
+  const denied = await requireTeamApi();
+  if (denied) return denied;
   try {
     const body = (await req.json()) as Record<string, unknown>;
     const result = await generateOutreachMessage(

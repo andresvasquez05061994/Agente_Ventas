@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ensureDb, getLeadById, getMessagesForLead } from "@/lib/db";
+import { requireTeamApi } from "@/lib/session";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = await requireTeamApi();
+  if (denied) return denied;
   try {
     await ensureDb();
     const { id } = await params;

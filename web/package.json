@@ -10,7 +10,8 @@
     "test:apollo": "node scripts/test-apollo-integration.mjs",
     "test:smart-search": "node scripts/test-smart-search.mjs",
     "test:mistral": "node scripts/test-mistral-production.mjs",
-    "test:platform": "node scripts/test-platform.mjs"
+    "test:platform": "node scripts/test-platform.mjs",
+    "test:auth": "node --experimental-strip-types --test scripts/test-security.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
@@ -19,7 +20,8 @@
     "next": "16.2.9",
     "next-themes": "^0.4.6",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

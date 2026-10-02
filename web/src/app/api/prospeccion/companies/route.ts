@@ -6,10 +6,15 @@ import {
 } from "@/lib/apollo-organizations";
 import { APOLLO_COUNTRIES } from "@/lib/apollo-filters";
 import { ensureDb, searchDistinctCompanies } from "@/lib/db";
+import { requireTeamApi } from "@/lib/session";
 
 const COUNTRY_VALUES = new Set(APOLLO_COUNTRIES.map((c) => c.value));
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
+  const denied = await requireTeamApi();
+  if (denied) return denied;
   try {
     const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
     const country = req.nextUrl.searchParams.get("country")?.trim() ?? "";

@@ -8,6 +8,7 @@ import { useTheme } from "next-themes";
 import {
   BarChart3,
   Coins,
+  LogOut,
   MessageSquare,
   Moon,
   Plus,
@@ -30,6 +31,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { theme, setTheme } = useTheme();
   const mounted = useMounted();
   const [creditsMonth, setCreditsMonth] = useState<number | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function logout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      window.location.assign("/login");
+    }
+  }
 
   const isDark = theme === "dark";
   const logoSrc = isDark ? "/logos/logo-iac-white.png" : "/logos/logo-iac.png";
@@ -88,6 +100,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
           <button
             type="button"
+            onClick={logout}
+            className="btn-secondary w-full"
+            disabled={loggingOut}
+          >
+            <LogOut size={16} strokeWidth={1.5} aria-hidden />
+            {loggingOut ? "Saliendo…" : "Cerrar sesión"}
+          </button>
+          <button
+            type="button"
             onClick={() => setTheme(isDark ? "light" : "dark")}
             className="btn-secondary w-full"
             aria-label={isDark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
@@ -144,6 +165,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </Link>
       )}
 
+      <button
+        type="button"
+        className="app-logout-mobile"
+        onClick={logout}
+        disabled={loggingOut}
+        aria-label="Cerrar sesión"
+      >
+        <LogOut size={18} strokeWidth={1.5} aria-hidden />
+      </button>
       <button
         type="button"
         className="app-theme-toggle-mobile"
