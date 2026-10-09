@@ -61,6 +61,10 @@ export type ResolutionDebug = {
   candidates: OrganizationCandidate[];
   selected: string[];
   employer_probe: EmployerProbe[];
+  /** Personas de la empresa halladas en Apollo (antes de enriquecer). */
+  matched_people?: number;
+  /** De esas, cuántas marca Apollo con teléfono directo disponible. */
+  matched_with_phone?: number;
   /** Solo en dry run: personas que pasarían a enriquecimiento. */
   sample?: Array<{ nombre: string; cargo: unknown; empresa: unknown; via: string }>;
 };
@@ -333,6 +337,13 @@ function candidateBudget(target: number): number {
   return Math.min(20, Math.max(target + 3, target * 2));
 }
 
+/** Máximo de personas de la empresa que se revisan antes de elegir a quién enriquecer. */
+const SCAN_LIMIT = 80;
+
+function hasPhoneFlag(raw: Record<string, unknown>): boolean {
+  return raw.has_direct_phone === true || raw.has_direct_phone === "Yes";
+}
+
 type PeopleSource =
   | { kind: "organization"; label: string; payload: Record<string, unknown> }
   | { kind: "keyword"; label: string; payload: Record<string, unknown> };
@@ -417,7 +428,7 @@ export async function searchCompanyContacts(
   const portfolioIds = input.dryRun ? new Set<string>() : await getPortfolioApolloIds();
   const target = input.perCompany;
   const wanted = candidateBudget(target);
-  const candidatesToEnrich: Array<{ raw: Record<string, unknown>; via: string; employer: string }> = [];
+  let candidatesToEnrich: Array<{ raw: Record<string, unknown>; via: string; employer: string }> = [];
   const seen = new Set<string>();
   const acceptedEmployers = new Set<string>();
   let totalPeople = 0;
@@ -426,7 +437,7 @@ export async function searchCompanyContacts(
 
   outer: for (const source of sources) {
     for (let page = 1; page <= MAX_PEOPLE_PAGES; page++) {
-      if (candidatesToEnrich.length >= wanted) break outer;
+      if (candidatesToEnrich.length >= SCAN_LIMIT) break outer;
       if (Date.now() > deadlineMs) {
         timedOut = true;
         break outer;
@@ -463,7 +474,7 @@ export async function searchCompanyContacts(
       if (!people.length) break;
 
       for (const person of people) {
-        if (candidatesToEnrich.length >= wanted) break outer;
+        if (candidatesToEnrich.length >= SCAN_LIMIT) break outer;
         const id = resolveApolloPersonId(person);
         if (!id || seen.has(id)) continue;
         seen.add(id);
@@ -494,6 +505,15 @@ export async function searchCompanyContacts(
     const name = [...acceptedEmployers][0];
     organization = { id: "", ids: [], name, domain: null, score: 100 };
   }
+
+  // Prioridad: perfiles para los que Apollo ya indica que tiene teléfono directo.
+  const matchedTotal = candidatesToEnrich.length;
+  const withPhoneFlag = candidatesToEnrich.filter((c) => hasPhoneFlag(c.raw)).length;
+  candidatesToEnrich = candidatesToEnrich
+    .sort((a, b) => Number(hasPhoneFlag(b.raw)) - Number(hasPhoneFlag(a.raw)))
+    .slice(0, wanted);
+  debug.matched_people = matchedTotal;
+  debug.matched_with_phone = withPhoneFlag;
 
   if (input.dryRun) {
     debug.sample = candidatesToEnrich.slice(0, 10).map((c) => ({
