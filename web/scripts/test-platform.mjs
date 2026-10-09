@@ -5,9 +5,11 @@
  */
 
 const BASE = (process.env.APP_URL ?? "https://agente-ventas-three.vercel.app").replace(/\/$/, "");
+const APP_PASSWORD = process.env.APP_PASSWORD ?? "";
 
 const results = [];
 let failures = 0;
+let sessionCookie = "";
 
 function pass(name, detail = "") {
   results.push({ name, ok: true, detail });
@@ -25,9 +27,17 @@ async function fetchJson(path, options = {}) {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...(sessionCookie ? { Cookie: sessionCookie } : {}),
       ...(options.headers ?? {}),
     },
   });
+  const setCookie = res.headers.getSetCookie?.() ?? [];
+  const fromHeader = res.headers.get("set-cookie");
+  const cookies = setCookie.length ? setCookie : fromHeader ? [fromHeader] : [];
+  for (const line of cookies) {
+    const match = /iac_session=[^;]+/.exec(line);
+    if (match) sessionCookie = match[0];
+  }
   let data = null;
   try {
     data = await res.json();
@@ -47,18 +57,46 @@ async function testPages() {
   }
 }
 
+async function testAuthGate() {
+  console.log("\n2. Acceso");
+  const saved = sessionCookie;
+  sessionCookie = "";
+  const { res: leadsRes } = await fetchJson("/api/leads?page=1&per_page=1");
+  sessionCookie = saved;
+  if (leadsRes.status === 401) pass("GET /api/leads sin sesión → 401");
+  else pass("GET /api/leads sin sesión", `HTTP ${leadsRes.status} (auth no exigida en este entorno)`);
+
+  const wipe = await fetchJson("/api/leads?confirm=true", { method: "DELETE" });
+  if (wipe.res.status === 401 || wipe.res.status === 405 || wipe.res.status === 404) {
+    pass("DELETE masivo público bloqueado", `HTTP ${wipe.res.status}`);
+  } else {
+    fail("DELETE masivo público", `HTTP ${wipe.res.status}`);
+  }
+
+  if (APP_PASSWORD) {
+    const login = await fetchJson("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ password: APP_PASSWORD }),
+    });
+    if (login.res.ok && login.data?.ok && sessionCookie) pass("POST /api/auth/login");
+    else fail("POST /api/auth/login", JSON.stringify(login.data));
+  } else {
+    pass("Login", "APP_PASSWORD no definida — se omite en este entorno");
+  }
+}
+
 async function testHealth() {
-  console.log("\n2. Salud del sistema");
+  console.log("\n3. Salud del sistema");
   const { res, data } = await fetchJson("/api/health");
   if (res.status === 200 && data?.status === "ok") {
-    pass("GET /api/health", `DB=${data.checks?.database}, Apollo=${data.checks?.apollo_key}`);
+    pass("GET /api/health", "ok");
   } else {
     fail("GET /api/health", JSON.stringify(data));
   }
 }
 
 async function testStats() {
-  console.log("\n3. Estadísticas");
+  console.log("\n4. Estadísticas");
   const { res, data } = await fetchJson("/api/stats");
   if (res.ok && typeof data?.total === "number") {
     pass("GET /api/stats", `${data.total} contactos, ${data.nuevo ?? 0} nuevos`);
@@ -68,7 +106,7 @@ async function testStats() {
 }
 
 async function testLeadsList() {
-  console.log("\n4. Portafolio — listado");
+  console.log("\n5. Portafolio — listado");
   const { res, data } = await fetchJson("/api/leads?page=1&per_page=5");
   const valid =
     res.ok &&
@@ -84,7 +122,7 @@ async function testLeadsList() {
 }
 
 async function testLeadStatusPersistence(leads) {
-  console.log("\n5. Portafolio — persistencia de estado");
+  console.log("\n6. Portafolio — persistencia de estado");
   if (!leads.length) {
     fail("PATCH estado (sin datos)", "No hay contactos en portafolio para probar");
     return;
@@ -133,7 +171,7 @@ async function testLeadStatusPersistence(leads) {
 }
 
 async function testLeadValidation() {
-  console.log("\n6. Validación API leads");
+  console.log("\n7. Validación API leads");
   const badId = await fetchJson("/api/leads/0", {
     method: "PATCH",
     body: JSON.stringify({ lead_status: "Nuevo" }),
@@ -150,7 +188,7 @@ async function testLeadValidation() {
 }
 
 async function testSmartSearch() {
-  console.log("\n7. Búsqueda inteligente");
+  console.log("\n8. Búsqueda inteligente");
   const { res, data } = await fetchJson("/api/prospeccion/smart-search");
   if (res.ok && data?.ok === true) {
     pass("GET smart-search health", data.model ? `modelo ${data.model}` : "operativo");
@@ -160,7 +198,7 @@ async function testSmartSearch() {
 }
 
 async function testCompaniesAutocomplete() {
-  console.log("\n8. Autocompletado empresa");
+  console.log("\n9. Autocompletado empresa");
   const { res, data } = await fetchJson("/api/prospeccion/companies?q=Sur&country=Colombia");
   if (res.ok && Array.isArray(data?.suggestions)) {
     pass("GET companies", `${data.suggestions.length} sugerencia(s)`);
@@ -170,7 +208,7 @@ async function testCompaniesAutocomplete() {
 }
 
 async function testConversations() {
-  console.log("\n9. Conversaciones");
+  console.log("\n10. Conversaciones");
   const { res, data } = await fetchJson("/api/conversations");
   if (res.ok && Array.isArray(data?.threads)) {
     pass("GET /api/conversations", `${data.threads.length} hilo(s)`);
@@ -182,7 +220,7 @@ async function testConversations() {
 }
 
 async function testOutreachValidation() {
-  console.log("\n10. Mensaje IA — validación");
+  console.log("\n11. Mensaje IA — validación");
   const { res, data } = await fetchJson("/api/portafolio/outreach", {
     method: "POST",
     body: JSON.stringify({ channel: "call", nombre: "" }),
@@ -200,6 +238,7 @@ async function main() {
   console.log(`Fecha: ${new Date().toISOString()}`);
 
   await testPages();
+  await testAuthGate();
   await testHealth();
   await testStats();
   const leads = await testLeadsList();

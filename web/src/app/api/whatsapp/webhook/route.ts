@@ -6,12 +6,25 @@ import {
   updateLeadConversationId,
   updateLeadWhatsAppStatus,
 } from "@/lib/db";
+import { requestProvidesWebhookToken, unauthorizedJson } from "@/lib/auth";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(req: NextRequest) {
+  if (!requestProvidesWebhookToken(req, "whatsapp")) return unauthorizedJson();
+  const challenge = req.nextUrl.searchParams.get("hub.challenge");
+  if (challenge) return new NextResponse(challenge, { status: 200 });
+  return NextResponse.json({ ok: true });
+}
 
 /**
  * Webhook entrante de WhatsApp (Meta / Twilio / pruebas).
+ * Requiere token: header x-webhook-secret, Bearer o ?token=
  * Body: { telefono: string, mensaje: string, conversation_id?: string }
  */
 export async function POST(req: NextRequest) {
+  if (!requestProvidesWebhookToken(req, "whatsapp")) return unauthorizedJson();
+
   try {
     await ensureDb();
     const body = await req.json();
@@ -40,7 +53,6 @@ export async function POST(req: NextRequest) {
       await updateLeadConversationId(lead.id, String(body.conversation_id));
     }
 
-    // La respuesta del agente Mistral se integrará en el worker de Fase 3.
     return NextResponse.json({
       ok: true,
       lead_id: lead.id,

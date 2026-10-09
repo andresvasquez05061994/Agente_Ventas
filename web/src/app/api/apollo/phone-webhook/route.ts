@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ensureDb, recordProspeccionCredits } from "@/lib/db";
 import { persistPhoneWebhook } from "@/lib/apollo-enrich";
+import { requestProvidesWebhookToken, unauthorizedJson } from "@/lib/auth";
+
+export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
+  if (!requestProvidesWebhookToken(req, "apollo")) return unauthorizedJson();
+
   try {
     await ensureDb();
     const body = await req.json();

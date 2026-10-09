@@ -1,4 +1,5 @@
 import type { ApolloPerson } from "./types";
+import { webhookToken } from "./auth";
 import { getPhoneCache, savePhoneCache } from "./db";
 
 const BASE_URL =
@@ -31,9 +32,10 @@ function apiHeaders() {
 }
 
 /**
- * URL pública a la que Apollo envía los teléfonos. Debe ser alcanzable sin autenticación:
- * la URL por despliegue (VERCEL_URL) está protegida por Vercel y devuelve 401, así que se
- * prefiere el dominio de producción del proyecto.
+ * URL pública a la que Apollo envía los teléfonos. La ruta del webhook no usa la
+ * sesión del equipo: se autentica con ?token=. La URL por despliegue (VERCEL_URL)
+ * a veces está protegida por Vercel y devuelve 401, así que se prefiere el
+ * dominio de producción del proyecto.
  */
 export function webhookBaseUrl(): string | null {
   const explicit = process.env.APOLLO_WEBHOOK_BASE_URL?.replace(/\/$/, "");
@@ -142,8 +144,15 @@ export function isContactableInSearch(raw: Record<string, unknown>): boolean {
   return true;
 }
 
+export function apolloPhoneWebhookUrl(): string | null {
+  const base = webhookBaseUrl();
+  const token = webhookToken("apollo");
+  if (!base || !token) return null;
+  return `${base}/api/apollo/phone-webhook/${encodeURIComponent(token)}`;
+}
+
 export function isApolloWebhookConfigured(): boolean {
-  return Boolean(webhookBaseUrl());
+  return Boolean(apolloPhoneWebhookUrl());
 }
 
 export interface EnrichStats {
@@ -176,11 +185,11 @@ async function bulkMatchPeople(
   url.searchParams.set("reveal_phone_number", options.revealPhone ? "true" : "false");
 
   if (options.revealPhone) {
-    const base = webhookBaseUrl();
-    if (!base) {
-      return { byId: new Map(), credits: 0, error: "Webhook no configurado (APOLLO_WEBHOOK_BASE_URL)" };
+    const hook = apolloPhoneWebhookUrl();
+    if (!hook) {
+      return { byId: new Map(), credits: 0, error: "Webhook no configurado (APOLLO_WEBHOOK_BASE_URL / AUTH_SECRET)" };
     }
-    url.searchParams.set("webhook_url", `${base}/api/apollo/phone-webhook`);
+    url.searchParams.set("webhook_url", hook);
   }
 
   let res: Response;

@@ -8,6 +8,8 @@ import { MessageIAPanel } from "@/components/MessageIAPanel";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { useDebounce } from "@/hooks/use-debounce";
 import { downloadLeadsCsv } from "@/lib/export-leads";
+import { WIPE_CONFIRM_PHRASE } from "@/lib/auth-constants";
+import { redirectToLoginIfUnauthorized } from "@/lib/parse-api-response";
 import type { ColdCallResult, ColdEmailResult, OutreachChannel } from "@/lib/commercial-outreach";
 
 const STATUSES: LeadStatus[] = ["Nuevo", "En revisión", "Aprobado para contacto", "Descartado"];
@@ -237,7 +239,10 @@ function PortafolioContent() {
       searchParamsRef.current.get("page") === "last" && !jumpedToLast.current;
 
     fetch(`/api/leads?${buildLeadsQuery(page)}`, { cache: "no-store" })
-      .then((res) => res.json())
+      .then((res) => {
+        if (redirectToLoginIfUnauthorized(res)) return { error: "Sesión expirada" };
+        return res.json();
+      })
       .then((data) => {
         if (cancelled) return;
         if (data.error) showError(data.error, "Error al cargar");
@@ -539,10 +544,20 @@ function PortafolioContent() {
     ) {
       return;
     }
+    const typed = window.prompt(`Para confirmar, escribe exactamente:\n${WIPE_CONFIRM_PHRASE}`);
+    if (typed !== WIPE_CONFIRM_PHRASE) {
+      showError("Confirmación incorrecta. El portafolio no se vació.", "Portafolio no vaciado");
+      return;
+    }
     setClearing(true);
     clear();
     try {
-      const res = await fetch("/api/leads?confirm=true", { method: "DELETE" });
+      const res = await fetch("/api/leads/wipe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: typed }),
+      });
+      if (redirectToLoginIfUnauthorized(res)) return;
       const data = await res.json();
       if (!res.ok) {
         showError(data.error ?? "Error al vaciar portafolio", "Portafolio no vaciado");

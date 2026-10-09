@@ -46,7 +46,11 @@ export async function DELETE(
   try {
     await ensureDb();
     const { id } = await params;
-    await deleteLead(Number(id));
+    const leadId = Number(id);
+    if (!Number.isFinite(leadId) || leadId <= 0) {
+      return NextResponse.json({ error: "ID de contacto no válido" }, { status: 400 });
+    }
+    await deleteLead(leadId);
     return NextResponse.json({ ok: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error al eliminar";

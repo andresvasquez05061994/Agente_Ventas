@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { clearAllLeads, ensureDb, getLeads, saveLeads } from "@/lib/db";
+import { ensureDb, getLeads, saveLeads } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -69,20 +69,3 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function DELETE(req: NextRequest) {
-  try {
-    const confirm = req.nextUrl.searchParams.get("confirm");
-    if (confirm !== "true") {
-      return NextResponse.json(
-        { error: "Confirmación requerida (?confirm=true)" },
-        { status: 400 }
-      );
-    }
-    await ensureDb();
-    const deleted = await clearAllLeads();
-    return NextResponse.json({ deleted });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Error al vaciar portafolio";
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
-}

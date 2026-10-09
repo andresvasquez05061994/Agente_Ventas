@@ -9,6 +9,7 @@ import {
   BarChart3,
   BookOpen,
   Coins,
+  LogOut,
   MessageSquare,
   Moon,
   Plus,
@@ -16,6 +17,7 @@ import {
   Sun,
   Users,
 } from "lucide-react";
+import { redirectToLoginIfUnauthorized } from "@/lib/parse-api-response";
 import { useMounted } from "@/hooks/use-mounted";
 import { ProspeccionSessionProvider } from "@/contexts/prospeccion-session";
 
@@ -32,6 +34,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { theme, setTheme } = useTheme();
   const mounted = useMounted();
   const [creditsMonth, setCreditsMonth] = useState<number | null>(null);
+  const [canLogout, setCanLogout] = useState(false);
+  const isLogin = pathname === "/login";
 
   const isDark = theme === "dark";
   const logoSrc = isDark ? "/logos/logo-iac-white.png" : "/logos/logo-iac.png";
@@ -40,13 +44,36 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     pathname.startsWith("/conversaciones") || pathname.startsWith("/portafolio");
 
   useEffect(() => {
-    fetch("/api/stats")
+    if (isLogin) return;
+    fetch("/api/auth/session")
       .then((r) => r.json())
-      .then((d) => {
-        if (!d.error) setCreditsMonth(d.apollo?.credits_this_month ?? 0);
+      .then((d: { required?: boolean; authenticated?: boolean }) => {
+        setCanLogout(Boolean(d.required || d.authenticated));
       })
       .catch(() => {});
-  }, []);
+  }, [isLogin]);
+
+  useEffect(() => {
+    if (isLogin) return;
+    fetch("/api/stats")
+      .then((r) => {
+        if (redirectToLoginIfUnauthorized(r)) return null;
+        return r.json();
+      })
+      .then((d) => {
+        if (d && !d.error) setCreditsMonth(d.apollo?.credits_this_month ?? 0);
+      })
+      .catch(() => {});
+  }, [isLogin]);
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.assign("/login");
+  }
+
+  if (isLogin) {
+    return <>{children}</>;
+  }
 
   return (
     <div className="app-shell">
@@ -103,6 +130,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             ) : null}
             {mounted ? (isDark ? "Modo claro" : "Modo oscuro") : "···"}
           </button>
+          {canLogout && (
+            <button type="button" className="btn-secondary w-full" onClick={() => void logout()}>
+              <LogOut size={16} strokeWidth={1.5} aria-hidden />
+              Salir
+            </button>
+          )}
           <div className="app-credits-pill" title="Créditos Apollo este mes">
             <Coins
               size={14}

@@ -18,8 +18,12 @@ Plataforma B2B de prospección con Apollo.io y gestión de leads en Neon Postgre
 ```env
 DATABASE_URL=postgresql://...
 APOLLO_API_KEY=...
-APOLLO_WEBHOOK_BASE_URL=https://tu-dominio.vercel.app   # opcional; en Vercel usa VERCEL_URL
+APOLLO_WEBHOOK_BASE_URL=https://tu-dominio.vercel.app
+APP_PASSWORD=...          # obligatorio en Vercel
+AUTH_SECRET=...           # firma de sesión; genera una cadena larga
 ```
+
+En producción la app pide contraseña en `/login`. Los webhooks de Apollo y WhatsApp no usan esa sesión: van con `?token=` (Apollo lo añade solo) o header `x-webhook-secret`.
 
 Apollo requiere **créditos activos** para `people/bulk_match` (email y teléfono).
 

@@ -1,7 +1,20 @@
+/** Si la sesión caducó, manda al login. Devuelve true si ya redirigió. */
+export function redirectToLoginIfUnauthorized(res: Response): boolean {
+  if (res.status !== 401) return false;
+  if (typeof window === "undefined") return false;
+  if (window.location.pathname.startsWith("/login")) return false;
+  const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+  window.location.assign(`/login?next=${next}`);
+  return true;
+}
+
 /** Lee respuesta de API; evita fallos de JSON cuando Vercel devuelve texto plano. */
 export async function parseApiResponse<T = Record<string, unknown>>(
   res: Response
 ): Promise<{ data: T | null; error: string | null }> {
+  if (redirectToLoginIfUnauthorized(res)) {
+    return { data: null, error: "Sesión expirada. Vuelve a entrar." };
+  }
   const text = await res.text();
   if (!text.trim()) {
     return {

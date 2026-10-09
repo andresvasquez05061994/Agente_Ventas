@@ -18,8 +18,11 @@ Plataforma de prospección y gestión de leads (Fase 1).
 4. **Variables de entorno:**
    - `APOLLO_API_KEY` — tu key de Apollo.io
    - `DATABASE_URL` — conexión [Neon](https://neon.tech) (gratis, integración nativa con Vercel)
+   - `APP_PASSWORD` — contraseña del equipo (obligatoria en Vercel; sin ella la app no abre)
+   - `AUTH_SECRET` — cadena larga aleatoria para firmar la sesión
 5. Deploy. La tabla `leads` se crea automáticamente en el primer request.
-6. Verifica: `https://agente-ventas-three.vercel.app/api/health` debe responder `{"status":"ok",...}`.
+6. Verifica: `https://agente-ventas-three.vercel.app/api/health` debe responder `{"status":"ok"}`.
+7. Entra en `/login` con `APP_PASSWORD`. Sin sesión, las APIs responden 401.
 
 ### Neon (base de datos)
 
