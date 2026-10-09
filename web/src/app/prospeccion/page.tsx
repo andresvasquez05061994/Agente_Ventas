@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Building2, Copy, Mail, Phone, Search } from "lucide-react";
 import type { SmartSearchResult } from "@/lib/smart-search";
 import type { ApolloPerson } from "@/lib/types";
@@ -22,6 +22,12 @@ type SearchParams = {
   employeeRanges: string[];
   perPage: number;
 };
+
+function isFatalCompanySearchError(message: string): boolean {
+  return /cr[eé]dito|insufficient credits|rate limit|l[ií]mite de solicitudes|failed to fetch|networkerror|load failed|tiempo de espera|tard[oó] demasiado/i.test(
+    message
+  );
+}
 
 export default function ProspeccionPage() {
   const router = useRouter();
@@ -58,6 +64,9 @@ export default function ProspeccionPage() {
   } = session;
 
   const [saving, setSaving] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<string | null>(null);
+  const batchRun = useRef(0);
+  const excelSource = useRef<string | null>(null);
   const { feedback, showSuccess, showError, showWarning, showInfo, clear } = useActionFeedback();
 
   function toggleTitle(value: string) {
@@ -91,6 +100,9 @@ export default function ProspeccionPage() {
       setPerPage(params.perPage);
     }
 
+    batchRun.current += 1;
+    excelSource.current = null;
+    setBatchProgress(null);
     setStatus("loading");
     clear();
 
@@ -177,6 +189,144 @@ export default function ProspeccionPage() {
     }
   }
 
+  async function searchCompanies(payload: { companies: string[]; totalFound: number }) {
+    if (!titles.length) {
+      setStatus("error");
+      showWarning("Selecciona o agrega al menos un cargo antes de buscar.", "Filtros incompletos");
+      return;
+    }
+
+    const companies = payload.companies;
+    if (!companies.length) return;
+
+    const runId = ++batchRun.current;
+    excelSource.current = null;
+    setStatus("loading");
+    clear();
+    setResults([]);
+    setMeta(null);
+    setSelectedIds([]);
+
+    const found: typeof results = [];
+    const seen = new Set<string>();
+    const withoutContacts: string[] = [];
+    const failed: string[] = [];
+    let credits = 0;
+    let totalEntries = 0;
+    let portfolioSkipped = 0;
+    let withContacts = 0;
+    let fatal: string | null = null;
+
+    for (let index = 0; index < companies.length; index++) {
+      if (batchRun.current !== runId) return;
+      const companyName = companies[index];
+      setBatchProgress(`Empresa ${index + 1} de ${companies.length}: ${companyName}`);
+
+      try {
+        const res = await fetch("/api/apollo/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            country,
+            titles,
+            keyword,
+            seniority,
+            company: companyName,
+            employee_ranges: employeeRanges.length ? employeeRanges : undefined,
+            per_page: perPage,
+          }),
+        });
+        if (batchRun.current !== runId) return;
+
+        const { data, error: parseError } = await parseApiResponse<{
+          results?: typeof results;
+          meta?: typeof meta;
+          error?: string;
+        }>(res);
+        if (batchRun.current !== runId) return;
+
+        const message = parseError ?? data?.error ?? (!res.ok ? `Error del servidor (${res.status})` : "");
+        if (message) {
+          if (isFatalCompanySearchError(message)) {
+            fatal = message;
+            break;
+          }
+          failed.push(companyName);
+          continue;
+        }
+
+        credits += data?.meta?.credits_consumed ?? 0;
+        totalEntries += data?.meta?.total_entries ?? 0;
+        portfolioSkipped += data?.meta?.portfolio_skipped ?? 0;
+        const list = data?.results ?? [];
+        if (!list.length) withoutContacts.push(companyName);
+        else withContacts += 1;
+        for (const person of list) {
+          if (seen.has(person.apollo_id)) continue;
+          seen.add(person.apollo_id);
+          found.push(person);
+        }
+      } catch (e) {
+        if (batchRun.current !== runId) return;
+        const raw = e instanceof Error ? e.message : "Error de búsqueda";
+        if (isFatalCompanySearchError(raw)) {
+          fatal = raw;
+          break;
+        }
+        failed.push(companyName);
+      }
+    }
+
+    if (batchRun.current !== runId) return;
+    setBatchProgress(null);
+
+    const listed = companies.slice(0, 8).join(", ");
+    const extra = companies.length > 8 ? ` +${companies.length - 8}` : "";
+    excelSource.current = `Excel: ${listed}${extra}`;
+
+    setResults(found);
+    setSelectedIds(found.map((person) => person.apollo_id));
+    setMeta({
+      total_entries: totalEntries,
+      with_contact_data: found.length,
+      credits_consumed: credits,
+      portfolio_skipped: portfolioSkipped || undefined,
+      organization_name: companies.length === 1 ? companies[0] : undefined,
+    });
+
+    const limitNote =
+      payload.totalFound > companies.length
+        ? ` Se buscaron las primeras ${companies.length} de ${payload.totalFound} empresas del archivo.`
+        : "";
+    const emptyNote = withoutContacts.length
+      ? ` Sin contactos completos: ${withoutContacts.slice(0, 4).join(", ")}${withoutContacts.length > 4 ? "…" : ""}.`
+      : "";
+    const failedNote = failed.length
+      ? ` No se pudo consultar: ${failed.slice(0, 3).join(", ")}${failed.length > 3 ? "…" : ""}.`
+      : "";
+    const creditNote = credits > 0 ? ` ${credits} crédito(s) usados.` : "";
+
+    if (!found.length) {
+      setStatus(fatal ? "error" : "empty");
+      const detail =
+        fatal ??
+        "Ninguna empresa del Excel devolvió contactos con email y teléfono. Revisa cargos, país y el nombre de la empresa.";
+      showWarning(`${detail}${limitNote}${emptyNote}${failedNote}`, "Sin contactos del Excel");
+      return;
+    }
+
+    setStatus("success");
+    const summary =
+      `${found.length} contacto(s) de ${withContacts} empresa(s).` +
+      creditNote +
+      limitNote +
+      emptyNote +
+      failedNote +
+      (fatal ? ` La tanda se detuvo: ${fatal}` : " Quedaron seleccionados para guardar en el portafolio.");
+    if (fatal || failed.length) showWarning(summary, "Búsqueda de Excel incompleta");
+    else showSuccess(summary, "Contactos listos para el portafolio");
+  }
+
   async function handleSmartApply(result: SmartSearchResult) {
     applyInterpretedFilters(result.filters);
     showInfo(result.summary, "Filtros interpretados");
@@ -199,7 +349,13 @@ export default function ProspeccionPage() {
       return;
     }
 
-    const fuente = [country, company.trim() || null, titles.join(", "), keyword || null, seniority || null]
+    const fuente = [
+      country,
+      excelSource.current ?? (company.trim() || null),
+      titles.join(", "),
+      keyword || null,
+      seniority || null,
+    ]
       .filter(Boolean)
       .join(" | ");
 
@@ -261,6 +417,9 @@ export default function ProspeccionPage() {
     setPerPage,
     loading: status === "loading" || saving,
     onSearch: () => search(),
+    onSearchCompanies: (payload: { companies: string[]; totalFound: number }) => {
+      void searchCompanies(payload);
+    },
   };
 
   const busy = status === "loading" || saving;
@@ -318,7 +477,7 @@ export default function ProspeccionPage() {
         {status === "loading" && (
           <div className="mt-10 flex flex-col items-center gap-4">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--color-accent)] border-t-transparent" />
-            <p className="text-caption">Buscando en Apollo…</p>
+            <p className="text-caption">{batchProgress ?? "Buscando en Apollo…"}</p>
             <div className="w-full max-w-md space-y-2">
               {Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="kpi-skeleton h-20" />
@@ -332,8 +491,8 @@ export default function ProspeccionPage() {
             <Search className="empty-state__icon" size={48} strokeWidth={1.5} aria-hidden />
             <p className="empty-state__title">Configura tu búsqueda</p>
             <p className="empty-state__desc">
-              Describe tu prospecto ideal, usa voz o ajusta filtros. Solo verás contactos con email y
-              teléfono confirmados.
+              Describe tu prospecto ideal, usa voz, ajusta filtros o carga un Excel con empresas.
+              Solo verás contactos con email y teléfono confirmados.
             </p>
           </div>
         )}

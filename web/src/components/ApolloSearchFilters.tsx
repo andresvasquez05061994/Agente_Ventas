@@ -16,6 +16,7 @@ import {
 } from "@/lib/apollo-filters";
 import { FieldLabel, SectionLabel, ActionBanner } from "@/components/ui";
 import { CompanyAutocomplete } from "@/components/CompanyAutocomplete";
+import { ExcelCompanySearch } from "@/components/ExcelCompanySearch";
 
 export type ApolloSearchFiltersProps = {
   country: string;
@@ -35,6 +36,7 @@ export type ApolloSearchFiltersProps = {
   setPerPage: (v: number) => void;
   loading: boolean;
   onSearch: () => void;
+  onSearchCompanies: (payload: { companies: string[]; totalFound: number }) => void;
 };
 
 function TitleCheckboxList({
@@ -83,6 +85,7 @@ export function ApolloSearchFilters({
   setPerPage,
   loading,
   onSearch,
+  onSearchCompanies,
 }: ApolloSearchFiltersProps) {
   const [customTitle, setCustomTitle] = useState("");
   const [customError, setCustomError] = useState("");
@@ -142,6 +145,13 @@ export function ApolloSearchFilters({
         onChange={setCompany}
         country={country}
         disabled={loading}
+      />
+
+      <ExcelCompanySearch
+        disabled={loading}
+        titlesSelected={titles.length}
+        perPage={perPage}
+        onSearchCompanies={onSearchCompanies}
       />
 
       <div className="apollo-titles-header">
