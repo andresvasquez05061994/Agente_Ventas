@@ -54,7 +54,13 @@ export type ResolutionDebug = {
   candidates: OrganizationCandidate[];
   selected: string[];
   /** Qué devolvió la búsqueda de personas por palabra clave (descubrimiento gratuito). */
-  people_probe: Array<{ query: string; returned: number; total: number; organizations: string[] }>;
+  people_probe: Array<{
+    query: string;
+    returned: number;
+    total: number;
+    organizations: string[];
+    sample?: Record<string, unknown>;
+  }>;
   /** Solo en dry run: muestra de personas que devuelve Apollo para los registros elegidos. */
   sample?: Array<{ nombre: string; cargo: unknown; empresa: unknown }>;
 };
@@ -228,7 +234,7 @@ async function searchOrganizations(query: string): Promise<RawOrg[]> {
  */
 async function organizationsFromPeople(
   query: string
-): Promise<{ orgs: RawOrg[]; returned: number; total: number }> {
+): Promise<{ orgs: RawOrg[]; returned: number; total: number; sample?: Record<string, unknown> }> {
   const data = await postApollo(PEOPLE_SEARCH_URL, { page: 1, per_page: 50, q_keywords: query });
   const people = (data.people ?? data.contacts ?? []) as Record<string, unknown>[];
   const pagination = data.pagination as { total_entries?: number } | undefined;
@@ -240,10 +246,23 @@ async function organizationsFromPeople(
     seen.add(org.id);
     orgs.push(org);
   }
+  const first = people[0];
+  const sample = first
+    ? {
+        keys: Object.keys(first),
+        organization_id: first.organization_id,
+        organization: first.organization,
+        account: first.account,
+        employment: Array.isArray(first.employment_history)
+          ? (first.employment_history as Record<string, unknown>[]).slice(0, 1)
+          : undefined,
+      }
+    : undefined;
   return {
     orgs,
     returned: people.length,
     total: Number(data.total_entries ?? pagination?.total_entries ?? 0) || 0,
+    sample,
   };
 }
 
@@ -279,6 +298,7 @@ export async function resolveOrganization(
         returned: probe.returned,
         total: probe.total,
         organizations: probe.orgs.map((o) => o.name).slice(0, 15),
+        sample: probe.sample,
       });
       add(probe.orgs, "people");
     } catch (e) {
