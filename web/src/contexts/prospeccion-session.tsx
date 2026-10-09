@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -16,6 +17,11 @@ export type ProspeccionSearchStatus = "idle" | "loading" | "success" | "empty" |
 
 export type ProspeccionSearchMeta = {
   total_entries: number;
+  page?: number;
+  per_page?: number;
+  total_pages?: number;
+  next_page?: number | null;
+  has_more?: boolean;
   with_contact_data?: number;
   scanned_profiles?: number;
   apollo_zero_results?: boolean;
@@ -35,6 +41,8 @@ export type ProspeccionSearchMeta = {
     with_both?: number;
   };
 };
+
+const SESSION_STORAGE_KEY = "iac.prospeccion.v1";
 
 type ProspeccionSessionState = {
   country: string;
@@ -110,10 +118,76 @@ function createInitialState(): ProspeccionSessionState {
   };
 }
 
+function persistable(state: ProspeccionSessionState): ProspeccionSessionState {
+  return {
+    ...state,
+    status: state.status === "loading" ? (state.results.length ? "success" : "idle") : state.status,
+  };
+}
+
+function readStoredSession(): ProspeccionSessionState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ProspeccionSessionState>;
+    if (!parsed || typeof parsed !== "object") return null;
+    const base = createInitialState();
+    const status: ProspeccionSearchStatus =
+      parsed.status === "success" || parsed.status === "empty" || parsed.status === "error"
+        ? parsed.status
+        : Array.isArray(parsed.results) && parsed.results.length
+          ? "success"
+          : "idle";
+    return {
+      ...base,
+      country: typeof parsed.country === "string" ? parsed.country : base.country,
+      company: typeof parsed.company === "string" ? parsed.company : base.company,
+      titles: Array.isArray(parsed.titles) ? parsed.titles.filter((t) => typeof t === "string") : base.titles,
+      keyword: typeof parsed.keyword === "string" ? parsed.keyword : base.keyword,
+      seniority: typeof parsed.seniority === "string" ? parsed.seniority : base.seniority,
+      employeeRanges: Array.isArray(parsed.employeeRanges)
+        ? parsed.employeeRanges.filter((r) => typeof r === "string")
+        : base.employeeRanges,
+      perPage: typeof parsed.perPage === "number" ? parsed.perPage : base.perPage,
+      results: Array.isArray(parsed.results) ? parsed.results : [],
+      selectedIds: Array.isArray(parsed.selectedIds)
+        ? parsed.selectedIds.filter((id) => typeof id === "string")
+        : [],
+      status,
+      meta: parsed.meta && typeof parsed.meta === "object" ? parsed.meta : null,
+      excelQueue: parsed.excelQueue && typeof parsed.excelQueue === "object" ? parsed.excelQueue : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSession(state: ProspeccionSessionState) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(persistable(state)));
+  } catch {
+    /* quota or private mode */
+  }
+}
+
 const ProspeccionSessionContext = createContext<ProspeccionSessionContextValue | null>(null);
 
 export function ProspeccionSessionProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<ProspeccionSessionState>(createInitialState);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    const stored = readStoredSession();
+    if (stored) setState(stored);
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    writeStoredSession(state);
+  }, [hydrated, state]);
 
   const selected = useMemo(() => new Set(state.selectedIds), [state.selectedIds]);
 
@@ -218,7 +292,6 @@ export function ProspeccionSessionProvider({ children }: { children: ReactNode }
       return {
         ...s,
         results: [...s.results, ...fresh],
-        selectedIds: [...s.selectedIds, ...fresh.map((p) => p.apollo_id)],
       };
     });
   }, []);

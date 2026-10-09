@@ -358,6 +358,22 @@ body {
   font-weight: 600;
 }
 
+.app-credits-pill--warn {
+  border-color: rgba(234, 179, 8, 0.45);
+  background: rgba(234, 179, 8, 0.1);
+}
+
+.app-credits-pill--warn strong {
+  color: var(--color-warning);
+}
+
+.prospect-next-lote {
+  border: 1px dashed var(--color-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--color-bg-tertiary);
+}
+
 .app-main {
   flex: 1;
   min-width: 0;

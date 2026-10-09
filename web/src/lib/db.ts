@@ -63,9 +63,13 @@ export async function initDb() {
   await sql`
     CREATE TABLE IF NOT EXISTS apollo_phone_cache (
       apollo_id TEXT PRIMARY KEY,
-      telefono TEXT NOT NULL,
+      telefono TEXT NOT NULL DEFAULT '',
+      requested_at TIMESTAMPTZ,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `;
+  await sql`
+    ALTER TABLE apollo_phone_cache ADD COLUMN IF NOT EXISTS requested_at TIMESTAMPTZ
   `;
   await sql`
     CREATE TABLE IF NOT EXISTS apollo_prospeccion_credits (
@@ -446,11 +450,58 @@ export async function clearAllLeads(): Promise<number> {
 export async function savePhoneCache(apolloId: string, telefono: string) {
   const sql = getSql();
   await sql`
-    INSERT INTO apollo_phone_cache (apollo_id, telefono, updated_at)
-    VALUES (${apolloId}, ${telefono}, NOW())
+    INSERT INTO apollo_phone_cache (apollo_id, telefono, requested_at, updated_at)
+    VALUES (${apolloId}, ${telefono}, NOW(), NOW())
     ON CONFLICT (apollo_id) DO UPDATE
     SET telefono = EXCLUDED.telefono, updated_at = NOW()
   `;
+}
+
+export type PhoneCacheState = {
+  telefono: string | null;
+  requestedAt: string | null;
+};
+
+export async function getPhoneCacheState(
+  apolloIds: string[]
+): Promise<Map<string, PhoneCacheState>> {
+  const map = new Map<string, PhoneCacheState>();
+  if (!apolloIds.length) return map;
+
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT apollo_id, telefono, requested_at FROM apollo_phone_cache
+    WHERE apollo_id = ANY(${apolloIds})
+  `) as Array<{
+    apollo_id: string;
+    telefono: string | null;
+    requested_at: string | Date | null;
+  }>;
+
+  for (const row of rows) {
+    const phone = row.telefono?.trim() || null;
+    map.set(row.apollo_id, {
+      telefono: phone,
+      requestedAt: row.requested_at ? new Date(row.requested_at).toISOString() : null,
+    });
+  }
+  return map;
+}
+
+export async function markPhoneRequested(apolloIds: string[]) {
+  const unique = [...new Set(apolloIds.filter(Boolean))];
+  if (!unique.length) return;
+
+  const sql = getSql();
+  for (const id of unique) {
+    await sql`
+      INSERT INTO apollo_phone_cache (apollo_id, telefono, requested_at, updated_at)
+      VALUES (${id}, '', NOW(), NOW())
+      ON CONFLICT (apollo_id) DO UPDATE
+      SET requested_at = NOW(), updated_at = NOW()
+      WHERE apollo_phone_cache.telefono IS NULL OR apollo_phone_cache.telefono = ''
+    `;
+  }
 }
 
 /** Diagnóstico: ¿está llegando el webhook de teléfonos de Apollo? */
@@ -482,16 +533,9 @@ export async function getPhoneWebhookHealth(): Promise<{
 
 export async function getPhoneCache(apolloIds: string[]): Promise<Map<string, string>> {
   const map = new Map<string, string>();
-  if (!apolloIds.length) return map;
-
-  const sql = getSql();
-  const rows = (await sql`
-    SELECT apollo_id, telefono FROM apollo_phone_cache
-    WHERE apollo_id = ANY(${apolloIds})
-  `) as Array<{ apollo_id: string; telefono: string }>;
-
-  for (const row of rows) {
-    if (row.telefono) map.set(row.apollo_id, row.telefono);
+  const states = await getPhoneCacheState(apolloIds);
+  for (const [id, state] of states) {
+    if (state.telefono) map.set(id, state.telefono);
   }
   return map;
 }

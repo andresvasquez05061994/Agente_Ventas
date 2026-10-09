@@ -9,12 +9,14 @@ import {
   summarizeExtract,
 } from "@/lib/knowledge-extract";
 import { countKnowledgeDocuments, insertKnowledgeDocument } from "@/lib/knowledge-store";
+import { assertMistralRateLimit, UsageLimitError } from "@/lib/usage-guard";
 
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
     await ensureDb();
+    assertMistralRateLimit();
     const count = await countKnowledgeDocuments();
     if (count >= MAX_KNOWLEDGE_DOCS) {
       return NextResponse.json(
@@ -56,6 +58,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ document });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "No se pudo leer el documento";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    const status = e instanceof UsageLimitError ? e.status : 500;
+    return NextResponse.json({ error: msg }, { status });
   }
 }

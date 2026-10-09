@@ -103,6 +103,18 @@ async function testStats() {
   } else {
     fail("GET /api/stats", JSON.stringify(data));
   }
+  if (
+    res.ok &&
+    typeof data?.apollo?.monthly_budget === "number" &&
+    typeof data?.apollo?.remaining === "number"
+  ) {
+    pass(
+      "Presupuesto Apollo en stats",
+      `${data.apollo.credits_this_month ?? 0}/${data.apollo.monthly_budget} usados, ${data.apollo.remaining} restantes`
+    );
+  } else if (res.ok) {
+    fail("Presupuesto Apollo en stats", "Faltan monthly_budget o remaining");
+  }
 }
 
 async function testLeadsList() {

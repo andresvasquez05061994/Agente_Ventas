@@ -34,6 +34,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { theme, setTheme } = useTheme();
   const mounted = useMounted();
   const [creditsMonth, setCreditsMonth] = useState<number | null>(null);
+  const [creditsBudget, setCreditsBudget] = useState<number | null>(null);
   const [canLogout, setCanLogout] = useState(false);
   const isLogin = pathname === "/login";
 
@@ -61,7 +62,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         return r.json();
       })
       .then((d) => {
-        if (d && !d.error) setCreditsMonth(d.apollo?.credits_this_month ?? 0);
+        if (d && !d.error) {
+          setCreditsMonth(d.apollo?.credits_this_month ?? 0);
+          setCreditsBudget(d.apollo?.monthly_budget ?? null);
+        }
       })
       .catch(() => {});
   }, [isLogin]);
@@ -136,7 +140,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               Salir
             </button>
           )}
-          <div className="app-credits-pill" title="Créditos Apollo este mes">
+          <div
+            className={`app-credits-pill${
+              creditsMonth != null &&
+              creditsBudget != null &&
+              creditsBudget > 0 &&
+              creditsMonth / creditsBudget >= 0.85
+                ? " app-credits-pill--warn"
+                : ""
+            }`}
+            title="Créditos Apollo usados este mes vs presupuesto"
+          >
             <Coins
               size={14}
               strokeWidth={1.5}
@@ -144,7 +158,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               aria-hidden
             />
             <span>
-              Apollo: <strong>{creditsMonth ?? "—"}</strong> créd. / mes
+              Apollo: <strong>{creditsMonth ?? "—"}</strong>
+              {creditsBudget != null ? ` / ${creditsBudget}` : ""} créd. / mes
             </span>
           </div>
         </div>

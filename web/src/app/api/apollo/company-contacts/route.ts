@@ -9,6 +9,7 @@ import {
 } from "@/lib/apollo-filters";
 import { cleanCompanyName, parseCompanyCell } from "@/lib/excel-companies";
 import { ensureDb } from "@/lib/db";
+import { assertApolloBudget, assertApolloRateLimit, UsageLimitError } from "@/lib/usage-guard";
 
 export const maxDuration = 60;
 
@@ -18,6 +19,8 @@ const SENIORITIES = new Set<string>(APOLLO_SENIORITIES.map((s) => s.value));
 export async function POST(req: NextRequest) {
   try {
     await ensureDb();
+    assertApolloRateLimit();
+    await assertApolloBudget();
     const body = (await req.json()) as Record<string, unknown>;
 
     const company = cleanCompanyName(String(body.company ?? ""));
@@ -73,7 +76,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error buscando contactos de la empresa";
-    const status = e instanceof ApolloApiError ? e.status : 500;
+    const status =
+      e instanceof UsageLimitError || e instanceof ApolloApiError ? e.status : 500;
     return NextResponse.json({ error: msg }, { status });
   }
 }

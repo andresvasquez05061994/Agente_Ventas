@@ -376,7 +376,7 @@ export function validateSearchRequest(body: Record<string, unknown>): ValidatedS
     throw new Error("Cantidad de resultados no válida.");
   }
 
-  const page = Math.max(1, Number(body.page ?? 1));
+  const page = Math.min(50, Math.max(1, Number(body.page ?? 1)));
 
   const company = String(body.company ?? body.organization_name ?? "")
     .trim()

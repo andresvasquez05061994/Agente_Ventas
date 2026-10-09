@@ -1,6 +1,7 @@
 import type { ApolloPerson } from "./types";
 import { webhookToken } from "./auth";
-import { getPhoneCache, savePhoneCache } from "./db";
+import { isPhoneRequestPending } from "./credit-policy";
+import { getPhoneCache, getPhoneCacheState, markPhoneRequested, savePhoneCache } from "./db";
 
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
@@ -264,6 +265,63 @@ async function pollPhones(ids: string[], maxMs = PHONE_POLL_MAX_MS): Promise<Map
   return found;
 }
 
+async function revealPhonesSafely(
+  ids: string[],
+  detailsById: Map<string, Record<string, unknown>>,
+  options?: { deadlineMs?: number }
+): Promise<{ phones: Map<string, string>; credits: number; errors: string[] }> {
+  const phones = new Map<string, string>();
+  const errors: string[] = [];
+  let credits = 0;
+  if (!ids.length) return { phones, credits, errors };
+
+  const states = await getPhoneCacheState(ids);
+  const pending: string[] = [];
+  const fresh: string[] = [];
+
+  for (const id of ids) {
+    const state = states.get(id);
+    if (state?.telefono) {
+      phones.set(id, state.telefono);
+      continue;
+    }
+    if (isPhoneRequestPending(state?.requestedAt)) pending.push(id);
+    else fresh.push(id);
+  }
+
+  if (fresh.length && webhookBaseUrl()) {
+    for (let i = 0; i < fresh.length; i += BATCH_SIZE) {
+      if (!hasTimeLeft(options?.deadlineMs)) break;
+      const batchIds = fresh.slice(i, i + BATCH_SIZE);
+      const batch = batchIds
+        .map((id) => detailsById.get(id))
+        .filter((d): d is Record<string, unknown> => Boolean(d));
+      if (!batch.length) continue;
+
+      const { credits: used, error } = await bulkMatchPeople(batch, {
+        revealEmail: false,
+        revealPhone: true,
+      });
+      credits += used;
+      if (error) errors.push(error);
+      if (!error || used > 0) await markPhoneRequested(batchIds);
+    }
+  } else if (fresh.length && !webhookBaseUrl()) {
+    errors.push("Webhook no configurado para revelar teléfonos móviles");
+  }
+
+  const waitIds = [...new Set([...fresh, ...pending])].filter((id) => !phones.has(id));
+  if (waitIds.length) {
+    const pollBudget = options?.deadlineMs
+      ? Math.max(800, Math.min(PHONE_POLL_MAX_MS, options.deadlineMs - Date.now()))
+      : PHONE_POLL_MAX_MS;
+    const polled = await pollPhones(waitIds, pollBudget);
+    for (const [id, phone] of polled) phones.set(id, phone);
+  }
+
+  return { phones, credits, errors };
+}
+
 function countCompleteContacts(
   candidates: Record<string, unknown>[],
   enrichedMap: Map<string, Record<string, unknown>>
@@ -360,25 +418,17 @@ export async function enrichSinglePersonWithContacts(
     !extractPhone(merged) &&
     hasTimeLeft(options?.deadlineMs)
   ) {
-    if (webhookBaseUrl()) {
-      const phoneDetail = buildMatchDetail(merged);
-      if (phoneDetail) {
-        const { credits, error } = await bulkMatchPeople([phoneDetail], {
-          revealEmail: false,
-          revealPhone: true,
-        });
-        creditsConsumed += credits;
-        if (error) matchErrors.push(error);
-
-        const pollBudget = options?.deadlineMs
-          ? Math.max(800, Math.min(PHONE_POLL_MAX_MS, options.deadlineMs - Date.now()))
-          : PHONE_POLL_MAX_MS;
-        const polled = await pollPhones([id], pollBudget);
-        const phone = polled.get(id);
-        if (phone) merged = { ...merged, sanitized_phone: phone };
-      }
-    } else {
-      matchErrors.push("Webhook no configurado para revelar teléfonos móviles");
+    const phoneDetail = buildMatchDetail(merged);
+    if (phoneDetail) {
+      const revealed = await revealPhonesSafely(
+        [id],
+        new Map([[id, phoneDetail]]),
+        { deadlineMs: options?.deadlineMs }
+      );
+      creditsConsumed += revealed.credits;
+      matchErrors.push(...revealed.errors);
+      const phone = revealed.phones.get(id);
+      if (phone) merged = { ...merged, sanitized_phone: phone };
     }
   }
 
@@ -464,41 +514,21 @@ export async function enrichPeopleWithContacts(
     return merged && extractEmail(merged) && !extractPhone(merged);
   });
 
-  if (needPhone.length && webhookBaseUrl()) {
-    const phoneDetails = needPhone
-      .map((id) => buildMatchDetail(enrichedMap.get(id) ?? rawById.get(id)!))
-      .filter((d): d is Record<string, unknown> => d !== null);
-
-    for (let i = 0; i < phoneDetails.length; i += BATCH_SIZE) {
-      if (!hasTimeLeft(options?.deadlineMs)) break;
-      const batch = phoneDetails.slice(i, i + BATCH_SIZE);
-      const batchIds = batch
-        .map((d) => String(d.id ?? ""))
-        .filter(Boolean);
-      const { credits, error } = await bulkMatchPeople(batch, {
-        revealEmail: false,
-        revealPhone: true,
-      });
-      creditsConsumed += credits;
-      if (error) matchErrors.push(error);
-
-      const pollBudget = options?.deadlineMs
-        ? Math.max(800, Math.min(PHONE_POLL_MAX_MS, options.deadlineMs - Date.now()))
-        : PHONE_POLL_MAX_MS;
-      const polled = await pollPhones(batchIds, pollBudget);
-      for (const [id, phone] of polled) {
-        const person = enrichedMap.get(id) ?? rawById.get(id) ?? { id };
-        enrichedMap.set(id, { ...person, sanitized_phone: phone });
-      }
-      if (
-        options?.targetComplete &&
-        countCompleteContacts(candidates, enrichedMap) >= options.targetComplete
-      ) {
-        break;
-      }
+  if (needPhone.length) {
+    const detailsById = new Map<string, Record<string, unknown>>();
+    for (const id of needPhone) {
+      const detail = buildMatchDetail(enrichedMap.get(id) ?? rawById.get(id)!);
+      if (detail) detailsById.set(id, detail);
     }
-  } else if (needPhone.length && !webhookBaseUrl()) {
-    matchErrors.push("Webhook no configurado para revelar teléfonos móviles");
+    const revealed = await revealPhonesSafely([...detailsById.keys()], detailsById, {
+      deadlineMs: options?.deadlineMs,
+    });
+    creditsConsumed += revealed.credits;
+    matchErrors.push(...revealed.errors);
+    for (const [id, phone] of revealed.phones) {
+      const person = enrichedMap.get(id) ?? rawById.get(id) ?? { id };
+      enrichedMap.set(id, { ...person, sanitized_phone: phone });
+    }
   }
 
   const results: ApolloPerson[] = [];

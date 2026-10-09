@@ -4,6 +4,7 @@ import {
   interpretSmartSearch,
   verifyMistralHealth,
 } from "@/lib/smart-search";
+import { assertMistralRateLimit, UsageLimitError } from "@/lib/usage-guard";
 
 export async function GET() {
   try {
@@ -17,6 +18,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    assertMistralRateLimit();
     const body = await req.json();
     const query = String(body.query ?? "").trim();
     const result = await interpretSmartSearch(query);
@@ -24,11 +26,13 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : "No se pudo interpretar la búsqueda";
     const status =
-      e instanceof SmartSearchError && e.status
+      e instanceof UsageLimitError
         ? e.status
-        : e instanceof SmartSearchError
-          ? 400
-          : 500;
+        : e instanceof SmartSearchError && e.status
+          ? e.status
+          : e instanceof SmartSearchError
+            ? 400
+            : 500;
     return NextResponse.json({ error: msg }, { status });
   }
 }

@@ -23,10 +23,11 @@ type SearchParams = {
   company: string;
   employeeRanges: string[];
   perPage: number;
+  page?: number;
 };
 
 function isFatalCompanySearchError(message: string): boolean {
-  return /cr[eé]dito|insufficient credits|rate limit|l[ií]mite de solicitudes|failed to fetch|networkerror|load failed|tiempo de espera|tard[oó] demasiado/i.test(
+  return /cr[eé]dito|presupuesto|insufficient credits|rate limit|l[ií]mite de solicitudes|failed to fetch|networkerror|load failed|tiempo de espera|tard[oó] demasiado/i.test(
     message
   );
 }
@@ -69,6 +70,7 @@ export default function ProspeccionPage() {
   } = session;
 
   const [saving, setSaving] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [batchProgress, setBatchProgress] = useState<string | null>(null);
   const batchRun = useRef(0);
   const excelMode = Boolean(excelQueue);
@@ -78,7 +80,8 @@ export default function ProspeccionPage() {
     setTitles(titles.includes(value) ? titles.filter((t) => t !== value) : [...titles, value]);
   }
 
-  async function search(overrides?: Partial<SearchParams>) {
+  async function search(overrides?: Partial<SearchParams> & { append?: boolean }) {
+    const append = Boolean(overrides?.append);
     const params: SearchParams = {
       country: overrides?.country ?? country,
       titles: overrides?.titles ?? titles,
@@ -87,6 +90,7 @@ export default function ProspeccionPage() {
       company: overrides?.company ?? company,
       employeeRanges: overrides?.employeeRanges ?? employeeRanges,
       perPage: overrides?.perPage ?? perPage,
+      page: overrides?.page ?? 1,
     };
 
     if (!params.titles.length) {
@@ -107,7 +111,8 @@ export default function ProspeccionPage() {
 
     batchRun.current += 1;
     setBatchProgress(null);
-    setStatus("loading");
+    if (append) setLoadingMore(true);
+    else setStatus("loading");
     clear();
 
     try {
@@ -122,6 +127,7 @@ export default function ProspeccionPage() {
           company: params.company.trim() || undefined,
           employee_ranges: params.employeeRanges.length ? params.employeeRanges : undefined,
           per_page: params.perPage,
+          page: params.page ?? 1,
         }),
       });
 
@@ -142,11 +148,22 @@ export default function ProspeccionPage() {
       }
 
       const list = data.results ?? [];
-      setResults(list);
-      setMeta(data.meta ?? null);
-      setSelectedIds([]);
+      const nextMeta = data.meta ?? null;
+      if (append) {
+        appendResults(list);
+        setMeta({
+          ...(meta ?? { total_entries: nextMeta?.total_entries ?? 0 }),
+          ...nextMeta,
+          total_entries: nextMeta?.total_entries ?? meta?.total_entries ?? 0,
+          credits_consumed: (meta?.credits_consumed ?? 0) + (nextMeta?.credits_consumed ?? 0),
+        });
+      } else {
+        setResults(list);
+        setMeta(nextMeta);
+        setSelectedIds([]);
+      }
 
-      if (list.length === 0) {
+      if (!append && list.length === 0) {
         setStatus("empty");
         showWarning(
           explainEmptySearchMessage(data.meta, Boolean(params.seniority?.trim())),
@@ -154,42 +171,58 @@ export default function ProspeccionPage() {
         );
       } else {
         setStatus("success");
-        const credits = data.meta?.credits_consumed ?? 0;
-        const relaxed = data.meta?.industry_relaxed
-          ? " Industria ampliada con término alternativo en Apollo."
+        const credits = nextMeta?.credits_consumed ?? 0;
+        const totalApollo = nextMeta?.total_entries ?? 0;
+        const more = nextMeta?.has_more
+          ? " Quedan más coincidencias: usa «Cargar siguiente lote» si quieres revisar otras (gasta créditos nuevos)."
           : "";
-        const org = params.company.trim() ? ` Empresa: ${params.company.trim()}.` : "";
-        const skipped = data.meta?.portfolio_skipped
-          ? ` ${data.meta.portfolio_skipped} perfil(es) ya en portafolio omitidos (sin gastar créditos).`
-          : "";
-        const countryFiltered =
-          data.meta?.country_rejected && data.meta.country_rejected > 0
-            ? ` ${data.meta.country_rejected} descartados por ubicación en otro país.`
+        if (append && list.length === 0) {
+          showWarning(
+            `Este lote no trajo contactos completos.${more}`,
+            "Sin contactos en este lote"
+          );
+        } else {
+          const relaxed = nextMeta?.industry_relaxed
+            ? " Industria ampliada con término alternativo en Apollo."
             : "";
-        showSuccess(
-          `${list.length} contacto(s) con email y teléfono · ${data.meta?.total_entries ?? 0} coincidencias en Apollo` +
-            (credits > 0 ? ` · ${credits} crédito(s) usados` : "") +
-            org +
-            skipped +
-            countryFiltered +
-            relaxed +
-            (data.meta?.timed_out
-              ? " Tiempo límite alcanzado; muestra resultados parciales. Reduce cantidad si necesitas más."
-              : ""),
-          "Búsqueda completada"
-        );
+          const org = params.company.trim() ? ` Empresa: ${params.company.trim()}.` : "";
+          const skipped = nextMeta?.portfolio_skipped
+            ? ` ${nextMeta.portfolio_skipped} perfil(es) ya en portafolio omitidos (sin gastar créditos).`
+            : "";
+          const countryFiltered =
+            nextMeta?.country_rejected && nextMeta.country_rejected > 0
+              ? ` ${nextMeta.country_rejected} descartados por ubicación en otro país.`
+              : "";
+          showSuccess(
+            `${list.length} contacto(s) con email y teléfono · ${totalApollo} coincidencias en Apollo` +
+              (credits > 0 ? ` · ${credits} crédito(s) usados en este lote` : "") +
+              org +
+              skipped +
+              countryFiltered +
+              relaxed +
+              more +
+              (nextMeta?.timed_out
+                ? " Tiempo límite alcanzado; muestra resultados parciales. Reduce cantidad si necesitas más."
+                : ""),
+            append ? "Lote añadido" : "Búsqueda completada"
+          );
+        }
       }
     } catch (e) {
-      setStatus("error");
+      if (!append) {
+        setStatus("error");
+        setResults([]);
+        setMeta(null);
+      }
       const raw = e instanceof Error ? e.message : "Error de búsqueda";
       const friendly = /failed to fetch|networkerror|load failed|network request failed/i.test(
         raw
       )
         ? "La búsqueda se interrumpió (tiempo de espera o red). Prueba con 5 resultados, quita el filtro de tamaño de empresa y vuelve a ejecutar."
         : raw;
-      showError(friendly, "Búsqueda fallida");
-      setResults([]);
-      setMeta(null);
+      showError(friendly, append ? "No se cargó el siguiente lote" : "Búsqueda fallida");
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -437,7 +470,7 @@ export default function ProspeccionPage() {
     onSearchCompanies: () => void searchCompanies(),
   };
 
-  const busy = status === "loading" || saving;
+  const busy = status === "loading" || saving || loadingMore;
   const hasResults = results.length > 0;
 
   function initials(name: string) {
@@ -519,8 +552,15 @@ export default function ProspeccionPage() {
                 <span className="ui-badge ui-badge--accent">{results.length} contactos de empresas del archivo</span>
               ) : (
                 <>
-                  <span className="ui-badge ui-badge--neutral">{meta?.total_entries ?? results.length} en Apollo</span>
-                  <span className="ui-badge ui-badge--accent">{results.length} en sesión</span>
+                  <span className="ui-badge ui-badge--neutral">
+                    {meta?.total_entries ?? results.length} coincidencias en Apollo
+                  </span>
+                  <span className="ui-badge ui-badge--accent">{results.length} con email y teléfono</span>
+                  {meta?.page && meta.total_pages ? (
+                    <span className="ui-badge ui-badge--neutral">
+                      lote hasta pág. {meta.page} de {meta.total_pages}
+                    </span>
+                  ) : null}
                 </>
               )}
               <span className="ui-badge ui-badge--neutral">{selected.size} seleccionados</span>
@@ -528,6 +568,11 @@ export default function ProspeccionPage() {
                 Seleccionar todos
               </button>
             </div>
+            <p className="text-micro mt-2">
+              {excelMode
+                ? "Los contactos nuevos no se marcan solos. Elige quién entra al portafolio o usa «Seleccionar todos»."
+                : "Apollo cobra créditos al revelar email y teléfono. Este lote muestra solo contactos ya completos; el resto de coincidencias no se cobra hasta que pidas otro lote."}
+            </p>
             <ul className="mt-4 flex flex-col gap-3">
               {results.map((r: ApolloPerson) => (
                 <li key={r.apollo_id} className="prospect-card">
@@ -575,6 +620,22 @@ export default function ProspeccionPage() {
                 </li>
               ))}
             </ul>
+            {!excelMode && Boolean(meta?.has_more && meta.next_page) && (
+              <div className="prospect-next-lote mt-5">
+                <p className="text-micro">
+                  Hay más perfiles en Apollo que coinciden. El siguiente lote parte de la página{" "}
+                  {meta?.next_page} y gastará créditos nuevos solo en esos contactos.
+                </p>
+                <button
+                  type="button"
+                  className="btn-secondary mt-2"
+                  disabled={busy}
+                  onClick={() => void search({ page: meta?.next_page ?? undefined, append: true })}
+                >
+                  {loadingMore ? "Cargando siguiente lote…" : "Cargar siguiente lote"}
+                </button>
+              </div>
+            )}
             <button
               type="button"
               onClick={() => void save()}

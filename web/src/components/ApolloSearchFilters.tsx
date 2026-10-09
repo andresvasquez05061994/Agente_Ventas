@@ -325,9 +325,9 @@ export function ApolloSearchFilters({
         </>
       )}
 
-      <SectionLabel>{excelMode ? "Contactos por empresa" : "Resultados"}</SectionLabel>
+      <SectionLabel>{excelMode ? "Contactos por empresa" : "Resultados por lote"}</SectionLabel>
       <select
-        className="input-field mb-4"
+        className={`input-field ${excelMode ? "mb-4" : "mb-2"}`}
         value={perPage}
         onChange={(e) => setPerPage(Number(e.target.value))}
       >
@@ -337,6 +337,12 @@ export function ApolloSearchFilters({
           </option>
         ))}
       </select>
+      {!excelMode && (
+        <p className="text-micro mb-4">
+          Máximo 25 por lote (límite de Apollo). Si hay más coincidencias verás «Cargar siguiente
+          lote»; cada lote gasta créditos nuevos.
+        </p>
+      )}
 
       {excelMode ? (
         <p className="text-micro">

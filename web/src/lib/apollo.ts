@@ -159,6 +159,7 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
   const collected: ApolloPerson[] = [];
   const seen = new Set<string>();
   let totalEntries = 0;
+  let lastTotalPages = 0;
   let lastPage = input.page;
   let scanned = 0;
   let enrichAttempts = 0;
@@ -195,6 +196,9 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
 
     const raw = (data.people ?? data.contacts ?? []) as Record<string, unknown>[];
     totalEntries = totalFromData(data) || totalEntries;
+    lastTotalPages =
+      (data.pagination as { total_pages?: number } | undefined)?.total_pages ??
+      (lastTotalPages || Math.ceil(totalEntries / Math.max(1, input.per_page)));
     lastPage = page;
     scanned += raw.length;
 
@@ -246,7 +250,8 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
 
     const totalPages =
       (data.pagination as { total_pages?: number } | undefined)?.total_pages ??
-      Math.ceil(totalEntries / input.per_page);
+      Math.ceil(totalEntries / Math.max(1, input.per_page));
+    lastTotalPages = totalPages;
     if (page >= totalPages) break;
   }
 
@@ -260,13 +265,21 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
     await recordProspeccionCredits(0, collected.length, "search");
   }
 
+  const totalPages = Math.max(
+    1,
+    lastTotalPages || Math.ceil(totalEntries / Math.max(1, input.per_page))
+  );
+  const hasMore = totalEntries > 0 && lastPage < totalPages;
+
   return {
     results: collected,
     meta: {
       page: lastPage,
       per_page: target,
       total_entries: totalEntries,
-      total_pages: Math.max(1, Math.ceil(totalEntries / input.per_page)),
+      total_pages: totalPages,
+      next_page: hasMore ? lastPage + 1 : null,
+      has_more: hasMore,
       scanned_profiles: scanned,
       with_contact_data: collected.length,
       enrich_stats: enrichStats,

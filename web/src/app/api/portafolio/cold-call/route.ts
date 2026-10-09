@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { generateOutreachMessage, OutreachError } from "@/lib/commercial-outreach";
+import { assertMistralRateLimit, UsageLimitError } from "@/lib/usage-guard";
 
 /** @deprecated Usar /api/portafolio/outreach */
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Record<string, unknown>;
+    assertMistralRateLimit();
     const result = await generateOutreachMessage(
       {
         nombre: String(body.nombre ?? ""),
@@ -19,8 +21,16 @@ export async function POST(req: Request) {
     );
     return NextResponse.json(result);
   } catch (e) {
-    const message = e instanceof OutreachError ? e.message : "Error al generar mensaje comercial";
-    const status = e instanceof OutreachError && e.status ? e.status : 500;
+    const message =
+      e instanceof UsageLimitError || e instanceof OutreachError
+        ? e.message
+        : "Error al generar mensaje comercial";
+    const status =
+      e instanceof UsageLimitError
+        ? e.status
+        : e instanceof OutreachError && e.status
+          ? e.status
+          : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

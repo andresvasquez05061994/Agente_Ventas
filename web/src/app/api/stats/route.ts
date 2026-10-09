@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { getApolloProspeccionCredits, ensureDb, getStats } from "@/lib/db";
+import { ensureDb, getStats } from "@/lib/db";
+import { getApolloBudgetSnapshot } from "@/lib/usage-guard";
 
 export async function GET() {
   try {
     await ensureDb();
     const [stats, apollo] = await Promise.all([
       getStats(),
-      getApolloProspeccionCredits(),
+      getApolloBudgetSnapshot(),
     ]);
     return NextResponse.json({ ...stats, apollo });
   } catch (e) {

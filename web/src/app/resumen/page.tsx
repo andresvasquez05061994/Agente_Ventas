@@ -24,6 +24,8 @@ type Stats = {
     total_searches: number;
     credits_this_month: number;
     searches_this_month: number;
+    monthly_budget?: number;
+    remaining?: number;
   };
 };
 
@@ -126,32 +128,33 @@ export default function ResumenPage() {
           <SectionBlock
             label="Apollo"
             title="Consumo de créditos"
-            description="Búsquedas ejecutadas y créditos gastados al enriquecer contactos."
+            description="Tope mensual para no gastar créditos Apollo de más. Ajústalo con APOLLO_MONTHLY_CREDIT_BUDGET."
           >
             <KpiGrid className="kpi-grid--4">
               <KpiCard
-                label="Créditos usados (total)"
-                value={apollo?.total_credits ?? 0}
-                sub="acumulado histórico"
-                accent="coral"
-                tag={{ positive: true, label: "enriquecimiento" }}
-              />
-              <KpiCard
                 label="Créditos este mes"
                 value={apollo?.credits_this_month ?? 0}
-                sub="período actual"
+                sub={`de ${apollo?.monthly_budget ?? "—"} de presupuesto`}
                 accent="coral"
                 tag={{
-                  positive: (apollo?.credits_this_month ?? 0) === 0,
-                  label: (apollo?.credits_this_month ?? 0) > 0 ? "consumo activo" : "sin consumo",
+                  positive: (apollo?.remaining ?? 1) > 0,
+                  label:
+                    (apollo?.remaining ?? 1) <= 0
+                      ? "presupuesto agotado"
+                      : (apollo?.credits_this_month ?? 0) > 0
+                        ? "consumo activo"
+                        : "sin consumo",
                 }}
               />
               <KpiCard
-                label="Búsquedas totales"
-                value={apollo?.total_searches ?? 0}
-                sub="ejecuciones acumuladas"
-                accent="blue"
-                tag={{ positive: true, label: "API Apollo" }}
+                label="Créditos restantes"
+                value={apollo?.remaining ?? 0}
+                sub="hasta el tope mensual"
+                accent="teal"
+                tag={{
+                  positive: (apollo?.remaining ?? 0) > 0,
+                  label: (apollo?.remaining ?? 0) > 0 ? "disponibles" : "bloqueado",
+                }}
               />
               <KpiCard
                 label="Búsquedas este mes"
@@ -162,6 +165,13 @@ export default function ResumenPage() {
                   positive: (apollo?.searches_this_month ?? 0) > 0,
                   label: (apollo?.searches_this_month ?? 0) > 0 ? "activo" : "sin búsquedas",
                 }}
+              />
+              <KpiCard
+                label="Créditos usados (total)"
+                value={apollo?.total_credits ?? 0}
+                sub="acumulado histórico"
+                accent="coral"
+                tag={{ positive: true, label: "enriquecimiento" }}
               />
             </KpiGrid>
           </SectionBlock>
