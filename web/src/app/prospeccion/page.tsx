@@ -205,8 +205,14 @@ export default function ProspeccionPage() {
     resetResults();
     setExcelQueue(queue);
     clear();
+    const load = queue.loadStats;
+    const skipped = load ? load.skippedDuplicate + load.skippedEmpty + load.skippedInvalid : 0;
+    const skipNote =
+      load && skipped
+        ? ` El archivo tenía ${load.rowsInColumn} fila(s) en la columna de empresas; ${skipped} se omitieron (vacías, inválidas o repetidas al limpiar la razón social).`
+        : "";
     showInfo(
-      `${queue.entries.length} empresa(s) cargadas. La búsqueda se hará solo dentro de estas empresas.`,
+      `${queue.entries.length} empresa(s) únicas cargadas. La búsqueda se hará solo dentro de estas empresas.${skipNote}`,
       "Archivo listo"
     );
   }

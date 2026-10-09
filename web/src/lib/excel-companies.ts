@@ -10,10 +10,29 @@ export type ExcelCompanyRow = {
   alias: string | null;
 };
 
+export type ExcelSkipReason = "empty" | "invalid" | "duplicate";
+
+export type ExcelSkippedRow = {
+  rawName: string;
+  reason: ExcelSkipReason;
+  duplicateOf?: string;
+};
+
+export type ExcelLoadStats = {
+  /** Filas con dato en la columna de empresas (sin contar el encabezado). */
+  rowsInColumn: number;
+  unique: number;
+  skippedEmpty: number;
+  skippedInvalid: number;
+  skippedDuplicate: number;
+  skipped: ExcelSkippedRow[];
+};
+
 export type ExcelCompanyExtract = {
   companies: ExcelCompanyRow[];
   totalFound: number;
   columnLabel: string | null;
+  loadStats: ExcelLoadStats;
 };
 
 export type ExcelCompanyStatus = "pending" | "found" | "no_contacts" | "not_found";
@@ -31,7 +50,19 @@ export type ExcelCompanyQueue = {
   fileLabel: string;
   columnLabel: string | null;
   entries: ExcelCompanyEntry[];
+  loadStats?: ExcelLoadStats;
 };
+
+function emptyLoadStats(): ExcelLoadStats {
+  return {
+    rowsInColumn: 0,
+    unique: 0,
+    skippedEmpty: 0,
+    skippedInvalid: 0,
+    skippedDuplicate: 0,
+    skipped: [],
+  };
+}
 
 export type ExcelQueueStats = {
   total: number;
@@ -207,7 +238,7 @@ function cellsOf(row: unknown): string[] {
 export function extractCompanyNames(matrix: unknown[][]): ExcelCompanyExtract {
   const rows = matrix.map(cellsOf).filter((row) => row.some((cell) => cell.length > 0));
   if (!rows.length) {
-    return { companies: [], totalFound: 0, columnLabel: null };
+    return { companies: [], totalFound: 0, columnLabel: null, loadStats: emptyLoadStats() };
   }
 
   let header: { row: number; col: number; label: string; score: number } | null = null;
@@ -245,17 +276,38 @@ export function extractCompanyNames(matrix: unknown[][]): ExcelCompanyExtract {
     }
   }
 
-  const seen = new Set<string>();
+  const seen = new Map<string, string>();
   const all: ExcelCompanyRow[] = [];
+  const skipped: ExcelSkippedRow[] = [];
+  let skippedEmpty = 0;
+  let skippedInvalid = 0;
+  let skippedDuplicate = 0;
+  let rowsInColumn = 0;
+
   for (let rowIndex = startRow; rowIndex < rows.length; rowIndex++) {
     const raw = rows[rowIndex][column] ?? "";
     if (isHeaderLabel(raw)) continue;
+    rowsInColumn++;
+    if (!raw.trim()) {
+      skippedEmpty++;
+      skipped.push({ rawName: "", reason: "empty" });
+      continue;
+    }
     const parsed = parseCompanyCell(raw);
     const name = sanitizeCompanyText(parsed.name);
-    if (!name) continue;
+    if (!name) {
+      skippedInvalid++;
+      skipped.push({ rawName: raw, reason: "invalid" });
+      continue;
+    }
     const key = fold(name);
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const previous = seen.get(key);
+    if (previous) {
+      skippedDuplicate++;
+      skipped.push({ rawName: raw, reason: "duplicate", duplicateOf: previous });
+      continue;
+    }
+    seen.set(key, name);
     const alias = parsed.alias ? sanitizeCompanyText(parsed.alias) || null : null;
     all.push({ name, rawName: raw, alias });
   }
@@ -264,18 +316,28 @@ export function extractCompanyNames(matrix: unknown[][]): ExcelCompanyExtract {
     companies: all,
     totalFound: all.length,
     columnLabel,
+    loadStats: {
+      rowsInColumn,
+      unique: all.length,
+      skippedEmpty,
+      skippedInvalid,
+      skippedDuplicate,
+      skipped,
+    },
   };
 }
 
 export function createExcelQueue(
   fileLabel: string,
   columnLabel: string | null,
-  companies: Array<ExcelCompanyRow | string>
+  companies: Array<ExcelCompanyRow | string>,
+  loadStats: ExcelLoadStats = emptyLoadStats()
 ): ExcelCompanyQueue {
   return {
     id: Date.now(),
     fileLabel,
     columnLabel,
+    loadStats: { ...loadStats, unique: companies.length },
     entries: companies.map((row) => {
       const base: ExcelCompanyRow =
         typeof row === "string" ? { name: row, rawName: row, alias: null } : row;
@@ -328,17 +390,41 @@ export async function readCompanyNamesFromBuffer(
 
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) {
-    return { companies: [], totalFound: 0, columnLabel: null };
+    return { companies: [], totalFound: 0, columnLabel: null, loadStats: emptyLoadStats() };
   }
 
-  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+  return extractCompanyNames(sheetToMatrix(XLSX, workbook.Sheets[sheetName]));
+}
+
+/**
+ * Lee todas las celdas con dato, no solo el rango usado de Excel (`!ref`).
+ * Ese rango suele quedar corto cuando se pegan filas y Excel no lo actualiza.
+ */
+function sheetToMatrix(
+  XLSX: typeof import("xlsx"),
+  sheet: import("xlsx").WorkSheet
+): unknown[][] {
+  const cells = Object.keys(sheet).filter((key) => key[0] !== "!");
+  let maxRow = 0;
+  let maxCol = 0;
+  for (const addr of cells) {
+    const { r, c } = XLSX.utils.decode_cell(addr);
+    if (r > maxRow) maxRow = r;
+    if (c > maxCol) maxCol = c;
+  }
+  if (sheet["!ref"]) {
+    const declared = XLSX.utils.decode_range(sheet["!ref"]);
+    maxRow = Math.max(maxRow, declared.e.r);
+    maxCol = Math.max(maxCol, declared.e.c);
+  }
+  const range = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: maxRow, c: maxCol } });
+  return XLSX.utils.sheet_to_json(sheet, {
     header: 1,
     raw: false,
     defval: "",
     blankrows: false,
+    range,
   }) as unknown[][];
-
-  return extractCompanyNames(rows);
 }
 
 function decodeCsv(buffer: ArrayBuffer): string {

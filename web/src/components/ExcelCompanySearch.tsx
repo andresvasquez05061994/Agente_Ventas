@@ -58,7 +58,7 @@ export function ExcelCompanySearch({
         setError("No encontré nombres de empresa. Usa una columna con encabezado Empresa, Compañía o Company.");
         return;
       }
-      onLoad(createExcelQueue(file.name, parsed.columnLabel, parsed.companies));
+      onLoad(createExcelQueue(file.name, parsed.columnLabel, parsed.companies, parsed.loadStats));
     } catch {
       setError("No se pudo leer el archivo. Ábrelo en Excel y guárdalo de nuevo como .xlsx.");
     } finally {
@@ -106,6 +106,15 @@ export function ExcelCompanySearch({
   }
 
   const stats = excelQueueStats(queue);
+  const load = queue.loadStats ?? {
+    rowsInColumn: stats.total,
+    unique: stats.total,
+    skippedEmpty: 0,
+    skippedInvalid: 0,
+    skippedDuplicate: 0,
+    skipped: [],
+  };
+  const skippedTotal = load.skippedDuplicate + load.skippedEmpty + load.skippedInvalid;
   const batch = nextPendingBatch(queue);
   const progress = stats.total ? Math.round((stats.reviewed / stats.total) * 100) : 0;
   const from = stats.reviewed + 1;
@@ -139,7 +148,11 @@ export function ExcelCompanySearch({
       <div className="excel-stats">
         <div className="excel-stat">
           <span className="excel-stat__value">{stats.total}</span>
-          <span className="excel-stat__label">Empresas cargadas</span>
+          <span className="excel-stat__label">
+            {load.rowsInColumn > stats.total
+              ? `Únicas de ${load.rowsInColumn} filas`
+              : "Empresas cargadas"}
+          </span>
         </div>
         <div className="excel-stat">
           <span className="excel-stat__value">{stats.contacts}</span>
@@ -182,6 +195,19 @@ export function ExcelCompanySearch({
         <p className="excel-card__done">Se revisaron todas las empresas del archivo.</p>
       )}
 
+      {skippedTotal > 0 && (
+        <p className="text-micro mt-1">
+          {[
+            load.skippedDuplicate ? `${load.skippedDuplicate} repetida(s)` : "",
+            load.skippedEmpty ? `${load.skippedEmpty} vacía(s)` : "",
+            load.skippedInvalid ? `${load.skippedInvalid} inválida(s)` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+          {load.skippedDuplicate ? " (misma razón social, no se consultan dos veces)" : ""}.
+        </p>
+      )}
+
       <details className="excel-companies">
         <summary>Ver estado por empresa</summary>
         <ul>
@@ -204,6 +230,25 @@ export function ExcelCompanySearch({
           ))}
         </ul>
       </details>
+      {load.skipped.filter((row) => row.reason !== "empty").length > 0 && (
+        <details className="excel-companies">
+          <summary>Filas omitidas ({skippedTotal})</summary>
+          <ul>
+            {load.skipped
+              .filter((row) => row.reason !== "empty")
+              .map((row, index) => (
+                <li key={`${row.reason}-${index}`}>
+                  <span className="excel-companies__name" title={row.rawName}>
+                    {row.rawName || "(vacía)"}
+                  </span>
+                  <span className="excel-chip">
+                    {row.reason === "duplicate" ? `Igual a ${row.duplicateOf}` : "Inválida"}
+                  </span>
+                </li>
+              ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }
