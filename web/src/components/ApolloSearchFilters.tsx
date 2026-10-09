@@ -16,7 +16,7 @@ import {
 } from "@/lib/apollo-filters";
 import { FieldLabel, SectionLabel, ActionBanner } from "@/components/ui";
 import { CompanyAutocomplete } from "@/components/CompanyAutocomplete";
-import { ExcelCompanySearch, type ExcelSearchPayload } from "@/components/ExcelCompanySearch";
+import { ExcelCompanySearch } from "@/components/ExcelCompanySearch";
 import type { ExcelCompanyQueue } from "@/lib/excel-companies";
 
 export type ApolloSearchFiltersProps = {
@@ -39,7 +39,8 @@ export type ApolloSearchFiltersProps = {
   onSearch: () => void;
   excelQueue: ExcelCompanyQueue | null;
   onExcelLoaded: (queue: ExcelCompanyQueue) => void;
-  onSearchCompanies: (payload: ExcelSearchPayload) => void;
+  onExcelCleared: () => void;
+  onSearchCompanies: () => void;
 };
 
 function TitleCheckboxList({
@@ -90,8 +91,10 @@ export function ApolloSearchFilters({
   onSearch,
   excelQueue,
   onExcelLoaded,
+  onExcelCleared,
   onSearchCompanies,
 }: ApolloSearchFiltersProps) {
+  const excelMode = Boolean(excelQueue);
   const [customTitle, setCustomTitle] = useState("");
   const [customError, setCustomError] = useState("");
   const [customSuccess, setCustomSuccess] = useState("");
@@ -125,14 +128,27 @@ export function ApolloSearchFilters({
     setTitles(titles.filter((t) => t !== value));
   }
 
+  const excelBlockedReason = titles.length ? null : "Selecciona al menos un cargo o pulsa Todos.";
+
   return (
     <>
-      <SectionLabel>Filtros Apollo</SectionLabel>
-      <p className="text-caption mb-3">
-        Solo listas validadas. Cada contacto incluye email y teléfono enriquecidos.
-      </p>
+      <ExcelCompanySearch
+        disabled={loading}
+        queue={excelQueue}
+        searchBlockedReason={excelBlockedReason}
+        onLoad={onExcelLoaded}
+        onClear={onExcelCleared}
+        onSearch={onSearchCompanies}
+      />
 
-      <FieldLabel>País</FieldLabel>
+      <SectionLabel>{excelMode ? "Filtros para las empresas del archivo" : "Filtros Apollo"}</SectionLabel>
+      {!excelMode && (
+        <p className="text-caption mb-3">
+          Solo listas validadas. Cada contacto incluye email y teléfono enriquecidos.
+        </p>
+      )}
+
+      <FieldLabel>{excelMode ? "País de las empresas" : "País"}</FieldLabel>
       <select
         className="input-field mb-3"
         value={country}
@@ -145,21 +161,14 @@ export function ApolloSearchFilters({
         ))}
       </select>
 
-      <CompanyAutocomplete
-        value={company}
-        onChange={setCompany}
-        country={country}
-        disabled={loading}
-      />
-
-      <ExcelCompanySearch
-        disabled={loading}
-        titlesSelected={titles.length}
-        perPage={perPage}
-        queue={excelQueue}
-        onExcelLoaded={onExcelLoaded}
-        onSearchCompanies={onSearchCompanies}
-      />
+      {!excelMode && (
+        <CompanyAutocomplete
+          value={company}
+          onChange={setCompany}
+          country={country}
+          disabled={loading}
+        />
+      )}
 
       <div className="apollo-titles-header">
         <FieldLabel className="!mb-0">Cargos</FieldLabel>
@@ -259,24 +268,32 @@ export function ApolloSearchFilters({
       )}
 
       <p className="text-micro apollo-titles-hint">
-        Selecciona de la lista o agrega cargos libres (ideal en inglés para Apollo).
-        {titles.length > 0 && (
+        {excelMode
+          ? allPresetsSelected
+            ? "Todos: se traen todos los cargos que Apollo tenga en cada empresa, también los que no están en esta lista."
+            : "Solo se traen personas con los cargos marcados. Pulsa Todos para traer cualquier cargo de la empresa."
+          : "Selecciona de la lista o agrega cargos libres (ideal en inglés para Apollo)."}
+        {titles.length > 0 && !(excelMode && allPresetsSelected) && (
           <span className="apollo-titles-count"> · {titles.length} seleccionados</span>
         )}
       </p>
 
-      <FieldLabel>Industria</FieldLabel>
-      <select
-        className="input-field mb-3"
-        value={keyword}
-        onChange={(e) => setKeyword(e.target.value)}
-      >
-        {APOLLO_KEYWORDS.map((k) => (
-          <option key={k.label} value={k.value}>
-            {k.label}
-          </option>
-        ))}
-      </select>
+      {!excelMode && (
+        <>
+          <FieldLabel>Industria</FieldLabel>
+          <select
+            className="input-field mb-3"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+          >
+            {APOLLO_KEYWORDS.map((k) => (
+              <option key={k.label} value={k.value}>
+                {k.label}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
 
       <FieldLabel>Seniority</FieldLabel>
       <select
@@ -291,20 +308,24 @@ export function ApolloSearchFilters({
         ))}
       </select>
 
-      <FieldLabel>Tamaño de empresa</FieldLabel>
-      <select
-        className="input-field mb-3"
-        value={employeeRanges[0] ?? ""}
-        onChange={(e) => setEmployeeRanges(e.target.value ? [e.target.value] : [])}
-      >
-        {APOLLO_EMPLOYEE_RANGES.map((r) => (
-          <option key={r.label} value={r.value}>
-            {r.label}
-          </option>
-        ))}
-      </select>
+      {!excelMode && (
+        <>
+          <FieldLabel>Tamaño de empresa</FieldLabel>
+          <select
+            className="input-field mb-3"
+            value={employeeRanges[0] ?? ""}
+            onChange={(e) => setEmployeeRanges(e.target.value ? [e.target.value] : [])}
+          >
+            {APOLLO_EMPLOYEE_RANGES.map((r) => (
+              <option key={r.label} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
 
-      <SectionLabel>Resultados</SectionLabel>
+      <SectionLabel>{excelMode ? "Contactos por empresa" : "Resultados"}</SectionLabel>
       <select
         className="input-field mb-4"
         value={perPage}
@@ -312,19 +333,26 @@ export function ApolloSearchFilters({
       >
         {APOLLO_PER_PAGE_OPTIONS.map((n) => (
           <option key={n} value={n}>
-            {n} contactos (con email y teléfono)
+            {excelMode ? `Hasta ${n} por empresa (con email y teléfono)` : `${n} contactos (con email y teléfono)`}
           </option>
         ))}
       </select>
 
-      <button
-        type="button"
-        onClick={onSearch}
-        disabled={loading}
-        className="btn-primary w-full disabled:opacity-60"
-      >
-        {loading ? "Buscando y enriqueciendo..." : "Ejecutar búsqueda"}
-      </button>
+      {excelMode ? (
+        <p className="text-micro">
+          La búsqueda general está pausada mientras haya un archivo cargado. Usa el botón del panel
+          de Excel; para volver a la búsqueda general, quita el archivo.
+        </p>
+      ) : (
+        <button
+          type="button"
+          onClick={onSearch}
+          disabled={loading}
+          className="btn-primary w-full disabled:opacity-60"
+        >
+          {loading ? "Buscando y enriqueciendo..." : "Ejecutar búsqueda"}
+        </button>
+      )}
     </>
   );
 }

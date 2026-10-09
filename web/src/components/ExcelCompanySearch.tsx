@@ -1,40 +1,40 @@
 "use client";
 
 import { useId, useState } from "react";
-import { FileSpreadsheet } from "lucide-react";
-import { ActionBanner, FieldLabel } from "@/components/ui";
+import { FileSpreadsheet, X } from "lucide-react";
+import { ActionBanner } from "@/components/ui";
 import {
-  excelCoverageMessage,
-  nextCompanyBatch,
+  createExcelQueue,
+  excelQueueStats,
+  nextPendingBatch,
   readCompanyNamesFromBuffer,
+  type ExcelCompanyEntry,
   type ExcelCompanyQueue,
 } from "@/lib/excel-companies";
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
-export type ExcelSearchPayload = {
-  queueId: number;
-  companies: string[];
-  total: number;
-  from: number;
-  to: number;
-  deliveredBefore: number;
-};
+function statusLabel(entry: ExcelCompanyEntry): string {
+  if (entry.status === "found") return `${entry.contacts} contacto${entry.contacts === 1 ? "" : "s"}`;
+  if (entry.status === "no_contacts") return "Sin contactos";
+  if (entry.status === "not_found") return "No está en Apollo";
+  return "Por revisar";
+}
 
 export function ExcelCompanySearch({
   disabled,
-  titlesSelected,
-  perPage,
   queue,
-  onExcelLoaded,
-  onSearchCompanies,
+  searchBlockedReason,
+  onLoad,
+  onClear,
+  onSearch,
 }: {
   disabled: boolean;
-  titlesSelected: number;
-  perPage: number;
   queue: ExcelCompanyQueue | null;
-  onExcelLoaded: (queue: ExcelCompanyQueue) => void;
-  onSearchCompanies: (payload: ExcelSearchPayload) => void;
+  searchBlockedReason: string | null;
+  onLoad: (queue: ExcelCompanyQueue) => void;
+  onClear: () => void;
+  onSearch: () => void;
 }) {
   const inputId = useId();
   const [reading, setReading] = useState(false);
@@ -43,9 +43,7 @@ export function ExcelCompanySearch({
   async function onFile(file: File | undefined) {
     setError("");
     if (!file) return;
-
-    const name = file.name.toLowerCase();
-    if (!/\.(xlsx|xls|csv)$/.test(name)) {
+    if (!/\.(xlsx|xls|csv)$/i.test(file.name)) {
       setError("Usa un archivo Excel (.xlsx, .xls) o CSV.");
       return;
     }
@@ -53,24 +51,14 @@ export function ExcelCompanySearch({
       setError("El archivo supera 2 MB. Deja solo la columna de empresas y vuelve a subirlo.");
       return;
     }
-
     setReading(true);
     try {
-      const buffer = await file.arrayBuffer();
-      const parsed = await readCompanyNamesFromBuffer(buffer, file.name);
+      const parsed = await readCompanyNamesFromBuffer(await file.arrayBuffer(), file.name);
       if (!parsed.totalFound) {
-        setError(
-          "No encontré nombres de empresa. Usa una columna con encabezado Empresa, Compañía o Company."
-        );
+        setError("No encontré nombres de empresa. Usa una columna con encabezado Empresa, Compañía o Company.");
         return;
       }
-      onExcelLoaded({
-        id: Date.now(),
-        fileLabel: file.name,
-        columnLabel: parsed.columnLabel,
-        companies: parsed.companies,
-        delivered: 0,
-      });
+      onLoad(createExcelQueue(file.name, parsed.columnLabel, parsed.companies));
     } catch {
       setError("No se pudo leer el archivo. Ábrelo en Excel y guárdalo de nuevo como .xlsx.");
     } finally {
@@ -78,106 +66,135 @@ export function ExcelCompanySearch({
     }
   }
 
-  const batch = queue ? nextCompanyBatch(queue.companies, queue.delivered) : null;
-  const coverage = queue ? excelCoverageMessage(queue.delivered, queue.companies.length) : null;
-  const preview = batch?.companies.slice(0, 6) ?? [];
-  const hiddenCount = batch ? Math.max(0, batch.companies.length - preview.length) : 0;
-  const canSearch = Boolean(batch && batch.companies.length > 0 && !disabled && !reading && titlesSelected > 0);
+  const fileInput = (
+    <input
+      id={inputId}
+      type="file"
+      accept=".xlsx,.xls,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+      className="hidden"
+      disabled={disabled || reading}
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        void onFile(file);
+      }}
+    />
+  );
 
-  const buttonLabel = !batch || batch.companies.length === 0
-    ? "Base revisada"
-    : queue && queue.delivered > 0
-      ? `Siguientes ${batch.companies.length} empresas (${batch.from}–${batch.to})`
-      : `Buscar empresas ${batch.from}–${batch.to}`;
+  if (!queue) {
+    return (
+      <div className="excel-card">
+        <p className="excel-card__title">Empresas desde Excel</p>
+        <p className="text-micro mb-2">
+          Busca contactos solo dentro de las empresas de tu archivo (columna Empresa, Compañía o Company).
+        </p>
+        <label
+          htmlFor={inputId}
+          className={`btn-secondary w-full cursor-pointer ${disabled || reading ? "pointer-events-none opacity-50" : ""}`}
+        >
+          <FileSpreadsheet size={14} strokeWidth={1.5} aria-hidden />
+          {reading ? "Leyendo archivo…" : "Cargar Excel"}
+        </label>
+        {fileInput}
+        {error && (
+          <div className="mt-2">
+            <ActionBanner compact tone="error" title="Excel no leído" message={error} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const stats = excelQueueStats(queue);
+  const batch = nextPendingBatch(queue);
+  const progress = stats.total ? Math.round((stats.reviewed / stats.total) * 100) : 0;
+  const from = stats.reviewed + 1;
+  const to = stats.reviewed + batch.length;
+  const buttonLabel =
+    stats.reviewed === 0
+      ? `Buscar contactos · empresas ${from}–${to} de ${stats.total}`
+      : `Siguientes ${batch.length} · empresas ${from}–${to} de ${stats.total}`;
 
   return (
-    <div className="mb-3">
-      <FieldLabel>Empresas desde Excel</FieldLabel>
-      <p className="text-micro mb-2">
-        Sube un Excel o CSV con el nombre de la empresa. Cada consulta revisa hasta 20 empresas y{" "}
-        {perPage} contactos por empresa, con los cargos y el país de estos filtros.
-      </p>
-      <label
-        htmlFor={inputId}
-        className={`btn-secondary w-full cursor-pointer ${disabled || reading ? "pointer-events-none opacity-50" : ""}`}
-      >
-        <FileSpreadsheet size={14} strokeWidth={1.5} aria-hidden />
-        {reading ? "Leyendo archivo…" : queue ? "Cargar otro Excel" : "Cargar Excel"}
-      </label>
-      <input
-        id={inputId}
-        type="file"
-        accept=".xlsx,.xls,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
-        className="hidden"
-        disabled={disabled || reading}
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          event.target.value = "";
-          void onFile(file);
-        }}
-      />
-
-      {error && (
-        <div className="mt-2">
-          <ActionBanner compact tone="error" title="Excel no leído" message={error} />
-        </div>
-      )}
-
-      {queue && coverage && batch && (
-        <div className="mt-2">
-          <p className="text-caption">
+    <div className="excel-card">
+      <div className="excel-card__head">
+        <div className="min-w-0">
+          <p className="excel-card__title">Empresas desde Excel</p>
+          <p className="excel-card__file" title={queue.fileLabel}>
             {queue.fileLabel}
-            {queue.columnLabel ? ` · columna «${queue.columnLabel}»` : ""}
           </p>
-          <div className="mt-2">
-            <ActionBanner
-              compact
-              tone={queue.delivered > 0 && batch.companies.length === 0 ? "success" : "info"}
-              title={coverage.title}
-              message={coverage.detail}
-            />
-          </div>
-          {batch.companies.length > 0 && (
-            <>
-              <p className="text-micro mt-2">
-                Próxima consulta: empresas {batch.from}–{batch.to} de {batch.total}.
-              </p>
-              <ul className="text-micro mt-1 max-h-24 list-disc overflow-y-auto pl-4">
-                {preview.map((name) => (
-                  <li key={`${batch.from}-${name}`}>{name}</li>
-                ))}
-                {hiddenCount > 0 && <li>y {hiddenCount} más en esta tanda</li>}
-              </ul>
-              {queue.delivered > 0 && (
-                <p className="text-micro mt-1">
-                  Guarda en el portafolio los contactos de esta tanda antes de continuar. La siguiente
-                  consulta reemplaza la lista en pantalla.
-                </p>
-              )}
-              {titlesSelected === 0 && (
-                <p className="text-micro mt-1">Selecciona al menos un cargo antes de buscar.</p>
-              )}
-              <button
-                type="button"
-                className="btn-primary mt-2 w-full disabled:opacity-60"
-                disabled={!canSearch}
-                onClick={() =>
-                  onSearchCompanies({
-                    queueId: queue.id,
-                    companies: batch.companies,
-                    total: batch.total,
-                    from: batch.from,
-                    to: batch.to,
-                    deliveredBefore: queue.delivered,
-                  })
-                }
-              >
-                {buttonLabel}
-              </button>
-            </>
-          )}
         </div>
+        <button
+          type="button"
+          className="excel-card__close"
+          onClick={onClear}
+          disabled={disabled}
+          aria-label="Quitar archivo"
+          title="Quitar archivo"
+        >
+          <X size={14} strokeWidth={1.75} aria-hidden />
+        </button>
+      </div>
+
+      <div className="excel-stats">
+        <div className="excel-stat">
+          <span className="excel-stat__value">{stats.total}</span>
+          <span className="excel-stat__label">Empresas cargadas</span>
+        </div>
+        <div className="excel-stat">
+          <span className="excel-stat__value">{stats.contacts}</span>
+          <span className="excel-stat__label">Contactos encontrados</span>
+        </div>
+        <div className="excel-stat">
+          <span className="excel-stat__value">{stats.withContacts}</span>
+          <span className="excel-stat__label">Empresas con contactos</span>
+        </div>
+        <div className="excel-stat">
+          <span className="excel-stat__value">{stats.withoutContacts}</span>
+          <span className="excel-stat__label">Faltan por asignar</span>
+        </div>
+      </div>
+
+      <div className="excel-progress" aria-label={`${stats.reviewed} de ${stats.total} empresas revisadas`}>
+        <div className="excel-progress__bar" style={{ width: `${progress}%` }} />
+      </div>
+      <p className="text-micro mt-1">
+        {stats.reviewed} de {stats.total} revisadas
+        {stats.pending > 0 ? ` · ${stats.pending} por revisar` : ""}
+        {stats.noContacts + stats.notFound > 0
+          ? ` · ${stats.noContacts + stats.notFound} sin contactos en Apollo`
+          : ""}
+      </p>
+
+      {batch.length > 0 ? (
+        <>
+          <button
+            type="button"
+            className="btn-primary mt-3 w-full disabled:opacity-60"
+            disabled={disabled || Boolean(searchBlockedReason)}
+            onClick={onSearch}
+          >
+            {buttonLabel}
+          </button>
+          {searchBlockedReason && <p className="text-micro mt-1">{searchBlockedReason}</p>}
+        </>
+      ) : (
+        <p className="excel-card__done">Se revisaron todas las empresas del archivo.</p>
       )}
+
+      <details className="excel-companies">
+        <summary>Ver estado por empresa</summary>
+        <ul>
+          {queue.entries.map((entry) => (
+            <li key={entry.name}>
+              <span className="excel-companies__name" title={entry.apolloName ? `En Apollo: ${entry.apolloName}` : entry.name}>
+                {entry.name}
+              </span>
+              <span className={`excel-chip excel-chip--${entry.status}`}>{statusLabel(entry)}</span>
+            </li>
+          ))}
+        </ul>
+      </details>
     </div>
   );
 }

@@ -7,21 +7,32 @@ export type ExcelCompanyExtract = {
   columnLabel: string | null;
 };
 
+export type ExcelCompanyStatus = "pending" | "found" | "no_contacts" | "not_found";
+
+export type ExcelCompanyEntry = {
+  name: string;
+  status: ExcelCompanyStatus;
+  contacts: number;
+  apolloName: string | null;
+  apolloId: string | null;
+};
+
 export type ExcelCompanyQueue = {
   id: number;
   fileLabel: string;
   columnLabel: string | null;
-  companies: string[];
-  delivered: number;
+  entries: ExcelCompanyEntry[];
 };
 
-export type CompanyBatchWindow = {
-  companies: string[];
+export type ExcelQueueStats = {
   total: number;
-  delivered: number;
-  from: number;
-  to: number;
-  remainingAfter: number;
+  reviewed: number;
+  pending: number;
+  withContacts: number;
+  noContacts: number;
+  notFound: number;
+  withoutContacts: number;
+  contacts: number;
 };
 
 const ALLOWED_COMPANY_CHAR = /[\w\s.&'´\-áéíóúñÁÉÍÓÚÑ]/u;
@@ -142,57 +153,54 @@ export function extractCompanyNames(matrix: unknown[][]): ExcelCompanyExtract {
   };
 }
 
-/** Siguiente tanda de hasta 20 empresas que aún no se han revisado. */
-export function nextCompanyBatch(companies: string[], delivered: number): CompanyBatchWindow {
-  const total = companies.length;
-  const start = Math.min(Math.max(0, delivered), total);
-  const slice = companies.slice(start, start + MAX_EXCEL_COMPANIES);
+export function createExcelQueue(
+  fileLabel: string,
+  columnLabel: string | null,
+  companies: string[]
+): ExcelCompanyQueue {
   return {
-    companies: slice,
-    total,
-    delivered: start,
-    from: slice.length ? start + 1 : total,
-    to: start + slice.length,
-    remainingAfter: total - (start + slice.length),
+    id: Date.now(),
+    fileLabel,
+    columnLabel,
+    entries: companies.map((name) => ({
+      name,
+      status: "pending",
+      contacts: 0,
+      apolloName: null,
+      apolloId: null,
+    })),
   };
 }
 
-/** Cuántas empresas de la base cargada ya se entregaron y cuántas faltan. */
-export function excelCoverageMessage(
-  delivered: number,
-  total: number
-): { title: string; detail: string } {
-  const reviewed = Math.min(Math.max(0, delivered), Math.max(0, total));
-  const remaining = Math.max(0, total - reviewed);
-
-  if (total <= 0) {
-    return { title: "Sin empresas en el archivo", detail: "" };
-  }
-
-  if (reviewed === 0) {
-    const first = Math.min(MAX_EXCEL_COMPANIES, total);
-    const after = total - first;
-    return {
-      title: `Base cargada: ${total} empresas`,
-      detail:
-        after > 0
-          ? `Esta consulta entregará las primeras ${first}. Quedarán ${after} empresas para una nueva consulta.`
-          : `Esta consulta entregará las ${total} empresas de la base.`,
-    };
-  }
-
-  if (remaining === 0) {
-    return {
-      title: `Se entregaron las ${reviewed} empresas`,
-      detail: `Ya se revisó toda la base cargada (${total}). No quedan empresas pendientes.`,
-    };
-  }
-
-  const next = Math.min(MAX_EXCEL_COMPANIES, remaining);
-  return {
-    title: `Se entregaron ${reviewed} de ${total} empresas`,
-    detail: `Quedan ${remaining} empresas por revisar en la base cargada. La siguiente consulta tomará ${next}.`,
+export function excelQueueStats(queue: ExcelCompanyQueue): ExcelQueueStats {
+  const stats: ExcelQueueStats = {
+    total: queue.entries.length,
+    reviewed: 0,
+    pending: 0,
+    withContacts: 0,
+    noContacts: 0,
+    notFound: 0,
+    withoutContacts: 0,
+    contacts: 0,
   };
+  for (const entry of queue.entries) {
+    stats.contacts += entry.contacts;
+    if (entry.status === "pending") stats.pending++;
+    else stats.reviewed++;
+    if (entry.status === "found") stats.withContacts++;
+    if (entry.status === "no_contacts") stats.noContacts++;
+    if (entry.status === "not_found") stats.notFound++;
+  }
+  stats.withoutContacts = stats.total - stats.withContacts;
+  return stats;
+}
+
+/** Siguiente tanda: hasta 20 empresas que aún no se han revisado, en el orden del archivo. */
+export function nextPendingBatch(queue: ExcelCompanyQueue): string[] {
+  return queue.entries
+    .filter((entry) => entry.status === "pending")
+    .slice(0, MAX_EXCEL_COMPANIES)
+    .map((entry) => entry.name);
 }
 
 export async function readCompanyNamesFromBuffer(

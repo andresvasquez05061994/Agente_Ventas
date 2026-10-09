@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { ApolloPerson } from "@/lib/types";
 import { DEFAULT_SEARCH } from "@/lib/apollo-filters";
+import type { ExcelCompanyQueue } from "@/lib/excel-companies";
 
 export type ProspeccionSearchStatus = "idle" | "loading" | "success" | "empty" | "error";
 
@@ -47,10 +48,15 @@ type ProspeccionSessionState = {
   selectedIds: string[];
   status: ProspeccionSearchStatus;
   meta: ProspeccionSearchMeta | null;
+  excelQueue: ExcelCompanyQueue | null;
 };
 
 type ProspeccionSessionContextValue = ProspeccionSessionState & {
   selected: Set<string>;
+  setExcelQueue: (
+    next: ExcelCompanyQueue | null | ((current: ExcelCompanyQueue | null) => ExcelCompanyQueue | null)
+  ) => void;
+  appendResults: (people: ApolloPerson[]) => void;
   setCountry: (v: string) => void;
   setCompany: (v: string) => void;
   setTitles: (v: string[]) => void;
@@ -100,6 +106,7 @@ function createInitialState(): ProspeccionSessionState {
     selectedIds: [],
     status: "idle",
     meta: null,
+    excelQueue: null,
   };
 }
 
@@ -189,8 +196,35 @@ export function ProspeccionSessionProvider({ children }: { children: ReactNode }
     });
   }, []);
 
+  const setExcelQueue = useCallback(
+    (
+      next:
+        | ExcelCompanyQueue
+        | null
+        | ((current: ExcelCompanyQueue | null) => ExcelCompanyQueue | null)
+    ) => {
+      setState((s) => ({
+        ...s,
+        excelQueue: typeof next === "function" ? next(s.excelQueue) : next,
+      }));
+    },
+    []
+  );
+
+  const appendResults = useCallback((people: ApolloPerson[]) => {
+    setState((s) => {
+      const known = new Set(s.results.map((r) => r.apollo_id));
+      const fresh = people.filter((p) => !known.has(p.apollo_id));
+      return {
+        ...s,
+        results: [...s.results, ...fresh],
+        selectedIds: [...s.selectedIds, ...fresh.map((p) => p.apollo_id)],
+      };
+    });
+  }, []);
+
   const clearSession = useCallback(() => {
-    setState(createInitialState());
+    setState((s) => ({ ...createInitialState(), excelQueue: s.excelQueue }));
   }, []);
 
   const applyInterpretedFilters = useCallback(
@@ -227,6 +261,8 @@ export function ProspeccionSessionProvider({ children }: { children: ReactNode }
     () => ({
       ...state,
       selected,
+      setExcelQueue,
+      appendResults,
       setCountry,
       setCompany,
       setTitles,
@@ -249,6 +285,8 @@ export function ProspeccionSessionProvider({ children }: { children: ReactNode }
     [
       state,
       selected,
+      setExcelQueue,
+      appendResults,
       setCountry,
       setCompany,
       setTitles,
