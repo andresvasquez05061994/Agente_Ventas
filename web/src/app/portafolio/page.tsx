@@ -1,7 +1,7 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { Lead, LeadStatus } from "@/lib/types";
 import { EmptyState, FieldLabel, PageSubtitle, SectionLabel, ActionBanner, FeedbackAnchor } from "@/components/ui";
 import { MessageIAPanel } from "@/components/MessageIAPanel";
@@ -167,8 +167,13 @@ export default function PortafolioPage() {
 }
 
 function PortafolioContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const openLastPage = searchParams.get("page") === "last";
+  const searchParamsRef = useRef(searchParams);
+  searchParamsRef.current = searchParams;
+  // ?page=last solo abre la última página una vez. Si se vuelve a aplicar en cada
+  // cambio, Anterior y los números 1–4 regresan siempre a la página final.
+  const jumpedToLast = useRef(false);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -200,7 +205,15 @@ function PortafolioContent() {
   const pendingSearch = search !== debouncedSearch;
   const showLoading = loading || pendingSearch;
 
+  function clearLastPageParam() {
+    if (searchParamsRef.current.get("page") === "last") {
+      router.replace("/portafolio", { scroll: false });
+    }
+  }
+
   function markReloading() {
+    jumpedToLast.current = true;
+    clearLastPageParam();
     setLoading(true);
     clear();
     setPage(1);
@@ -219,6 +232,9 @@ function PortafolioContent() {
 
   useEffect(() => {
     let cancelled = false;
+    let jumpingToLast = false;
+    const wantLast =
+      searchParamsRef.current.get("page") === "last" && !jumpedToLast.current;
 
     fetch(`/api/leads?${buildLeadsQuery(page)}`, { cache: "no-store" })
       .then((res) => res.json())
@@ -226,9 +242,16 @@ function PortafolioContent() {
         if (cancelled) return;
         if (data.error) showError(data.error, "Error al cargar");
         else {
-          if (openLastPage && data.totalPages && page !== data.totalPages) {
+          if (wantLast && data.totalPages && page !== data.totalPages) {
+            jumpedToLast.current = true;
+            jumpingToLast = true;
+            clearLastPageParam();
             setPage(data.totalPages);
             return;
+          }
+          if (wantLast) {
+            jumpedToLast.current = true;
+            clearLastPageParam();
           }
           setLeads(data.leads ?? []);
           setTotal(data.total ?? 0);
@@ -241,13 +264,13 @@ function PortafolioContent() {
         if (!cancelled) showError("No se pudo cargar el portafolio.", "Error al cargar");
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && !jumpingToLast) setLoading(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [status, debouncedSearch, contact, page, openLastPage]);
+  }, [status, debouncedSearch, contact, page, router]);
 
   async function updateStatus(id: number, lead_status: LeadStatus) {
     const prev = leads;
@@ -828,6 +851,8 @@ function PortafolioContent() {
             total={total}
             perPage={PER_PAGE}
             onPageChange={(p) => {
+              jumpedToLast.current = true;
+              clearLastPageParam();
               setLoading(true);
               setPage(p);
               setSelected(new Set());
