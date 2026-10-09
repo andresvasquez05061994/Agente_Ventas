@@ -1,5 +1,5 @@
 import { getMistralModel, isMistralConfigured } from "./smart-search";
-import { formatPortfolioForPrompt, IAC_COMPANY_PROFILE } from "./iac-portfolio-knowledge";
+import { formatPortfolioForPrompt } from "./iac-portfolio-knowledge";
 import {
   formatProspectContextBlock,
   gatherProspectContext,
@@ -59,17 +59,33 @@ export class OutreachError extends Error {
   }
 }
 
-const COMMERCIAL_RULES = `Reglas comerciales (obligatorias):
+function commercialRules(context: ProspectContext): string {
+  const firm = context.company_profile;
+  const demandRule = context.knowledge_from_documents
+    ? "- Ofrece SOLO servicios del portafolio activo y de los extractos de documentos. No inventes productos ni casos de clientes."
+    : "- NO mencionar «Predicción de Demanda» salvo que aparezca como solución principal o complementaria en el portafolio recomendado para este prospecto.";
+  const erpRule = context.knowledge_from_documents
+    ? "- Conecta el dolor detectado (cargo, sector, web, intereses) con la solución principal recomendada."
+    : "- Si el contexto habla de ERP, software a medida, procesos o automatización → prioriza Centro de Automatización, no predicción de demanda.";
+  return `Reglas comerciales (obligatorias):
 - Español profesional, directo y cercano. Sin hype ni promesas irreales.
 - Personaliza con cargo, empresa, país y AL MENOS UNA observación concreta del sitio web, notas o contexto de prospección.
 - El eje del mensaje DEBE ser la SOLUCIÓN PRINCIPAL indicada en el portafolio recomendado (primera de la lista). No cambies de solución por iniciativa propia.
-- NO mencionar «Predicción de Demanda» salvo que aparezca como solución principal o complementaria en el portafolio recomendado para este prospecto.
+${demandRule}
 - Menciona 1-2 soluciones SOLO de la lista recomendada, con métricas orientativas del portafolio (no inventes casos de clientes nombrados).
-- Conecta el dolor detectado en el contexto del prospecto (cargo, sector, web, fuente de búsqueda) con esa solución principal.
-- Si el contexto habla de ERP, software a medida, procesos o automatización → prioriza Centro de Automatización, no predicción de demanda.
+${erpRule}
 - Si no hay datos web, sé específico con el rol, la empresa y el contexto de prospección; evita frases genéricas.
 - No inventes noticias, financieros ni proyectos internos del prospecto.
-- Firma mentalmente como ${IAC_COMPANY_PROFILE.contact.consultant}, ${IAC_COMPANY_PROFILE.name} (${IAC_COMPANY_PROFILE.contact.web}).`;
+- Firma mentalmente como ${firm.contact.consultant}, ${firm.name} (${firm.contact.web}).`;
+}
+
+function portfolioBlock(context: ProspectContext): string {
+  return formatPortfolioForPrompt(context.recommended_solutions, {
+    company: context.company_profile,
+    excerpt: context.knowledge_excerpt,
+    fromDocuments: context.knowledge_from_documents,
+  });
+}
 
 function buildPersonalization(
   context: ProspectContext,
@@ -92,10 +108,11 @@ function buildPersonalization(
 }
 
 function buildCallPrompt(input: OutreachInput, context: ProspectContext): string {
-  return `Eres ${IAC_COMPANY_PROFILE.contact.consultant}, consultor comercial senior de ${IAC_COMPANY_PROFILE.name}.
+  const firm = context.company_profile;
+  return `Eres ${firm.contact.consultant}, consultor comercial senior de ${firm.name}.
 
-PORTAFOLIO IAC (oferta real — úsala como base, no inventes servicios fuera de esto):
-${formatPortfolioForPrompt(context.recommended_solutions)}
+PORTAFOLIO ACTIVO (oferta real — úsala como base, no inventes servicios fuera de esto):
+${portfolioBlock(context)}
 
 CONTEXTO DEL PROSPECTO:
 ${formatProspectContextBlock(input, context)}
@@ -110,19 +127,20 @@ Responde SOLO JSON válido (sin markdown):
   "why_now": "1-2 oraciones: urgencia operativa ligada a su sector o a lo visto en su web",
   "value_points": ["beneficio 1 citando la SOLUCIÓN PRINCIPAL + métrica del portafolio", "beneficio 2 ligado a su cargo y contexto", "beneficio 3 conectado con su empresa o sector"],
   "discovery_question": "pregunta abierta que demuestre que investigaste su contexto",
-  "closing": "cierre para agendar 15 min con ${IAC_COMPANY_PROFILE.contact.consultant} (1-2 oraciones)",
-  "objection_tip": "respuesta breve si dice 'no tengo tiempo' o 'ya tenemos proveedor', mencionando complemento con IAC"
+  "closing": "cierre para agendar 15 min con ${firm.contact.consultant} (1-2 oraciones)",
+  "objection_tip": "respuesta breve si dice 'no tengo tiempo' o 'ya tenemos proveedor', mencionando complemento con ${firm.name}"
 }
 
-${COMMERCIAL_RULES}
+${commercialRules(context)}
 - opening_line debe incluir referencia explícita a company_hook o al sector de la empresa.`;
 }
 
 function buildEmailPrompt(input: OutreachInput, context: ProspectContext): string {
-  return `Eres ${IAC_COMPANY_PROFILE.contact.consultant}, consultor comercial senior de ${IAC_COMPANY_PROFILE.name}.
+  const firm = context.company_profile;
+  return `Eres ${firm.contact.consultant}, consultor comercial senior de ${firm.name}.
 
-PORTAFOLIO IAC (oferta real):
-${formatPortfolioForPrompt(context.recommended_solutions)}
+PORTAFOLIO ACTIVO (oferta real):
+${portfolioBlock(context)}
 
 CONTEXTO DEL PROSPECTO:
 ${formatProspectContextBlock(input, context)}
@@ -139,11 +157,11 @@ Responde SOLO JSON válido (sin markdown):
   "hook": "2 oraciones: company_hook + problema del cargo enlazado a solución IAC concreta",
   "value_bullets": ["bullet con la SOLUCIÓN PRINCIPAL + métrica portafolio", "bullet personalizado al rol y contexto", "bullet conectado a su empresa"],
   "body_close": "1-2 oraciones consultivas antes del CTA",
-  "cta": "CTA de baja fricción (15 min con ${IAC_COMPANY_PROFILE.contact.consultant})",
-  "ps_line": "P.S. breve con beneficio IAC principal o referencia a su sector"
+  "cta": "CTA de baja fricción (15 min con ${firm.contact.consultant})",
+  "ps_line": "P.S. breve con beneficio principal o referencia a su sector"
 }
 
-${COMMERCIAL_RULES}
+${commercialRules(context)}
 - El hook debe integrar company_hook de forma natural.`;
 }
 
@@ -165,7 +183,7 @@ function ruleBasedCall(input: OutreachInput, context: ProspectContext): ColdCall
   return {
     channel: "call",
     headline: `${primary?.name?.split("(")[0]?.trim() ?? "Automatización"} para ${company}`,
-    opening_line: `Hola ${firstName}, soy ${IAC_COMPANY_PROFILE.contact.consultant} de ${IAC_COMPANY_PROFILE.name}. ${webRef}Como ${role}, muchos equipos en su sector están priorizando ${primary?.talking_points[0]?.toLowerCase() ?? "automatización"} — justo donde ayudamos con ${primary?.name ?? "nuestro Centro de Automatización"}.`,
+    opening_line: `Hola ${firstName}, soy ${context.company_profile.contact.consultant} de ${context.company_profile.name}. ${webRef}Como ${role}, muchos equipos en su sector están priorizando ${primary?.talking_points[0]?.toLowerCase() ?? "eficiencia operativa"} — justo donde ayudamos con ${primary?.name ?? context.company_profile.tagline}.`,
     why_now: `En ${input.pais || "la región"}, perfiles como el suyo buscan resultados en semanas: ${primary?.metrics[0] ?? "menos tiempo operativo"} sin proyectos eternos.`,
     value_points: [
       `${primary?.name ?? "Automatización"}: ${primary?.metrics[0] ?? "hasta 70% menos tiempo operativo"}`,
@@ -208,10 +226,10 @@ function ruleBasedEmail(input: OutreachInput, context: ProspectContext): ColdEma
     value_bullets: [
       `${primary?.name}: ${primary?.metrics[0] ?? "impacto operativo medible"}`,
       secondary ? `${secondary.name}: ${secondary.metrics[0]}` : "Entrenamiento consultivo en IA para su equipo",
-      `${IAC_COMPANY_PROFILE.experience} — integración con ERP/CRM existente`,
+      `${context.company_profile.experience} — integración con ERP/CRM existente`,
     ],
     body_close: `No busco vender en este correo: solo validar si este enfoque encaja con una prioridad actual de ${company}.`,
-    cta: `¿Le funciona 15 minutos con ${IAC_COMPANY_PROFILE.contact.consultant}? Responda con un horario y preparo un ejemplo aplicado a ${company}.`,
+    cta: `¿Le funciona 15 minutos con ${context.company_profile.contact.consultant}? Responda con un horario y preparo un ejemplo aplicado a ${company}.`,
     ps_line: `P.D.: Puedo compartir en 3 líneas cómo aplicaríamos ${primary?.name ?? "automatización IAC"} a su operación.`,
     personalization,
     source: "rules",
@@ -237,7 +255,7 @@ async function callMistral(prompt: string, systemExtra: string): Promise<string>
       messages: [
         {
           role: "system",
-          content: `Eres ${IAC_COMPANY_PROFILE.contact.consultant}, asesor comercial de ${IAC_COMPANY_PROFILE.name}. Respondes únicamente JSON válido en español. ${systemExtra}`,
+          content: `Eres un asesor comercial B2B. Respondes únicamente JSON válido en español. ${systemExtra}`,
         },
         { role: "user", content: prompt },
       ],
@@ -338,14 +356,18 @@ export async function generateOutreachMessage(
   if (channel === "email") {
     const content = await callMistral(
       buildEmailPrompt(input, context),
-      "Escribes cold emails B2B. Usa la solución principal del portafolio recomendado como eje. No ofrezcas Predicción de Demanda si no está en la lista recomendada."
+      context.knowledge_from_documents
+        ? "Escribes cold emails B2B. Usa la solución principal del portafolio activo y los documentos del proyecto. No inventes servicios."
+        : "Escribes cold emails B2B. Usa la solución principal del portafolio recomendado como eje. No ofrezcas Predicción de Demanda si no está en la lista recomendada."
     );
     return { channel: "email", ...parseEmailJson(content, context), source: "mistral", model };
   }
 
   const content = await callMistral(
     buildCallPrompt(input, context),
-    "Escribes guiones de llamada B2B. Usa la solución principal del portafolio recomendado como eje. No ofrezcas Predicción de Demanda si no está en la lista recomendada."
+    context.knowledge_from_documents
+      ? "Escribes guiones de llamada B2B. Usa la solución principal del portafolio activo y los documentos del proyecto. No inventes servicios."
+      : "Escribes guiones de llamada B2B. Usa la solución principal del portafolio recomendado como eje. No ofrezcas Predicción de Demanda si no está en la lista recomendada."
   );
   return { channel: "call", ...parseCallJson(content, context), source: "mistral", model };
 }

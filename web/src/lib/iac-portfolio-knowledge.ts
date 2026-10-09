@@ -307,11 +307,21 @@ export function pickSolutionsForProspect(
     .map((m) => m.solution);
 }
 
-export function formatPortfolioForPrompt(solutions: IACSolution[]): string {
-  const header = `${IAC_COMPANY_PROFILE.name} — ${IAC_COMPANY_PROFILE.tagline}
-${IAC_COMPANY_PROFILE.experience}. ${IAC_COMPANY_PROFILE.scale}.
-Sectores: ${IAC_COMPANY_PROFILE.sectors.join(", ")}.
-Web: ${IAC_COMPANY_PROFILE.contact.web}`;
+export type PortfolioPromptOptions = {
+  company?: typeof IAC_COMPANY_PROFILE;
+  excerpt?: string;
+  fromDocuments?: boolean;
+};
+
+export function formatPortfolioForPrompt(
+  solutions: IACSolution[],
+  options: PortfolioPromptOptions = {}
+): string {
+  const company = options.company ?? IAC_COMPANY_PROFILE;
+  const header = `${company.name} — ${company.tagline}
+${company.experience}. ${company.scale}.
+Sectores: ${company.sectors.join(", ")}.
+Web: ${company.contact.web}`;
 
   const primary = solutions[0];
   const secondary = solutions[1];
@@ -321,19 +331,34 @@ Web: ${IAC_COMPANY_PROFILE.contact.web}`;
       index === 0
         ? "SOLUCIÓN PRINCIPAL — eje obligatorio del mensaje"
         : "SOLUCIÓN COMPLEMENTARIA — mencionar solo brevemente si aporta valor";
+    const metrics = s.metrics.length
+      ? `Métricas de referencia (orientación, no inventar casos nombrados): ${s.metrics.join("; ")}`
+      : "Sin métricas explícitas: no inventes cifras.";
+    const angles = s.talking_points.length
+      ? `Ángulos de conversación: ${s.talking_points.join("; ")}`
+      : "";
     return `### ${s.name} (${role})
 ${s.summary}
-Métricas de referencia (orientación, no inventar casos nombrados): ${s.metrics.join("; ")}
-Ángulos de conversación: ${s.talking_points.join("; ")}`;
+${metrics}
+${angles}`.trim();
   });
 
-  const guardrails = `REGLAS DE ENFOQUE:
+  const guardrails = options.fromDocuments
+    ? `REGLAS DE ENFOQUE:
+- El mensaje debe girar en torno a «${primary?.name ?? "la oferta del proyecto"}».
+- Ofrece SOLO lo que aparece en este portafolio activo y en los extractos de documentos. No inventes otros servicios.
+${secondary ? `- Máximo una mención breve de «${secondary.name}» si refuerza el argumento.` : "- No hace falta segunda solución."}`
+    : `REGLAS DE ENFOQUE:
 - El mensaje debe girar en torno a «${primary?.name ?? "la solución principal"}».
 - NO mencionar Predicción de Demanda salvo que sea la solución principal o complementaria listada abajo.
 - No ofrecer soluciones del portafolio IAC que no aparezcan en esta lista.
 ${secondary ? `- Máximo una mención breve de «${secondary.name}» si refuerza el argumento.` : "- No hace falta segunda solución."}`;
 
-  return `${header}\n\n${guardrails}\n\n${blocks.join("\n\n")}`;
+  const docs = options.excerpt?.trim()
+    ? `\n\nEXTRACTOS DE DOCUMENTOS DEL PROYECTO (elige lo que encaje con el rol, sector e intereses del prospecto):\n${options.excerpt.trim()}`
+    : "";
+
+  return `${header}\n\n${guardrails}\n\n${blocks.join("\n\n")}${docs}`;
 }
 
 export function formatSolutionNames(solutions: IACSolution[]): string[] {

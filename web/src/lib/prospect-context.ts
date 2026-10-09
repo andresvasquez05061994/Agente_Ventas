@@ -2,9 +2,16 @@ import { searchApolloOrganizations } from "./apollo-organizations";
 import {
   formatMatchExplanation,
   formatSolutionNames,
+  IAC_COMPANY_PROFILE,
   rankSolutionsForProspect,
   type IACSolution,
 } from "./iac-portfolio-knowledge";
+import {
+  loadLiveKnowledge,
+  pickRelevantExcerpts,
+  rankCatalogForProspect,
+  solutionsForKnowledge,
+} from "./knowledge-match";
 
 export type ProspectInput = {
   nombre: string;
@@ -24,6 +31,9 @@ export type ProspectContext = {
   company_web_title: string | null;
   company_web_summary: string | null;
   intel_sources: string[];
+  company_profile: typeof IAC_COMPANY_PROFILE;
+  knowledge_excerpt: string;
+  knowledge_from_documents: boolean;
 };
 
 const FETCH_TIMEOUT_MS = 9000;
@@ -146,7 +156,10 @@ function guessDomainFromEmail(email: string | null | undefined): string | null {
 }
 
 export async function gatherProspectContext(input: ProspectInput): Promise<ProspectContext> {
-  const intel_sources: string[] = ["portafolio IAC"];
+  const live = await loadLiveKnowledge();
+  const intel_sources: string[] = live.fromDocuments
+    ? ["conocimiento del proyecto"]
+    : ["portafolio IAC"];
   let company_domain: string | null = null;
   let company_web_title: string | null = null;
   let company_web_summary: string | null = null;
@@ -183,10 +196,26 @@ export async function gatherProspectContext(input: ProspectInput): Promise<Prosp
     hints = `${hints} linkedin`;
   }
 
-  const ranked = rankSolutionsForProspect(input.cargo, hints);
+  const query = `${hints} ${company_web_summary ?? ""}`;
+  const catalog = solutionsForKnowledge(live);
+  const ranked = live.fromDocuments
+    ? rankCatalogForProspect(catalog, input.cargo, query)
+    : rankSolutionsForProspect(input.cargo, query);
   const matched = ranked.filter((m) => m.score > 0).slice(0, 2).map((m) => m.solution);
   const recommended_solutions = matched.length ? matched : ranked[0] ? [ranked[0].solution] : [];
   const solution_match_explanation = formatMatchExplanation(ranked);
+
+  let knowledge_excerpt = "";
+  if (live.fromDocuments) {
+    const picked = pickRelevantExcerpts(live.documents, query);
+    knowledge_excerpt = picked.excerpt;
+    if (picked.sources.length) intel_sources.push(...picked.sources.map((name) => `doc: ${name}`));
+  }
+  if (live.profile.notes.trim()) {
+    knowledge_excerpt = knowledge_excerpt
+      ? `${knowledge_excerpt}\n\n[Notas del perfil]\n${live.profile.notes}`
+      : `[Notas del perfil]\n${live.profile.notes}`;
+  }
 
   return {
     recommended_solutions,
@@ -195,6 +224,17 @@ export async function gatherProspectContext(input: ProspectInput): Promise<Prosp
     company_web_title,
     company_web_summary,
     intel_sources,
+    company_profile: {
+      name: live.company.name,
+      tagline: live.company.tagline,
+      experience: live.company.experience,
+      scale: live.company.scale,
+      sectors: live.company.sectors,
+      domains: IAC_COMPANY_PROFILE.domains,
+      contact: live.company.contact,
+    },
+    knowledge_excerpt,
+    knowledge_from_documents: live.fromDocuments,
   };
 }
 
@@ -223,9 +263,11 @@ export function formatProspectContextBlock(
     lines.push("- Sin datos públicos del sitio web; personaliza con cargo, sector y país.");
   }
   lines.push(`- Fuentes usadas: ${context.intel_sources.join(", ")}`);
-  lines.push(`- Coincidencia portafolio IAC: ${context.solution_match_explanation}`);
   lines.push(
-    `- Solución principal para el mensaje: ${formatSolutionNames(context.recommended_solutions)[0] ?? "Centro de Automatización"}`
+    `- Coincidencia del portafolio: ${context.solution_match_explanation}`
+  );
+  lines.push(
+    `- Solución principal para el mensaje: ${formatSolutionNames(context.recommended_solutions)[0] ?? context.company_profile.tagline}`
   );
   if (context.recommended_solutions[1]) {
     lines.push(

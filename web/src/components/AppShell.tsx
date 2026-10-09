@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import {
   BarChart3,
+  BookOpen,
   Coins,
   MessageSquare,
   Moon,
@@ -22,6 +23,7 @@ const NAV = [
   { href: "/resumen", label: "Resumen", icon: BarChart3 },
   { href: "/prospeccion", label: "Prospección", icon: Search },
   { href: "/portafolio", label: "Portafolio", icon: Users },
+  { href: "/conocimiento", label: "Conocimiento", icon: BookOpen },
   { href: "/conversaciones", label: "Conversaciones", icon: MessageSquare },
 ] as const;
 

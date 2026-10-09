@@ -22,7 +22,7 @@ export type LeadsPage = {
 
 let dbReady: Promise<void> | null = null;
 
-function getSql() {
+export function getSql() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL no configurada");
   return neon(url);
@@ -115,6 +115,38 @@ export async function initDb() {
   await sql`
     CREATE INDEX IF NOT EXISTS idx_leads_whatsapp_status
     ON leads (whatsapp_status, updated_at DESC)
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS knowledge_profile (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      name TEXT NOT NULL DEFAULT '',
+      tagline TEXT NOT NULL DEFAULT '',
+      experience TEXT NOT NULL DEFAULT '',
+      scale TEXT NOT NULL DEFAULT '',
+      sectors TEXT NOT NULL DEFAULT '',
+      consultant TEXT NOT NULL DEFAULT '',
+      consultant_role TEXT NOT NULL DEFAULT '',
+      email TEXT NOT NULL DEFAULT '',
+      phone TEXT NOT NULL DEFAULT '',
+      web TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS knowledge_documents (
+      id SERIAL PRIMARY KEY,
+      filename TEXT NOT NULL,
+      mime TEXT,
+      kind TEXT NOT NULL,
+      extracted_text TEXT NOT NULL DEFAULT '',
+      summary TEXT NOT NULL DEFAULT '',
+      structured JSONB,
+      char_count INTEGER NOT NULL DEFAULT 0,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
   `;
 }
 

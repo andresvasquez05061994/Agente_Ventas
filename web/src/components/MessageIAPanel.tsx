@@ -190,7 +190,7 @@ export function MessageIAPanel({
               <p>Generando {channelLabel}…</p>
               <span className="text-micro">
                 Analizando {lead.empresa || "la empresa"}
-                {lead.empresa ? " (web + portafolio IAC)" : ""} para {lead.cargo || "el cargo"}
+                {lead.empresa ? " (web + conocimiento del proyecto)" : ""} para {lead.cargo || "el cargo"}
               </span>
             </div>
           )}
