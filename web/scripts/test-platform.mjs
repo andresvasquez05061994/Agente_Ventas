@@ -99,7 +99,10 @@ async function testStats() {
   console.log("\n4. Estadísticas");
   const { res, data } = await fetchJson("/api/stats");
   if (res.ok && typeof data?.total === "number") {
-    pass("GET /api/stats", `${data.total} contactos, ${data.nuevo ?? 0} nuevos`);
+    pass(
+      "GET /api/stats",
+      `${data.total} contactos, ${data.nuevo ?? 0} nuevos, ${data.aprobado ?? 0} aprobados`
+    );
   } else {
     fail("GET /api/stats", JSON.stringify(data));
   }
@@ -112,6 +115,14 @@ async function testStats() {
       "Presupuesto Apollo en stats",
       `${data.apollo.credits_this_month ?? 0}/${data.apollo.monthly_budget} usados, ${data.apollo.remaining} restantes`
     );
+    if (typeof data?.aprobado === "number" && data?.conversations) {
+      pass(
+        "Pipeline en stats",
+        `${data.aprobado} aprobados, ${data.conversations.active} WhatsApp activos`
+      );
+    } else if (res.ok) {
+      fail("Pipeline en stats", "Faltan aprobado o conversations");
+    }
   } else if (res.ok) {
     fail("Presupuesto Apollo en stats", "Faltan monthly_budget o remaining");
   }

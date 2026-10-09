@@ -17,8 +17,19 @@ import {
 type Stats = {
   total: number;
   nuevo: number;
+  en_revision?: number;
+  aprobado?: number;
+  descartado?: number;
   with_phone: number;
   with_email: number;
+  conversations?: {
+    total_threads: number;
+    active: number;
+    pending: number;
+    scheduled: number;
+    errors: number;
+    awaiting_reply: number;
+  };
   apollo?: {
     total_credits: number;
     total_searches: number;
@@ -46,9 +57,11 @@ export default function ResumenPage() {
   }, []);
 
   const apollo = stats?.apollo;
+  const conv = stats?.conversations;
   const phonePct = pct(stats?.with_phone ?? 0, stats?.total ?? 0);
   const emailPct = pct(stats?.with_email ?? 0, stats?.total ?? 0);
   const nuevoPct = pct(stats?.nuevo ?? 0, stats?.total ?? 0);
+  const aprobadoPct = pct(stats?.aprobado ?? 0, stats?.total ?? 0);
 
   return (
     <main className="app-content flex-1 py-6 lg:py-8">
@@ -70,6 +83,11 @@ export default function ResumenPage() {
           <KpiGrid className="kpi-grid--4">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="kpi-skeleton" />
+            ))}
+          </KpiGrid>
+          <KpiGrid className="kpi-grid--4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={`pipe-${i}`} className="kpi-skeleton" />
             ))}
           </KpiGrid>
           <KpiGrid className="kpi-grid--4">
@@ -121,6 +139,55 @@ export default function ResumenPage() {
                 sub={`${phonePct}% del portafolio`}
                 accent="teal"
                 tag={{ positive: phonePct >= 80, label: "móvil listo" }}
+              />
+            </KpiGrid>
+          </SectionBlock>
+
+          <SectionBlock
+            label="Pipeline"
+            title="Estados y WhatsApp"
+            description="Cómo avanza el portafolio: revisión, aprobación y conversaciones."
+          >
+            <KpiGrid className="kpi-grid--4">
+              <KpiCard
+                label="En revisión"
+                value={stats.en_revision ?? 0}
+                sub="pendientes de decidir"
+                accent="amber"
+                tag={{
+                  positive: (stats.en_revision ?? 0) > 0,
+                  label: (stats.en_revision ?? 0) > 0 ? "en curso" : "sin cola",
+                }}
+              />
+              <KpiCard
+                label="Aprobados"
+                value={stats.aprobado ?? 0}
+                sub={`${aprobadoPct}% listos para contactar`}
+                accent="teal"
+                tag={{
+                  positive: (stats.aprobado ?? 0) > 0,
+                  label: (stats.aprobado ?? 0) > 0 ? "para WhatsApp" : "sin aprobados",
+                }}
+              />
+              <KpiCard
+                label="WhatsApp activo"
+                value={conv?.active ?? 0}
+                sub={`${conv?.pending ?? 0} pendientes · ${conv?.awaiting_reply ?? 0} por respuesta`}
+                accent="blue"
+                tag={{
+                  positive: (conv?.active ?? 0) > 0,
+                  label: (conv?.active ?? 0) > 0 ? "en conversación" : "sin hilos",
+                }}
+              />
+              <KpiCard
+                label="Errores WhatsApp"
+                value={conv?.errors ?? 0}
+                sub={`${conv?.scheduled ?? 0} agendados · ${stats.descartado ?? 0} descartados`}
+                accent="coral"
+                tag={{
+                  positive: (conv?.errors ?? 0) === 0,
+                  label: (conv?.errors ?? 0) > 0 ? "revisar envíos" : "sin errores",
+                }}
               />
             </KpiGrid>
           </SectionBlock>

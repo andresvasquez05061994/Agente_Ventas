@@ -28,6 +28,8 @@ En producción la app pide contraseña en `/login`. Los webhooks de Apollo y Wha
 
 Apollo requiere **créditos activos** para `people/bulk_match` (email y teléfono).
 
+El esquema se aplica con migraciones versionadas (`schema_migrations`) en el primer request. Los teléfonos se guardan en E.164 para emparejar WhatsApp.
+
 ## Desarrollo
 
 ```bash

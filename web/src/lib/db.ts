@@ -1,4 +1,6 @@
 import { neon } from "@neondatabase/serverless";
+import { applyMigrations } from "./migrations";
+import { phoneMatchCandidates, toE164 } from "./phone";
 import type {
   ConversationStats,
   ConversationThread,
@@ -15,6 +17,7 @@ const LEADS_EXPORT_MAX = 10_000;
 export type LeadsPage = {
   leads: Lead[];
   total: number;
+  unfilteredTotal: number;
   page: number;
   perPage: number;
   totalPages: number;
@@ -40,131 +43,7 @@ export function ensureDb(): Promise<void> {
 }
 
 export async function initDb() {
-  const sql = getSql();
-  await sql`
-    CREATE TABLE IF NOT EXISTS leads (
-      id SERIAL PRIMARY KEY,
-      apollo_id TEXT NOT NULL UNIQUE,
-      nombre TEXT NOT NULL,
-      cargo TEXT,
-      empresa TEXT,
-      email TEXT,
-      telefono TEXT,
-      pais TEXT,
-      linkedin_url TEXT,
-      lead_status TEXT NOT NULL DEFAULT 'Nuevo',
-      whatsapp_status TEXT NOT NULL DEFAULT 'No iniciado',
-      notas TEXT,
-      fuente_busqueda TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`
-    CREATE TABLE IF NOT EXISTS apollo_phone_cache (
-      apollo_id TEXT PRIMARY KEY,
-      telefono TEXT NOT NULL DEFAULT '',
-      requested_at TIMESTAMPTZ,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`
-    ALTER TABLE apollo_phone_cache ADD COLUMN IF NOT EXISTS requested_at TIMESTAMPTZ
-  `;
-  await sql`
-    CREATE TABLE IF NOT EXISTS apollo_prospeccion_credits (
-      id SERIAL PRIMARY KEY,
-      credits INTEGER NOT NULL DEFAULT 0,
-      contactos_enriquecidos INTEGER NOT NULL DEFAULT 0,
-      source TEXT NOT NULL DEFAULT 'search',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_leads_status_created
-    ON leads (lead_status, created_at DESC)
-  `;
-  await sql`
-    ALTER TABLE leads ADD COLUMN IF NOT EXISTS mistral_conversation_id TEXT
-  `;
-  await sql`
-    ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_status TEXT NOT NULL DEFAULT 'Nuevo'
-  `;
-  await sql`
-    ALTER TABLE leads ADD COLUMN IF NOT EXISTS whatsapp_status TEXT NOT NULL DEFAULT 'No iniciado'
-  `;
-  await sql`
-    ALTER TABLE leads ADD COLUMN IF NOT EXISTS notas TEXT
-  `;
-  await sql`
-    ALTER TABLE leads ADD COLUMN IF NOT EXISTS fuente_busqueda TEXT
-  `;
-  await sql`
-    ALTER TABLE leads ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  `;
-  await sql`
-    CREATE TABLE IF NOT EXISTS whatsapp_messages (
-      id SERIAL PRIMARY KEY,
-      lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
-      telefono TEXT NOT NULL,
-      direction TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
-      content TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_wa_messages_lead_created
-    ON whatsapp_messages (lead_id, created_at DESC)
-  `;
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_leads_whatsapp_status
-    ON leads (whatsapp_status, updated_at DESC)
-  `;
-  await sql`
-    CREATE TABLE IF NOT EXISTS knowledge_profile (
-      id INTEGER PRIMARY KEY DEFAULT 1,
-      name TEXT NOT NULL DEFAULT '',
-      tagline TEXT NOT NULL DEFAULT '',
-      experience TEXT NOT NULL DEFAULT '',
-      scale TEXT NOT NULL DEFAULT '',
-      sectors TEXT NOT NULL DEFAULT '',
-      consultant TEXT NOT NULL DEFAULT '',
-      consultant_role TEXT NOT NULL DEFAULT '',
-      email TEXT NOT NULL DEFAULT '',
-      phone TEXT NOT NULL DEFAULT '',
-      web TEXT NOT NULL DEFAULT '',
-      notes TEXT NOT NULL DEFAULT '',
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`
-    CREATE TABLE IF NOT EXISTS knowledge_documents (
-      id SERIAL PRIMARY KEY,
-      filename TEXT NOT NULL,
-      mime TEXT,
-      kind TEXT NOT NULL,
-      extracted_text TEXT NOT NULL DEFAULT '',
-      summary TEXT NOT NULL DEFAULT '',
-      structured JSONB,
-      char_count INTEGER NOT NULL DEFAULT 0,
-      active BOOLEAN NOT NULL DEFAULT TRUE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`
-    CREATE TABLE IF NOT EXISTS knowledge_personas (
-      id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL DEFAULT '',
-      role TEXT NOT NULL DEFAULT '',
-      sector TEXT NOT NULL DEFAULT '',
-      characteristics TEXT NOT NULL DEFAULT '',
-      value_for_client TEXT NOT NULL DEFAULT '',
-      active BOOLEAN NOT NULL DEFAULT TRUE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
+  await applyMigrations(getSql());
 }
 
 export async function getPortfolioApolloIds(): Promise<Set<string>> {
@@ -216,6 +95,9 @@ export async function getLeads(
   const contact =
     filters?.contact && filters.contact !== "Todos" ? filters.contact : null;
 
+  const [allRow] = await sql`SELECT COUNT(*)::int AS total FROM leads`;
+  const unfilteredTotal = (allRow as { total: number })?.total ?? 0;
+
   const [countRow] = await sql`
     SELECT COUNT(*)::int AS total FROM leads
     WHERE (${status}::text IS NULL OR lead_status = ${status})
@@ -224,6 +106,8 @@ export async function getLeads(
         OR nombre ILIKE ${pattern}
         OR empresa ILIKE ${pattern}
         OR cargo ILIKE ${pattern}
+        OR telefono ILIKE ${pattern}
+        OR telefono_e164 ILIKE ${pattern}
       )
       AND (
         ${contact}::text IS NULL
@@ -254,6 +138,8 @@ export async function getLeads(
         OR nombre ILIKE ${pattern}
         OR empresa ILIKE ${pattern}
         OR cargo ILIKE ${pattern}
+        OR telefono ILIKE ${pattern}
+        OR telefono_e164 ILIKE ${pattern}
       )
       AND (
         ${contact}::text IS NULL
@@ -267,7 +153,7 @@ export async function getLeads(
     OFFSET ${offset}
   `) as Lead[];
 
-  return { leads, total, page, perPage, totalPages };
+  return { leads, total, unfilteredTotal, page, perPage, totalPages };
 }
 
 export async function saveLeads(
@@ -290,7 +176,8 @@ export async function saveLeads(
 
   for (const lead of leads) {
     const email = lead.email?.trim() || null;
-    const telefono = lead.telefono?.trim() || null;
+    const telefonoE164 = toE164(lead.telefono, lead.pais);
+    const telefono = telefonoE164 || lead.telefono?.trim() || null;
     if (!email || !telefono) {
       skipped++;
       continue;
@@ -299,11 +186,11 @@ export async function saveLeads(
     // En re-guardados desde prospección se conservan lead_status, notas, whatsapp_status y created_at.
     const rows = await sql`
       INSERT INTO leads (
-        apollo_id, nombre, cargo, empresa, email, telefono,
+        apollo_id, nombre, cargo, empresa, email, telefono, telefono_e164,
         pais, linkedin_url, lead_status, fuente_busqueda, created_at, updated_at
       ) VALUES (
         ${lead.apollo_id}, ${lead.nombre}, ${lead.cargo}, ${lead.empresa},
-        ${email}, ${telefono}, ${lead.pais}, ${lead.linkedin_url},
+        ${email}, ${telefono}, ${telefonoE164}, ${lead.pais}, ${lead.linkedin_url},
         'Nuevo', ${fuente}, NOW(), NOW()
       )
       ON CONFLICT (apollo_id) DO UPDATE SET
@@ -312,6 +199,7 @@ export async function saveLeads(
         empresa = EXCLUDED.empresa,
         email = EXCLUDED.email,
         telefono = EXCLUDED.telefono,
+        telefono_e164 = EXCLUDED.telefono_e164,
         pais = EXCLUDED.pais,
         linkedin_url = EXCLUDED.linkedin_url,
         fuente_busqueda = EXCLUDED.fuente_busqueda,
@@ -335,6 +223,9 @@ export async function getStats() {
     SELECT
       COUNT(*)::int AS total,
       COUNT(*) FILTER (WHERE lead_status = 'Nuevo')::int AS nuevo,
+      COUNT(*) FILTER (WHERE lead_status = 'En revisión')::int AS en_revision,
+      COUNT(*) FILTER (WHERE lead_status = 'Aprobado para contacto')::int AS aprobado,
+      COUNT(*) FILTER (WHERE lead_status = 'Descartado')::int AS descartado,
       COUNT(*) FILTER (WHERE telefono IS NOT NULL AND telefono != '')::int AS with_phone,
       COUNT(*) FILTER (WHERE email IS NOT NULL AND email != '')::int AS with_email
     FROM leads
@@ -342,14 +233,22 @@ export async function getStats() {
   const r = row as {
     total: number;
     nuevo: number;
+    en_revision: number;
+    aprobado: number;
+    descartado: number;
     with_phone: number;
     with_email: number;
   };
+  const conversations = await getConversationStats();
   return {
     total: r?.total ?? 0,
     nuevo: r?.nuevo ?? 0,
+    en_revision: r?.en_revision ?? 0,
+    aprobado: r?.aprobado ?? 0,
+    descartado: r?.descartado ?? 0,
     with_phone: r?.with_phone ?? 0,
     with_email: r?.with_email ?? 0,
+    conversations,
   };
 }
 
@@ -449,9 +348,10 @@ export async function clearAllLeads(): Promise<number> {
 
 export async function savePhoneCache(apolloId: string, telefono: string) {
   const sql = getSql();
+  const normalized = toE164(telefono) || telefono.trim();
   await sql`
     INSERT INTO apollo_phone_cache (apollo_id, telefono, requested_at, updated_at)
-    VALUES (${apolloId}, ${telefono}, NOW(), NOW())
+    VALUES (${apolloId}, ${normalized}, NOW(), NOW())
     ON CONFLICT (apollo_id) DO UPDATE
     SET telefono = EXCLUDED.telefono, updated_at = NOW()
   `;
@@ -657,9 +557,16 @@ export async function getLeadById(id: number): Promise<Lead | null> {
 }
 
 export async function getLeadByPhone(telefono: string): Promise<Lead | null> {
+  const candidates = phoneMatchCandidates(telefono);
+  if (!candidates.length) return null;
+
   const sql = getSql();
   const rows = (await sql`
-    SELECT * FROM leads WHERE telefono = ${telefono} LIMIT 1
+    SELECT * FROM leads
+    WHERE telefono_e164 = ANY(${candidates})
+       OR telefono = ANY(${candidates})
+       OR regexp_replace(COALESCE(telefono, ''), '[^0-9]', '', 'g') = ANY(${candidates})
+    LIMIT 1
   `) as Lead[];
   return rows[0] ?? null;
 }
@@ -681,9 +588,10 @@ export async function saveWhatsAppMessage(
   content: string
 ): Promise<WhatsAppMessage> {
   const sql = getSql();
+  const storedPhone = toE164(telefono) || telefono.trim();
   const rows = (await sql`
     INSERT INTO whatsapp_messages (lead_id, telefono, direction, content)
-    VALUES (${leadId}, ${telefono}, ${direction}, ${content})
+    VALUES (${leadId}, ${storedPhone}, ${direction}, ${content})
     RETURNING id, lead_id, telefono, direction, content, created_at
   `) as WhatsAppMessage[];
   await sql`UPDATE leads SET updated_at = NOW() WHERE id = ${leadId}`;

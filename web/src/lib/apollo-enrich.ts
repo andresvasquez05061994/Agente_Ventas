@@ -2,6 +2,7 @@ import type { ApolloPerson } from "./types";
 import { webhookToken } from "./auth";
 import { isPhoneRequestPending } from "./credit-policy";
 import { getPhoneCache, getPhoneCacheState, markPhoneRequested, savePhoneCache } from "./db";
+import { toE164 } from "./phone";
 
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
@@ -132,7 +133,7 @@ export function normalizePerson(raw: Record<string, unknown>): ApolloPerson {
     cargo: (raw.title as string) ?? (raw.headline as string) ?? null,
     empresa: org.name ?? null,
     email: extractEmail(raw),
-    telefono: extractPhone(raw),
+    telefono: toE164(extractPhone(raw), (raw.country as string) ?? null) ?? extractPhone(raw),
     pais: (raw.country as string) ?? (raw.present_raw_address as string) ?? null,
     linkedin_url: (raw.linkedin_url as string) ?? null,
   };
@@ -570,7 +571,7 @@ export function parsePhoneWebhookPayload(
     const id = resolveApolloPersonId(entry as Record<string, unknown>);
     if (!id) continue;
     const phone = extractPhone(entry as Record<string, unknown>);
-    if (phone) out.push({ apollo_id: id, telefono: phone });
+    if (phone) out.push({ apollo_id: id, telefono: toE164(phone) || phone });
   }
   return out;
 }

@@ -162,7 +162,19 @@ export function SectionBlock({
   );
 }
 
-export function EmptyState({ message, href, cta }: { message: string; href: string; cta: string }) {
+export function EmptyState({
+  message,
+  href,
+  cta,
+  title = "Sin datos aún",
+  onAction,
+}: {
+  message: string;
+  href?: string;
+  cta: string;
+  title?: string;
+  onAction?: () => void;
+}) {
   return (
     <div className="empty-state">
       <svg
@@ -176,11 +188,17 @@ export function EmptyState({ message, href, cta }: { message: string; href: stri
         <rect x="8" y="12" width="48" height="40" rx="6" stroke="currentColor" strokeWidth="1.5" />
         <path d="M20 24h24M20 32h16M20 40h20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       </svg>
-      <p className="empty-state__title">Sin datos aún</p>
+      <p className="empty-state__title">{title}</p>
       <p className="empty-state__desc">{message}</p>
-      <a href={href} className="btn-primary px-6 py-2.5">
-        {cta}
-      </a>
+      {onAction ? (
+        <button type="button" className="btn-primary px-6 py-2.5" onClick={onAction}>
+          {cta}
+        </button>
+      ) : href ? (
+        <a href={href} className="btn-primary px-6 py-2.5">
+          {cta}
+        </a>
+      ) : null}
     </div>
   );
 }

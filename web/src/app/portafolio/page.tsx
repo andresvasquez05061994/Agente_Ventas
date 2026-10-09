@@ -179,6 +179,7 @@ function PortafolioContent() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [unfilteredTotal, setUnfilteredTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [status, setStatus] = useState("Todos");
   const [contact, setContact] = useState("Todos");
@@ -206,6 +207,14 @@ function PortafolioContent() {
 
   const pendingSearch = search !== debouncedSearch;
   const showLoading = loading || pendingSearch;
+  const filtersActive = status !== "Todos" || contact !== "Todos" || Boolean(search.trim());
+
+  function clearFilters() {
+    setStatus("Todos");
+    setContact("Todos");
+    setSearch("");
+    markReloading();
+  }
 
   function clearLastPageParam() {
     if (searchParamsRef.current.get("page") === "last") {
@@ -260,6 +269,7 @@ function PortafolioContent() {
           }
           setLeads(data.leads ?? []);
           setTotal(data.total ?? 0);
+          setUnfilteredTotal(data.unfilteredTotal ?? data.total ?? 0);
           setTotalPages(data.totalPages ?? 1);
           if (data.page && data.page !== page) setPage(data.page);
           setSelected(new Set());
@@ -660,7 +670,9 @@ function PortafolioContent() {
         <PageSubtitle>
           {total > 0
             ? `${total.toLocaleString("es-CO")} contacto(s) guardados · ${PER_PAGE} por página. Orden: del más antiguo al más reciente (los nuevos al final).`
-            : "Cada contacto guardado incluye email y teléfono verificados en la prospección."}
+            : filtersActive
+              ? "Ningún contacto coincide con los filtros actuales."
+              : "Cada contacto guardado incluye email y teléfono verificados en la prospección."}
         </PageSubtitle>
 
         <div className="mt-4 lg:hidden">
@@ -712,7 +724,20 @@ function PortafolioContent() {
           </div>
         ) : total === 0 ? (
           <div className="mt-8">
-            <EmptyState message="Sin contactos en el portafolio" href="/prospeccion" cta="Ir a Prospección" />
+            {filtersActive && unfilteredTotal > 0 ? (
+              <EmptyState
+                title="Ningún contacto con estos filtros"
+                message="El portafolio tiene contactos, pero ninguno coincide con el estado, el buscador o el filtro de contacto. Quita los filtros para verlos todos."
+                cta="Quitar filtros"
+                onAction={clearFilters}
+              />
+            ) : (
+              <EmptyState
+                message="Sin contactos en el portafolio"
+                href="/prospeccion"
+                cta="Ir a Prospección"
+              />
+            )}
           </div>
         ) : (
           <>

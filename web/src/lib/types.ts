@@ -35,6 +35,7 @@ export interface Lead {
   empresa: string | null;
   email: string | null;
   telefono: string | null;
+  telefono_e164?: string | null;
   pais: string | null;
   linkedin_url: string | null;
   lead_status: LeadStatus;
