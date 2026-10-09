@@ -333,7 +333,7 @@ export function ApolloSearchFilters({
       >
         {APOLLO_PER_PAGE_OPTIONS.map((n) => (
           <option key={n} value={n}>
-            {excelMode ? `Hasta ${n} por empresa (con email y teléfono)` : `${n} contactos (con email y teléfono)`}
+            {excelMode ? `${n} por empresa (con email y teléfono)` : `${n} contactos (con email y teléfono)`}
           </option>
         ))}
       </select>

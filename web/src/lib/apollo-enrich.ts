@@ -5,7 +5,8 @@ const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
 const BULK_MATCH_URL = `${BASE_URL}/people/bulk_match`;
 const PHONE_POLL_MS = 1200;
-const PHONE_POLL_MAX_MS = 12000;
+/** Apollo suele entregar el teléfono por webhook entre 10 y 20 s después de pedirlo. */
+const PHONE_POLL_MAX_MS = 20000;
 const BATCH_SIZE = 10;
 
 export interface EnrichOptions {
@@ -433,7 +434,11 @@ export async function enrichPeopleWithContacts(
     creditsConsumed += credits;
     if (error) matchErrors.push(error);
     for (const [id, person] of byId) {
-      enrichedMap.set(id, { ...(rawById.get(id) ?? {}), ...person });
+      const merged: Record<string, unknown> = { ...(rawById.get(id) ?? {}), ...person };
+      // No perder el teléfono que ya estaba en caché (evita pedirlo y pagarlo otra vez).
+      const cachedPhone = cachedPhones.get(id);
+      if (cachedPhone && !extractPhone(merged)) merged.sanitized_phone = cachedPhone;
+      enrichedMap.set(id, merged);
       apiMatched++;
     }
     if (
