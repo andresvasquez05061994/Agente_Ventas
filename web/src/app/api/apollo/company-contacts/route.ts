@@ -7,7 +7,7 @@ import {
   APOLLO_SENIORITIES,
   normalizeJobTitles,
 } from "@/lib/apollo-filters";
-import { cleanCompanyName } from "@/lib/excel-companies";
+import { cleanCompanyName, parseCompanyCell } from "@/lib/excel-companies";
 import { ensureDb } from "@/lib/db";
 
 export const maxDuration = 60;
@@ -51,7 +51,10 @@ export async function POST(req: NextRequest) {
       : [];
     const orgName = typeof body.organization_name === "string" ? body.organization_name.trim() : "";
 
-    const alias = typeof body.alias === "string" ? cleanCompanyName(body.alias) || null : null;
+    // Sigla: la que detectó el cliente o, si no vino, la que se pueda extraer de la celda.
+    const detectedAlias = parseCompanyCell(String(body.company ?? "")).alias;
+    const aliasSource = typeof body.alias === "string" && body.alias.trim() ? body.alias : detectedAlias ?? "";
+    const alias = aliasSource ? cleanCompanyName(aliasSource) || null : null;
 
     const result = await searchCompanyContacts({
       company,

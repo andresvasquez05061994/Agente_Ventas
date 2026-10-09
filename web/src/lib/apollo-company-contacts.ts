@@ -53,6 +53,8 @@ export type ResolutionDebug = {
   queries: string[];
   candidates: OrganizationCandidate[];
   selected: string[];
+  /** Qué devolvió la búsqueda de personas por palabra clave (descubrimiento gratuito). */
+  people_probe: Array<{ query: string; returned: number; total: number; organizations: string[] }>;
   /** Solo en dry run: muestra de personas que devuelve Apollo para los registros elegidos. */
   sample?: Array<{ nombre: string; cargo: unknown; empresa: unknown }>;
 };
@@ -224,18 +226,25 @@ async function searchOrganizations(query: string): Promise<RawOrg[]> {
  * Descubrimiento gratuito: busca personas por palabra clave y toma las empresas
  * donde trabajan. Encuentra los registros de Apollo que realmente tienen personas.
  */
-async function organizationsFromPeople(query: string): Promise<RawOrg[]> {
-  const data = await postApollo(PEOPLE_SEARCH_URL, { page: 1, per_page: 25, q_keywords: query });
+async function organizationsFromPeople(
+  query: string
+): Promise<{ orgs: RawOrg[]; returned: number; total: number }> {
+  const data = await postApollo(PEOPLE_SEARCH_URL, { page: 1, per_page: 50, q_keywords: query });
   const people = (data.people ?? data.contacts ?? []) as Record<string, unknown>[];
+  const pagination = data.pagination as { total_entries?: number } | undefined;
   const seen = new Set<string>();
-  const out: RawOrg[] = [];
+  const orgs: RawOrg[] = [];
   for (const person of people) {
     const org = toRawOrg(person.organization as Record<string, unknown> | undefined);
     if (!org || seen.has(org.id)) continue;
     seen.add(org.id);
-    out.push(org);
+    orgs.push(org);
   }
-  return out;
+  return {
+    orgs,
+    returned: people.length,
+    total: Number(data.total_entries ?? pagination?.total_entries ?? 0) || 0,
+  };
 }
 
 /** Ubica la empresa del Excel en Apollo y fusiona registros duplicados. */
@@ -261,18 +270,33 @@ export async function resolveOrganization(
     if (best() >= STRONG_ORG_SCORE) break;
   }
 
+  const peopleProbe: ResolutionDebug["people_probe"] = [];
   for (const query of queries.slice(0, alias ? 2 : 1)) {
     try {
-      add(await organizationsFromPeople(query), "people");
+      const probe = await organizationsFromPeople(query);
+      peopleProbe.push({
+        query,
+        returned: probe.returned,
+        total: probe.total,
+        organizations: probe.orgs.map((o) => o.name).slice(0, 15),
+      });
+      add(probe.orgs, "people");
     } catch (e) {
       if (e instanceof ApolloApiError && (e.status === 429 || e.status === 402)) throw e;
+      peopleProbe.push({ query, returned: -1, total: -1, organizations: [String(e)] });
     }
   }
 
   const candidates = [...byId.values()].sort((a, b) => b.score - a.score);
   const strong = candidates.filter((c) => c.score >= STRONG_ORG_SCORE);
   const chosen = strong.length ? strong : candidates.slice(0, 1).filter((c) => c.score >= MIN_ORG_SCORE);
-  const debug: ResolutionDebug = { company, queries, candidates, selected: chosen.map((c) => c.id) };
+  const debug: ResolutionDebug = {
+    company,
+    queries,
+    candidates,
+    selected: chosen.map((c) => c.id),
+    people_probe: peopleProbe,
+  };
 
   if (!chosen.length) return { organization: null, credits, debug };
   const top = chosen[0];
