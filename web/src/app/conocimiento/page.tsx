@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
-import { FileSpreadsheet, FileText, Trash2, Upload } from "lucide-react";
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { ChevronDown, FileSpreadsheet, FileText, Trash2, Upload } from "lucide-react";
 import {
   ActionBanner,
   FeedbackAnchor,
@@ -57,6 +57,32 @@ function kindLabel(kind: string): string {
   if (kind === "docx") return "Word";
   if (kind === "xlsx") return "Excel";
   return "Texto";
+}
+
+function KnowledgeFold({
+  title,
+  hint,
+  meta,
+  children,
+}: {
+  title: string;
+  hint: string;
+  meta?: string;
+  children: ReactNode;
+}) {
+  return (
+    <details className="knowledge-fold">
+      <summary className="knowledge-fold__summary">
+        <span className="knowledge-fold__text">
+          <span className="knowledge-card__title">{title}</span>
+          <span className="text-micro">{hint}</span>
+        </span>
+        {meta ? <span className="knowledge-fold__meta">{meta}</span> : null}
+        <ChevronDown className="knowledge-fold__chevron" size={16} strokeWidth={1.75} aria-hidden />
+      </summary>
+      <div className="knowledge-fold__body">{children}</div>
+    </details>
+  );
 }
 
 export default function ConocimientoPage() {
@@ -272,7 +298,13 @@ export default function ConocimientoPage() {
   }
 
   const activeCount = documents.filter((doc) => doc.active).length;
+  const servicesCount = documents.reduce((sum, doc) => sum + (doc.services_count ?? 0), 0);
   const busy = loading || saving || uploading || personaBusy !== null;
+  const profileMeta = [profile.name, profile.consultant].filter(Boolean).join(" · ") || "Sin completar";
+  const personasMeta =
+    personas.length === 0
+      ? "Sin fichas"
+      : `${personas.length} ficha${personas.length === 1 ? "" : "s"}`;
 
   return (
     <main className="app-content flex-1 py-6 lg:py-8">
@@ -280,8 +312,8 @@ export default function ConocimientoPage() {
         <div>
           <PageTitle>Conocimiento</PageTitle>
           <PageSubtitle>
-            Perfil comercial, buyer personas y documentos que alimentan el Mensaje IA según el cargo,
-            la investigación y lo que genera valor para cada cliente.
+            El portafolio alimenta el Mensaje IA. Despliega el perfil comercial o un buyer persona
+            solo cuando quieras configurarlos.
           </PageSubtitle>
         </div>
       </header>
@@ -294,215 +326,46 @@ export default function ConocimientoPage() {
 
       {loading ? (
         <div className="mt-6 space-y-3">
-          <div className="kpi-skeleton h-40" />
-          <div className="kpi-skeleton h-40" />
+          <div className="kpi-skeleton h-52" />
+          <div className="kpi-skeleton h-16" />
+          <div className="kpi-skeleton h-16" />
         </div>
       ) : (
         <div className="knowledge-layout">
-          <section className="knowledge-card">
-            <p className="knowledge-card__title">Perfil comercial</p>
-            <p className="text-micro mb-3">Firma, promesa y sectores. Se usa en cada mensaje.</p>
-            <div className="knowledge-grid">
-              <div>
-                <FieldLabel>Empresa</FieldLabel>
-                <input className="input-field" value={profile.name} onChange={(e) => patchProfile("name", e.target.value)} />
-              </div>
-              <div>
-                <FieldLabel>Promesa / tagline</FieldLabel>
-                <input className="input-field" value={profile.tagline} onChange={(e) => patchProfile("tagline", e.target.value)} />
-              </div>
-              <div>
-                <FieldLabel>Consultor</FieldLabel>
-                <input className="input-field" value={profile.consultant} onChange={(e) => patchProfile("consultant", e.target.value)} />
-              </div>
-              <div>
-                <FieldLabel>Cargo del consultor</FieldLabel>
-                <input className="input-field" value={profile.consultant_role} onChange={(e) => patchProfile("consultant_role", e.target.value)} />
-              </div>
-              <div>
-                <FieldLabel>Email</FieldLabel>
-                <input className="input-field" value={profile.email} onChange={(e) => patchProfile("email", e.target.value)} />
-              </div>
-              <div>
-                <FieldLabel>Teléfono</FieldLabel>
-                <input className="input-field" value={profile.phone} onChange={(e) => patchProfile("phone", e.target.value)} />
-              </div>
-              <div>
-                <FieldLabel>Web</FieldLabel>
-                <input className="input-field" value={profile.web} onChange={(e) => patchProfile("web", e.target.value)} />
-              </div>
-              <div>
-                <FieldLabel>Escala / trayectoria</FieldLabel>
-                <input className="input-field" value={profile.scale} onChange={(e) => patchProfile("scale", e.target.value)} />
-              </div>
-            </div>
-            <FieldLabel className="!mt-3">Experiencia</FieldLabel>
-            <input className="input-field" value={profile.experience} onChange={(e) => patchProfile("experience", e.target.value)} />
-            <FieldLabel className="!mt-3">Sectores</FieldLabel>
-            <input
-              className="input-field"
-              value={profile.sectors}
-              onChange={(e) => patchProfile("sectors", e.target.value)}
-              placeholder="Manufactura, construcción, retail…"
-            />
-            <FieldLabel className="!mt-3">Notas para la IA</FieldLabel>
-            <textarea
-              className="input-field knowledge-notes"
-              rows={3}
-              value={profile.notes}
-              onChange={(e) => patchProfile("notes", e.target.value)}
-              placeholder="Enfoque comercial, ofertas vigentes, lo que no se debe ofrecer…"
-            />
-            <button type="button" className="btn-primary mt-3" onClick={() => void saveProfile()} disabled={busy}>
-              {saving ? "Guardando…" : "Guardar perfil"}
-            </button>
-          </section>
-
-          <section className="knowledge-card">
-            <p className="knowledge-card__title">Buyer personas</p>
-            <p className="text-micro mb-3">
-              Fichas editables. El Mensaje IA elige la que coincida con el cargo, el sector y las
-              características del contacto.
-            </p>
-
-            <div className="persona-card persona-card--new">
-              <p className="persona-card__label">Nuevo buyer persona</p>
-              <FieldLabel>Nombre</FieldLabel>
-              <input
-                className="input-field"
-                value={draft.name}
-                onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-                placeholder="Ej. Director de operaciones en manufactura"
-              />
-              <div className="knowledge-grid mt-2">
-                <div>
-                  <FieldLabel>Cargo / rol</FieldLabel>
-                  <input
-                    className="input-field"
-                    value={draft.role}
-                    onChange={(e) => setDraft((d) => ({ ...d, role: e.target.value }))}
-                    placeholder="COO, Gerente de planta…"
-                  />
-                </div>
-                <div>
-                  <FieldLabel>Sector</FieldLabel>
-                  <input
-                    className="input-field"
-                    value={draft.sector}
-                    onChange={(e) => setDraft((d) => ({ ...d, sector: e.target.value }))}
-                    placeholder="Manufactura, retail…"
-                  />
-                </div>
-              </div>
-              <FieldLabel className="!mt-2">Características del cliente</FieldLabel>
-              <textarea
-                className="input-field knowledge-notes"
-                rows={2}
-                value={draft.characteristics}
-                onChange={(e) => setDraft((d) => ({ ...d, characteristics: e.target.value }))}
-                placeholder="Dolores, prioridades, cómo decide, contexto típico…"
-              />
-              <FieldLabel className="!mt-2">¿Qué genera valor para este cliente?</FieldLabel>
-              <textarea
-                className="input-field knowledge-notes"
-                rows={2}
-                value={draft.value_for_client}
-                onChange={(e) => setDraft((d) => ({ ...d, value_for_client: e.target.value }))}
-                placeholder="El beneficio concreto que debe articular el Mensaje IA…"
-              />
-              <button
-                type="button"
-                className="btn-primary mt-3 w-full"
-                onClick={() => void createPersona()}
-                disabled={busy || !draft.name.trim()}
-              >
-                {personaBusy === "new" ? "Guardando…" : "Agregar buyer persona"}
-              </button>
-            </div>
-
-            {personas.length === 0 ? (
-              <p className="text-micro mt-3">Aún no hay fichas. Agrega la primera para personalizar los mensajes.</p>
-            ) : (
-              <ul className="persona-list">
-                {personas.map((persona) => {
-                  const fields = personaFields(persona);
-                  return (
-                    <li key={persona.id} className="persona-card">
-                      <FieldLabel>Nombre</FieldLabel>
-                      <input
-                        className="input-field"
-                        value={fields.name}
-                        onChange={(e) => patchEdit(persona.id, "name", e.target.value)}
-                      />
-                      <div className="knowledge-grid mt-2">
-                        <div>
-                          <FieldLabel>Cargo / rol</FieldLabel>
-                          <input
-                            className="input-field"
-                            value={fields.role}
-                            onChange={(e) => patchEdit(persona.id, "role", e.target.value)}
-                          />
-                        </div>
-                        <div>
-                          <FieldLabel>Sector</FieldLabel>
-                          <input
-                            className="input-field"
-                            value={fields.sector}
-                            onChange={(e) => patchEdit(persona.id, "sector", e.target.value)}
-                          />
-                        </div>
-                      </div>
-                      <FieldLabel className="!mt-2">Características del cliente</FieldLabel>
-                      <textarea
-                        className="input-field knowledge-notes"
-                        rows={2}
-                        value={fields.characteristics}
-                        onChange={(e) => patchEdit(persona.id, "characteristics", e.target.value)}
-                      />
-                      <FieldLabel className="!mt-2">¿Qué genera valor para este cliente?</FieldLabel>
-                      <textarea
-                        className="input-field knowledge-notes"
-                        rows={2}
-                        value={fields.value_for_client}
-                        onChange={(e) => patchEdit(persona.id, "value_for_client", e.target.value)}
-                      />
-                      <div className="persona-card__actions">
-                        <button
-                          type="button"
-                          className="btn-primary"
-                          onClick={() => void savePersona(persona.id)}
-                          disabled={busy}
-                        >
-                          {personaBusy === persona.id ? "Guardando…" : "Guardar"}
-                        </button>
-                        <button
-                          type="button"
-                          className="knowledge-doc__delete"
-                          onClick={() => void removePersona(persona)}
-                          disabled={busy}
-                          aria-label={`Eliminar ${persona.name}`}
-                        >
-                          <Trash2 size={14} strokeWidth={1.75} />
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-
           <section className="knowledge-card knowledge-card--docs">
-            <p className="knowledge-card__title">Documentos del portafolio</p>
-            <p className="text-micro mb-3">
-              {activeCount} activo{activeCount === 1 ? "" : "s"} de {documents.length}. PDF, Word o Excel. Máx. 4 MB.
-            </p>
+            <div className="knowledge-docs-head">
+              <div>
+                <p className="knowledge-card__title">Documentos del portafolio</p>
+                <p className="knowledge-docs-head__lead">
+                  Base del Mensaje IA. El agente usa el texto y los servicios extraídos según cargo,
+                  sector e investigación del cliente.
+                </p>
+              </div>
+              <ul className="knowledge-kpis" aria-label="Resumen del portafolio">
+                <li>
+                  <strong>{activeCount}</strong>
+                  <span>activo{activeCount === 1 ? "" : "s"}</span>
+                </li>
+                <li>
+                  <strong>{documents.length}</strong>
+                  <span>archivo{documents.length === 1 ? "" : "s"}</span>
+                </li>
+                <li>
+                  <strong>{servicesCount}</strong>
+                  <span>servicio{servicesCount === 1 ? "" : "s"}</span>
+                </li>
+              </ul>
+            </div>
+
             <label
               htmlFor={inputId}
-              className={`knowledge-drop ${busy ? "pointer-events-none opacity-50" : ""}`}
+              className={`knowledge-drop knowledge-drop--hero ${busy ? "pointer-events-none opacity-50" : ""}`}
             >
-              <Upload size={16} strokeWidth={1.5} aria-hidden />
-              {uploading ? "Leyendo y estructurando…" : "Cargar PDF, Word o Excel"}
+              <Upload size={20} strokeWidth={1.5} aria-hidden />
+              <span>
+                {uploading ? "Leyendo y estructurando…" : "Cargar PDF, Word o Excel"}
+                <small>Máx. 4 MB. El contenido pasa a estar disponible para el Mensaje IA.</small>
+              </span>
             </label>
             <input
               id={inputId}
@@ -526,7 +389,7 @@ export default function ConocimientoPage() {
                 {documents.map((doc) => (
                   <li key={doc.id} className={`knowledge-doc ${doc.active ? "" : "knowledge-doc--off"}`}>
                     <div className="knowledge-doc__icon" aria-hidden>
-                      {doc.kind === "xlsx" ? <FileSpreadsheet size={16} /> : <FileText size={16} />}
+                      {doc.kind === "xlsx" ? <FileSpreadsheet size={18} /> : <FileText size={18} />}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="knowledge-doc__name" title={doc.filename}>
@@ -559,6 +422,224 @@ export default function ConocimientoPage() {
               </ul>
             )}
           </section>
+
+          <div className="knowledge-side">
+            <KnowledgeFold
+              title="Perfil comercial"
+              hint="Firma, promesa y sectores. Se usa en cada mensaje."
+              meta={profileMeta}
+            >
+              <div className="knowledge-grid">
+                <div>
+                  <FieldLabel>Empresa</FieldLabel>
+                  <input className="input-field" value={profile.name} onChange={(e) => patchProfile("name", e.target.value)} />
+                </div>
+                <div>
+                  <FieldLabel>Promesa / tagline</FieldLabel>
+                  <input className="input-field" value={profile.tagline} onChange={(e) => patchProfile("tagline", e.target.value)} />
+                </div>
+                <div>
+                  <FieldLabel>Consultor</FieldLabel>
+                  <input className="input-field" value={profile.consultant} onChange={(e) => patchProfile("consultant", e.target.value)} />
+                </div>
+                <div>
+                  <FieldLabel>Cargo del consultor</FieldLabel>
+                  <input className="input-field" value={profile.consultant_role} onChange={(e) => patchProfile("consultant_role", e.target.value)} />
+                </div>
+                <div>
+                  <FieldLabel>Email</FieldLabel>
+                  <input className="input-field" value={profile.email} onChange={(e) => patchProfile("email", e.target.value)} />
+                </div>
+                <div>
+                  <FieldLabel>Teléfono</FieldLabel>
+                  <input className="input-field" value={profile.phone} onChange={(e) => patchProfile("phone", e.target.value)} />
+                </div>
+                <div>
+                  <FieldLabel>Web</FieldLabel>
+                  <input className="input-field" value={profile.web} onChange={(e) => patchProfile("web", e.target.value)} />
+                </div>
+                <div>
+                  <FieldLabel>Escala / trayectoria</FieldLabel>
+                  <input className="input-field" value={profile.scale} onChange={(e) => patchProfile("scale", e.target.value)} />
+                </div>
+              </div>
+              <FieldLabel className="!mt-3">Experiencia</FieldLabel>
+              <input className="input-field" value={profile.experience} onChange={(e) => patchProfile("experience", e.target.value)} />
+              <FieldLabel className="!mt-3">Sectores</FieldLabel>
+              <input
+                className="input-field"
+                value={profile.sectors}
+                onChange={(e) => patchProfile("sectors", e.target.value)}
+                placeholder="Manufactura, construcción, retail…"
+              />
+              <FieldLabel className="!mt-3">Notas para la IA</FieldLabel>
+              <textarea
+                className="input-field knowledge-notes"
+                rows={3}
+                value={profile.notes}
+                onChange={(e) => patchProfile("notes", e.target.value)}
+                placeholder="Enfoque comercial, ofertas vigentes, lo que no se debe ofrecer…"
+              />
+              <button type="button" className="btn-primary mt-3" onClick={() => void saveProfile()} disabled={busy}>
+                {saving ? "Guardando…" : "Guardar perfil"}
+              </button>
+            </KnowledgeFold>
+
+            <KnowledgeFold
+              title="Buyer personas"
+              hint="Despliega una ficha para editarla. El Mensaje IA elige la que coincida con el contacto."
+              meta={personasMeta}
+            >
+              <details className="persona-card persona-card--new">
+                <summary className="persona-card__summary">
+                  <span className="persona-card__text">
+                    <span className="persona-card__name">Nuevo buyer persona</span>
+                    <span className="text-micro">Completa cargo, sector, características y qué genera valor.</span>
+                  </span>
+                  <ChevronDown className="knowledge-fold__chevron" size={16} strokeWidth={1.75} aria-hidden />
+                </summary>
+                <div className="persona-card__body">
+                  <FieldLabel>Nombre</FieldLabel>
+                  <input
+                    className="input-field"
+                    value={draft.name}
+                    onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+                    placeholder="Ej. Director de operaciones en manufactura"
+                  />
+                  <div className="knowledge-grid mt-2">
+                    <div>
+                      <FieldLabel>Cargo / rol</FieldLabel>
+                      <input
+                        className="input-field"
+                        value={draft.role}
+                        onChange={(e) => setDraft((d) => ({ ...d, role: e.target.value }))}
+                        placeholder="COO, Gerente de planta…"
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel>Sector</FieldLabel>
+                      <input
+                        className="input-field"
+                        value={draft.sector}
+                        onChange={(e) => setDraft((d) => ({ ...d, sector: e.target.value }))}
+                        placeholder="Manufactura, retail…"
+                      />
+                    </div>
+                  </div>
+                  <FieldLabel className="!mt-2">Características del cliente</FieldLabel>
+                  <textarea
+                    className="input-field knowledge-notes"
+                    rows={2}
+                    value={draft.characteristics}
+                    onChange={(e) => setDraft((d) => ({ ...d, characteristics: e.target.value }))}
+                    placeholder="Dolores, prioridades, cómo decide, contexto típico…"
+                  />
+                  <FieldLabel className="!mt-2">¿Qué genera valor para este cliente?</FieldLabel>
+                  <textarea
+                    className="input-field knowledge-notes"
+                    rows={2}
+                    value={draft.value_for_client}
+                    onChange={(e) => setDraft((d) => ({ ...d, value_for_client: e.target.value }))}
+                    placeholder="El beneficio concreto que debe articular el Mensaje IA…"
+                  />
+                  <button
+                    type="button"
+                    className="btn-primary mt-3 w-full"
+                    onClick={() => void createPersona()}
+                    disabled={busy || !draft.name.trim()}
+                  >
+                    {personaBusy === "new" ? "Guardando…" : "Agregar buyer persona"}
+                  </button>
+                </div>
+              </details>
+
+              {personas.length === 0 ? (
+                <p className="text-micro mt-3">Aún no hay fichas. Despliega «Nuevo buyer persona» para crear la primera.</p>
+              ) : (
+                <ul className="persona-list">
+                  {personas.map((persona) => {
+                    const fields = personaFields(persona);
+                    const subtitle = [fields.role, fields.sector].filter(Boolean).join(" · ");
+                    return (
+                      <li key={persona.id}>
+                        <details className="persona-card">
+                          <summary className="persona-card__summary">
+                            <span className="persona-card__text">
+                              <span className="persona-card__name">{fields.name || "Sin nombre"}</span>
+                              {subtitle ? <span className="text-micro">{subtitle}</span> : null}
+                              {fields.value_for_client ? (
+                                <span className="persona-card__value">{fields.value_for_client}</span>
+                              ) : null}
+                            </span>
+                            <ChevronDown className="knowledge-fold__chevron" size={16} strokeWidth={1.75} aria-hidden />
+                          </summary>
+                          <div className="persona-card__body">
+                            <FieldLabel>Nombre</FieldLabel>
+                            <input
+                              className="input-field"
+                              value={fields.name}
+                              onChange={(e) => patchEdit(persona.id, "name", e.target.value)}
+                            />
+                            <div className="knowledge-grid mt-2">
+                              <div>
+                                <FieldLabel>Cargo / rol</FieldLabel>
+                                <input
+                                  className="input-field"
+                                  value={fields.role}
+                                  onChange={(e) => patchEdit(persona.id, "role", e.target.value)}
+                                />
+                              </div>
+                              <div>
+                                <FieldLabel>Sector</FieldLabel>
+                                <input
+                                  className="input-field"
+                                  value={fields.sector}
+                                  onChange={(e) => patchEdit(persona.id, "sector", e.target.value)}
+                                />
+                              </div>
+                            </div>
+                            <FieldLabel className="!mt-2">Características del cliente</FieldLabel>
+                            <textarea
+                              className="input-field knowledge-notes"
+                              rows={2}
+                              value={fields.characteristics}
+                              onChange={(e) => patchEdit(persona.id, "characteristics", e.target.value)}
+                            />
+                            <FieldLabel className="!mt-2">¿Qué genera valor para este cliente?</FieldLabel>
+                            <textarea
+                              className="input-field knowledge-notes"
+                              rows={2}
+                              value={fields.value_for_client}
+                              onChange={(e) => patchEdit(persona.id, "value_for_client", e.target.value)}
+                            />
+                            <div className="persona-card__actions">
+                              <button
+                                type="button"
+                                className="btn-primary"
+                                onClick={() => void savePersona(persona.id)}
+                                disabled={busy}
+                              >
+                                {personaBusy === persona.id ? "Guardando…" : "Guardar"}
+                              </button>
+                              <button
+                                type="button"
+                                className="knowledge-doc__delete"
+                                onClick={() => void removePersona(persona)}
+                                disabled={busy}
+                                aria-label={`Eliminar ${persona.name}`}
+                              >
+                                <Trash2 size={14} strokeWidth={1.75} />
+                              </button>
+                            </div>
+                          </div>
+                        </details>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </KnowledgeFold>
+          </div>
         </div>
       )}
     </main>
