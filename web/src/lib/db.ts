@@ -408,6 +408,33 @@ export async function savePhoneCache(apolloId: string, telefono: string) {
   `;
 }
 
+/** Diagnóstico: ¿está llegando el webhook de teléfonos de Apollo? */
+export async function getPhoneWebhookHealth(): Promise<{
+  cache_rows: number;
+  last_cache_at: string | null;
+  last_webhook_at: string | null;
+  webhook_events_24h: number;
+}> {
+  const sql = getSql();
+  const [cache] = (await sql`
+    SELECT COUNT(*)::int AS rows, MAX(updated_at) AS last_at FROM apollo_phone_cache
+  `) as Array<{ rows: number; last_at: string | Date | null }>;
+  const [hook] = (await sql`
+    SELECT
+      MAX(created_at) AS last_at,
+      COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours')::int AS recent
+    FROM apollo_prospeccion_credits
+    WHERE source = 'phone_webhook'
+  `) as Array<{ last_at: string | Date | null; recent: number }>;
+  const iso = (v: string | Date | null) => (v ? new Date(v).toISOString() : null);
+  return {
+    cache_rows: cache?.rows ?? 0,
+    last_cache_at: iso(cache?.last_at ?? null),
+    last_webhook_at: iso(hook?.last_at ?? null),
+    webhook_events_24h: hook?.recent ?? 0,
+  };
+}
+
 export async function getPhoneCache(apolloIds: string[]): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   if (!apolloIds.length) return map;

@@ -6,7 +6,7 @@ import {
   isContactableInSearch,
   resolveApolloPersonId,
 } from "./apollo-enrich";
-import { getPortfolioApolloIds, recordProspeccionCredits } from "./db";
+import { getPhoneWebhookHealth, getPortfolioApolloIds, recordProspeccionCredits } from "./db";
 
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
@@ -67,6 +67,8 @@ export type ResolutionDebug = {
   matched_with_phone?: number;
   /** Solo en dry run: personas que pasarían a enriquecimiento. */
   sample?: Array<{ nombre: string; cargo: unknown; empresa: unknown; via: string }>;
+  /** Solo en dry run: estado del webhook de teléfonos. */
+  phone_webhook?: Record<string, unknown>;
 };
 
 export type CompanyContactsStatus = "found" | "no_contacts" | "not_found";
@@ -516,6 +518,14 @@ export async function searchCompanyContacts(
   debug.matched_with_phone = withPhoneFlag;
 
   if (input.dryRun) {
+    try {
+      debug.phone_webhook = {
+        base_url: process.env.APOLLO_WEBHOOK_BASE_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null),
+        ...(await getPhoneWebhookHealth()),
+      };
+    } catch (e) {
+      debug.phone_webhook = { error: String(e) };
+    }
     debug.sample = candidatesToEnrich.slice(0, 10).map((c) => ({
       nombre: `${c.raw.first_name ?? ""} ${c.raw.last_name ?? ""}`.trim(),
       cargo: c.raw.title,
