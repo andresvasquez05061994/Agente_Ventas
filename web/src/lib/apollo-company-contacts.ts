@@ -2,7 +2,7 @@ import type { ApolloPerson } from "./types";
 import { ApolloApiError } from "./apollo";
 import { normalizeOrgName } from "./apollo-filters";
 import {
-  enrichSinglePersonWithContacts,
+  enrichPeopleWithContacts,
   isContactableInSearch,
   resolveApolloPersonId,
 } from "./apollo-enrich";
@@ -328,8 +328,9 @@ function enrichedEmployerMatches(
   );
 }
 
-function maxEnrichAttempts(target: number): number {
-  return Math.min(40, Math.max(target + 5, target * 3));
+/** Cuántas personas se mandan a enriquecer para lograr `target` contactos completos. */
+function candidateBudget(target: number): number {
+  return Math.min(20, Math.max(target + 3, target * 2));
 }
 
 type PeopleSource =
@@ -415,20 +416,17 @@ export async function searchCompanyContacts(
 
   const portfolioIds = input.dryRun ? new Set<string>() : await getPortfolioApolloIds();
   const target = input.perCompany;
-  const enrichLimit = maxEnrichAttempts(target);
-  const collected: ApolloPerson[] = [];
-  const sample: NonNullable<ResolutionDebug["sample"]> = [];
+  const wanted = candidateBudget(target);
+  const candidatesToEnrich: Array<{ raw: Record<string, unknown>; via: string; employer: string }> = [];
   const seen = new Set<string>();
   const acceptedEmployers = new Set<string>();
   let totalPeople = 0;
-  let attempts = 0;
   let portfolioSkipped = 0;
-  let rejected = 0;
   let timedOut = false;
 
   outer: for (const source of sources) {
     for (let page = 1; page <= MAX_PEOPLE_PAGES; page++) {
-      if (collected.length >= target || attempts >= enrichLimit) break outer;
+      if (candidatesToEnrich.length >= wanted) break outer;
       if (Date.now() > deadlineMs) {
         timedOut = true;
         break outer;
@@ -465,11 +463,7 @@ export async function searchCompanyContacts(
       if (!people.length) break;
 
       for (const person of people) {
-        if (collected.length >= target || attempts >= enrichLimit) break outer;
-        if (Date.now() > deadlineMs) {
-          timedOut = true;
-          break outer;
-        }
+        if (candidatesToEnrich.length >= wanted) break outer;
         const id = resolveApolloPersonId(person);
         if (!id || seen.has(id)) continue;
         seen.add(id);
@@ -484,32 +478,11 @@ export async function searchCompanyContacts(
         }
         if (!isContactableInSearch(person)) continue;
         acceptedEmployers.add(employer);
-
-        if (input.dryRun) {
-          if (sample.length < 10) {
-            sample.push({
-              nombre: `${person.first_name ?? ""} ${person.last_name ?? ""}`.trim(),
-              cargo: person.title,
-              empresa: employer,
-              via: source.kind === "organization" ? "registro" : `palabra clave «${source.label}»`,
-            });
-          }
-          attempts++;
-          continue;
-        }
-
-        attempts++;
-        const enriched = await enrichSinglePersonWithContacts(person, { deadlineMs });
-        credits += enriched.stats.credits_consumed;
-        if (!enriched.person) continue;
-
-        if (
-          !enrichedEmployerMatches(enriched.person.empresa, input.company, alias, organization, candidates)
-        ) {
-          rejected++;
-          continue;
-        }
-        collected.push({ ...enriched.person, empresa: organization?.name ?? employer });
+        candidatesToEnrich.push({
+          raw: person,
+          employer,
+          via: source.kind === "organization" ? "registro" : `palabra clave «${source.label}»`,
+        });
       }
 
       const totalPages = pagination?.total_pages ?? Math.ceil(total / PEOPLE_PAGE_SIZE);
@@ -523,12 +496,40 @@ export async function searchCompanyContacts(
   }
 
   if (input.dryRun) {
-    debug.sample = sample;
-    return finish(acceptedEmployers.size ? "found" : organization ? "no_contacts" : "not_found", [], {
+    debug.sample = candidatesToEnrich.slice(0, 10).map((c) => ({
+      nombre: `${c.raw.first_name ?? ""} ${c.raw.last_name ?? ""}`.trim(),
+      cargo: c.raw.title,
+      empresa: c.employer,
+      via: c.via,
+    }));
+    return finish(candidatesToEnrich.length ? "found" : organization ? "no_contacts" : "not_found", [], {
       total_people: totalPeople,
       portfolio_skipped: portfolioSkipped,
       timed_out: timedOut,
     });
+  }
+
+  // Enriquecimiento por lotes: correo en lote y luego teléfono en lote (una sola espera del webhook).
+  const collected: ApolloPerson[] = [];
+  let rejected = 0;
+  if (candidatesToEnrich.length && Date.now() < deadlineMs) {
+    const enriched = await enrichPeopleWithContacts(
+      candidatesToEnrich.map((c) => c.raw),
+      { targetComplete: target, deadlineMs }
+    );
+    credits += enriched.stats.credits_consumed;
+    const employerById = new Map(
+      candidatesToEnrich.map((c) => [resolveApolloPersonId(c.raw), c.employer] as const)
+    );
+    for (const person of enriched.results) {
+      const employer = person.empresa ?? employerById.get(person.apollo_id) ?? "";
+      if (!enrichedEmployerMatches(employer, input.company, alias, organization, candidates)) {
+        rejected++;
+        continue;
+      }
+      collected.push({ ...person, empresa: employer || organization?.name || input.company });
+    }
+    if (Date.now() > deadlineMs) timedOut = true;
   }
 
   const status: CompanyContactsStatus = collected.length
