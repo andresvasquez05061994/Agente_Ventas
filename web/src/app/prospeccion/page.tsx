@@ -6,6 +6,8 @@ import { Building2, Copy, Mail, Phone, Search } from "lucide-react";
 import type { SmartSearchResult } from "@/lib/smart-search";
 import type { ApolloPerson } from "@/lib/types";
 import { ApolloSearchFilters } from "@/components/ApolloSearchFilters";
+import type { ExcelSearchPayload } from "@/components/ExcelCompanySearch";
+import { excelCoverageMessage, type ExcelCompanyQueue } from "@/lib/excel-companies";
 import { SmartSearchPanel } from "@/components/SmartSearchPanel";
 import { ActionBanner, FeedbackAnchor } from "@/components/ui";
 import { useProspeccionSession } from "@/contexts/prospeccion-session";
@@ -64,6 +66,7 @@ export default function ProspeccionPage() {
   } = session;
 
   const [saving, setSaving] = useState(false);
+  const [excelQueue, setExcelQueue] = useState<ExcelCompanyQueue | null>(null);
   const [batchProgress, setBatchProgress] = useState<string | null>(null);
   const batchRun = useRef(0);
   const excelSource = useRef<string | null>(null);
@@ -189,15 +192,15 @@ export default function ProspeccionPage() {
     }
   }
 
-  async function searchCompanies(payload: { companies: string[]; totalFound: number }) {
+  async function searchCompanies(payload: ExcelSearchPayload): Promise<number> {
     if (!titles.length) {
       setStatus("error");
       showWarning("Selecciona o agrega al menos un cargo antes de buscar.", "Filtros incompletos");
-      return;
+      return 0;
     }
 
     const companies = payload.companies;
-    if (!companies.length) return;
+    if (!companies.length) return 0;
 
     const runId = ++batchRun.current;
     excelSource.current = null;
@@ -215,12 +218,14 @@ export default function ProspeccionPage() {
     let totalEntries = 0;
     let portfolioSkipped = 0;
     let withContacts = 0;
+    let processed = 0;
     let fatal: string | null = null;
 
     for (let index = 0; index < companies.length; index++) {
-      if (batchRun.current !== runId) return;
+      if (batchRun.current !== runId) return 0;
       const companyName = companies[index];
-      setBatchProgress(`Empresa ${index + 1} de ${companies.length}: ${companyName}`);
+      const position = payload.deliveredBefore + index + 1;
+      setBatchProgress(`Empresa ${position} de ${payload.total}: ${companyName}`);
 
       try {
         const res = await fetch("/api/apollo/search", {
@@ -236,14 +241,14 @@ export default function ProspeccionPage() {
             per_page: perPage,
           }),
         });
-        if (batchRun.current !== runId) return;
+        if (batchRun.current !== runId) return 0;
 
         const { data, error: parseError } = await parseApiResponse<{
           results?: typeof results;
           meta?: typeof meta;
           error?: string;
         }>(res);
-        if (batchRun.current !== runId) return;
+        if (batchRun.current !== runId) return 0;
 
         const message = parseError ?? data?.error ?? (!res.ok ? `Error del servidor (${res.status})` : "");
         if (message) {
@@ -252,6 +257,7 @@ export default function ProspeccionPage() {
             break;
           }
           failed.push(companyName);
+          processed += 1;
           continue;
         }
 
@@ -266,19 +272,32 @@ export default function ProspeccionPage() {
           seen.add(person.apollo_id);
           found.push(person);
         }
+        processed += 1;
       } catch (e) {
-        if (batchRun.current !== runId) return;
+        if (batchRun.current !== runId) return 0;
         const raw = e instanceof Error ? e.message : "Error de búsqueda";
         if (isFatalCompanySearchError(raw)) {
           fatal = raw;
           break;
         }
         failed.push(companyName);
+        processed += 1;
       }
     }
 
-    if (batchRun.current !== runId) return;
+    if (batchRun.current !== runId) return 0;
     setBatchProgress(null);
+
+    if (processed === 0) {
+      setStatus("error");
+      showError(fatal ?? "No se pudo revisar esta tanda de empresas.", "Consulta detenida");
+      setResults([]);
+      setMeta(null);
+      return 0;
+    }
+
+    const reviewed = payload.deliveredBefore + processed;
+    const coverage = excelCoverageMessage(reviewed, payload.total);
 
     const listed = companies.slice(0, 8).join(", ");
     const extra = companies.length > 8 ? ` +${companies.length - 8}` : "";
@@ -294,10 +313,6 @@ export default function ProspeccionPage() {
       organization_name: companies.length === 1 ? companies[0] : undefined,
     });
 
-    const limitNote =
-      payload.totalFound > companies.length
-        ? ` Se buscaron las primeras ${companies.length} de ${payload.totalFound} empresas del archivo.`
-        : "";
     const emptyNote = withoutContacts.length
       ? ` Sin contactos completos: ${withoutContacts.slice(0, 4).join(", ")}${withoutContacts.length > 4 ? "…" : ""}.`
       : "";
@@ -305,26 +320,23 @@ export default function ProspeccionPage() {
       ? ` No se pudo consultar: ${failed.slice(0, 3).join(", ")}${failed.length > 3 ? "…" : ""}.`
       : "";
     const creditNote = credits > 0 ? ` ${credits} crédito(s) usados.` : "";
+    const contactNote = found.length
+      ? ` ${found.length} contacto(s) de ${withContacts} empresa(s).${creditNote}`
+      : " Ninguna empresa de esta tanda devolvió contactos con email y teléfono.";
+    const summary =
+      `${coverage.detail}${contactNote}${emptyNote}${failedNote}` +
+      (fatal ? ` La tanda se detuvo: ${fatal}` : found.length ? " Quedaron seleccionados para guardar en el portafolio." : "");
 
     if (!found.length) {
       setStatus(fatal ? "error" : "empty");
-      const detail =
-        fatal ??
-        "Ninguna empresa del Excel devolvió contactos con email y teléfono. Revisa cargos, país y el nombre de la empresa.";
-      showWarning(`${detail}${limitNote}${emptyNote}${failedNote}`, "Sin contactos del Excel");
-      return;
+      showWarning(summary, coverage.title);
+      return processed;
     }
 
     setStatus("success");
-    const summary =
-      `${found.length} contacto(s) de ${withContacts} empresa(s).` +
-      creditNote +
-      limitNote +
-      emptyNote +
-      failedNote +
-      (fatal ? ` La tanda se detuvo: ${fatal}` : " Quedaron seleccionados para guardar en el portafolio.");
-    if (fatal || failed.length) showWarning(summary, "Búsqueda de Excel incompleta");
-    else showSuccess(summary, "Contactos listos para el portafolio");
+    if (fatal || failed.length) showWarning(summary, coverage.title);
+    else showSuccess(summary, coverage.title);
+    return processed;
   }
 
   async function handleSmartApply(result: SmartSearchResult) {
@@ -417,8 +429,19 @@ export default function ProspeccionPage() {
     setPerPage,
     loading: status === "loading" || saving,
     onSearch: () => search(),
-    onSearchCompanies: (payload: { companies: string[]; totalFound: number }) => {
-      void searchCompanies(payload);
+    excelQueue,
+    onExcelLoaded: setExcelQueue,
+    onSearchCompanies: (payload: ExcelSearchPayload) => {
+      void searchCompanies(payload).then((processed) => {
+        if (processed <= 0) return;
+        setExcelQueue((current) => {
+          if (!current || current.id !== payload.queueId) return current;
+          return {
+            ...current,
+            delivered: Math.min(current.companies.length, payload.deliveredBefore + processed),
+          };
+        });
+      });
     },
   };
 

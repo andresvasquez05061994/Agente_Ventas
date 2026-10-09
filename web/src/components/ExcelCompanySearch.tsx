@@ -4,33 +4,44 @@ import { useId, useState } from "react";
 import { FileSpreadsheet } from "lucide-react";
 import { ActionBanner, FieldLabel } from "@/components/ui";
 import {
-  MAX_EXCEL_COMPANIES,
+  excelCoverageMessage,
+  nextCompanyBatch,
   readCompanyNamesFromBuffer,
-  type ExcelCompanyExtract,
+  type ExcelCompanyQueue,
 } from "@/lib/excel-companies";
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
+
+export type ExcelSearchPayload = {
+  queueId: number;
+  companies: string[];
+  total: number;
+  from: number;
+  to: number;
+  deliveredBefore: number;
+};
 
 export function ExcelCompanySearch({
   disabled,
   titlesSelected,
   perPage,
+  queue,
+  onExcelLoaded,
   onSearchCompanies,
 }: {
   disabled: boolean;
   titlesSelected: number;
   perPage: number;
-  onSearchCompanies: (payload: { companies: string[]; totalFound: number }) => void;
+  queue: ExcelCompanyQueue | null;
+  onExcelLoaded: (queue: ExcelCompanyQueue) => void;
+  onSearchCompanies: (payload: ExcelSearchPayload) => void;
 }) {
   const inputId = useId();
   const [reading, setReading] = useState(false);
-  const [fileLabel, setFileLabel] = useState("");
-  const [extract, setExtract] = useState<ExcelCompanyExtract | null>(null);
   const [error, setError] = useState("");
 
   async function onFile(file: File | undefined) {
     setError("");
-    setExtract(null);
     if (!file) return;
 
     const name = file.name.toLowerCase();
@@ -44,43 +55,54 @@ export function ExcelCompanySearch({
     }
 
     setReading(true);
-    setFileLabel(file.name);
     try {
       const buffer = await file.arrayBuffer();
       const parsed = await readCompanyNamesFromBuffer(buffer, file.name);
       if (!parsed.totalFound) {
-        setExtract(null);
         setError(
           "No encontré nombres de empresa. Usa una columna con encabezado Empresa, Compañía o Company."
         );
         return;
       }
-      setExtract(parsed);
+      onExcelLoaded({
+        id: Date.now(),
+        fileLabel: file.name,
+        columnLabel: parsed.columnLabel,
+        companies: parsed.companies,
+        delivered: 0,
+      });
     } catch {
-      setExtract(null);
       setError("No se pudo leer el archivo. Ábrelo en Excel y guárdalo de nuevo como .xlsx.");
     } finally {
       setReading(false);
     }
   }
 
-  const preview = extract?.companies.slice(0, 6) ?? [];
-  const hiddenCount = extract ? Math.max(0, extract.companies.length - preview.length) : 0;
-  const canSearch = !disabled && !reading && titlesSelected > 0 && (extract?.companies.length ?? 0) > 0;
+  const batch = queue ? nextCompanyBatch(queue.companies, queue.delivered) : null;
+  const coverage = queue ? excelCoverageMessage(queue.delivered, queue.companies.length) : null;
+  const preview = batch?.companies.slice(0, 6) ?? [];
+  const hiddenCount = batch ? Math.max(0, batch.companies.length - preview.length) : 0;
+  const canSearch = Boolean(batch && batch.companies.length > 0 && !disabled && !reading && titlesSelected > 0);
+
+  const buttonLabel = !batch || batch.companies.length === 0
+    ? "Base revisada"
+    : queue && queue.delivered > 0
+      ? `Siguientes ${batch.companies.length} empresas (${batch.from}–${batch.to})`
+      : `Buscar empresas ${batch.from}–${batch.to}`;
 
   return (
     <div className="mb-3">
       <FieldLabel>Empresas desde Excel</FieldLabel>
       <p className="text-micro mb-2">
-        Sube un Excel o CSV con el nombre de la empresa. Se buscan hasta {perPage} contactos por
-        empresa, con los cargos y el país de estos filtros, para guardarlos en el portafolio.
+        Sube un Excel o CSV con el nombre de la empresa. Cada consulta revisa hasta 20 empresas y{" "}
+        {perPage} contactos por empresa, con los cargos y el país de estos filtros.
       </p>
       <label
         htmlFor={inputId}
         className={`btn-secondary w-full cursor-pointer ${disabled || reading ? "pointer-events-none opacity-50" : ""}`}
       >
         <FileSpreadsheet size={14} strokeWidth={1.5} aria-hidden />
-        {reading ? "Leyendo archivo…" : "Cargar Excel"}
+        {reading ? "Leyendo archivo…" : queue ? "Cargar otro Excel" : "Cargar Excel"}
       </label>
       <input
         id={inputId}
@@ -101,41 +123,59 @@ export function ExcelCompanySearch({
         </div>
       )}
 
-      {extract && extract.companies.length > 0 && (
+      {queue && coverage && batch && (
         <div className="mt-2">
           <p className="text-caption">
-            {fileLabel ? `${fileLabel}: ` : ""}
-            {extract.totalFound} empresa(s)
-            {extract.columnLabel ? ` · columna «${extract.columnLabel}»` : ""}
+            {queue.fileLabel}
+            {queue.columnLabel ? ` · columna «${queue.columnLabel}»` : ""}
           </p>
-          <ul className="text-micro mt-1 max-h-24 list-disc overflow-y-auto pl-4">
-            {preview.map((name) => (
-              <li key={name}>{name}</li>
-            ))}
-            {hiddenCount > 0 && <li>y {hiddenCount} más en esta tanda</li>}
-          </ul>
-          {extract.truncated && (
-            <p className="text-micro mt-1">
-              El archivo tiene {extract.totalFound} empresas. Esta búsqueda usa las primeras{" "}
-              {MAX_EXCEL_COMPANIES} para no agotar los créditos de Apollo.
-            </p>
+          <div className="mt-2">
+            <ActionBanner
+              compact
+              tone={queue.delivered > 0 && batch.companies.length === 0 ? "success" : "info"}
+              title={coverage.title}
+              message={coverage.detail}
+            />
+          </div>
+          {batch.companies.length > 0 && (
+            <>
+              <p className="text-micro mt-2">
+                Próxima consulta: empresas {batch.from}–{batch.to} de {batch.total}.
+              </p>
+              <ul className="text-micro mt-1 max-h-24 list-disc overflow-y-auto pl-4">
+                {preview.map((name) => (
+                  <li key={`${batch.from}-${name}`}>{name}</li>
+                ))}
+                {hiddenCount > 0 && <li>y {hiddenCount} más en esta tanda</li>}
+              </ul>
+              {queue.delivered > 0 && (
+                <p className="text-micro mt-1">
+                  Guarda en el portafolio los contactos de esta tanda antes de continuar. La siguiente
+                  consulta reemplaza la lista en pantalla.
+                </p>
+              )}
+              {titlesSelected === 0 && (
+                <p className="text-micro mt-1">Selecciona al menos un cargo antes de buscar.</p>
+              )}
+              <button
+                type="button"
+                className="btn-primary mt-2 w-full disabled:opacity-60"
+                disabled={!canSearch}
+                onClick={() =>
+                  onSearchCompanies({
+                    queueId: queue.id,
+                    companies: batch.companies,
+                    total: batch.total,
+                    from: batch.from,
+                    to: batch.to,
+                    deliveredBefore: queue.delivered,
+                  })
+                }
+              >
+                {buttonLabel}
+              </button>
+            </>
           )}
-          {titlesSelected === 0 && (
-            <p className="text-micro mt-1">Selecciona al menos un cargo antes de buscar.</p>
-          )}
-          <button
-            type="button"
-            className="btn-primary mt-2 w-full disabled:opacity-60"
-            disabled={!canSearch}
-            onClick={() =>
-              onSearchCompanies({
-                companies: extract.companies,
-                totalFound: extract.totalFound,
-              })
-            }
-          >
-            Buscar contactos de estas empresas
-          </button>
         </div>
       )}
     </div>

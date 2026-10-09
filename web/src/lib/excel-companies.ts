@@ -4,8 +4,24 @@ export const MAX_EXCEL_COMPANIES = 20;
 export type ExcelCompanyExtract = {
   companies: string[];
   totalFound: number;
-  truncated: boolean;
   columnLabel: string | null;
+};
+
+export type ExcelCompanyQueue = {
+  id: number;
+  fileLabel: string;
+  columnLabel: string | null;
+  companies: string[];
+  delivered: number;
+};
+
+export type CompanyBatchWindow = {
+  companies: string[];
+  total: number;
+  delivered: number;
+  from: number;
+  to: number;
+  remainingAfter: number;
 };
 
 const ALLOWED_COMPANY_CHAR = /[\w\s.&'´\-áéíóúñÁÉÍÓÚÑ]/u;
@@ -68,7 +84,7 @@ function cellsOf(row: unknown): string[] {
 export function extractCompanyNames(matrix: unknown[][]): ExcelCompanyExtract {
   const rows = matrix.map(cellsOf).filter((row) => row.some((cell) => cell.length > 0));
   if (!rows.length) {
-    return { companies: [], totalFound: 0, truncated: false, columnLabel: null };
+    return { companies: [], totalFound: 0, columnLabel: null };
   }
 
   let header: { row: number; col: number; label: string; score: number } | null = null;
@@ -120,10 +136,62 @@ export function extractCompanyNames(matrix: unknown[][]): ExcelCompanyExtract {
   }
 
   return {
-    companies: all.slice(0, MAX_EXCEL_COMPANIES),
+    companies: all,
     totalFound: all.length,
-    truncated: all.length > MAX_EXCEL_COMPANIES,
     columnLabel,
+  };
+}
+
+/** Siguiente tanda de hasta 20 empresas que aún no se han revisado. */
+export function nextCompanyBatch(companies: string[], delivered: number): CompanyBatchWindow {
+  const total = companies.length;
+  const start = Math.min(Math.max(0, delivered), total);
+  const slice = companies.slice(start, start + MAX_EXCEL_COMPANIES);
+  return {
+    companies: slice,
+    total,
+    delivered: start,
+    from: slice.length ? start + 1 : total,
+    to: start + slice.length,
+    remainingAfter: total - (start + slice.length),
+  };
+}
+
+/** Cuántas empresas de la base cargada ya se entregaron y cuántas faltan. */
+export function excelCoverageMessage(
+  delivered: number,
+  total: number
+): { title: string; detail: string } {
+  const reviewed = Math.min(Math.max(0, delivered), Math.max(0, total));
+  const remaining = Math.max(0, total - reviewed);
+
+  if (total <= 0) {
+    return { title: "Sin empresas en el archivo", detail: "" };
+  }
+
+  if (reviewed === 0) {
+    const first = Math.min(MAX_EXCEL_COMPANIES, total);
+    const after = total - first;
+    return {
+      title: `Base cargada: ${total} empresas`,
+      detail:
+        after > 0
+          ? `Esta consulta entregará las primeras ${first}. Quedarán ${after} empresas para una nueva consulta.`
+          : `Esta consulta entregará las ${total} empresas de la base.`,
+    };
+  }
+
+  if (remaining === 0) {
+    return {
+      title: `Se entregaron las ${reviewed} empresas`,
+      detail: `Ya se revisó toda la base cargada (${total}). No quedan empresas pendientes.`,
+    };
+  }
+
+  const next = Math.min(MAX_EXCEL_COMPANIES, remaining);
+  return {
+    title: `Se entregaron ${reviewed} de ${total} empresas`,
+    detail: `Quedan ${remaining} empresas por revisar en la base cargada. La siguiente consulta tomará ${next}.`,
   };
 }
 
@@ -140,7 +208,7 @@ export async function readCompanyNamesFromBuffer(
 
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) {
-    return { companies: [], totalFound: 0, truncated: false, columnLabel: null };
+    return { companies: [], totalFound: 0, columnLabel: null };
   }
 
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
