@@ -29,9 +29,16 @@ function apiHeaders() {
   };
 }
 
-function webhookBaseUrl(): string | null {
+/**
+ * URL pública a la que Apollo envía los teléfonos. Debe ser alcanzable sin autenticación:
+ * la URL por despliegue (VERCEL_URL) está protegida por Vercel y devuelve 401, así que se
+ * prefiere el dominio de producción del proyecto.
+ */
+export function webhookBaseUrl(): string | null {
   const explicit = process.env.APOLLO_WEBHOOK_BASE_URL?.replace(/\/$/, "");
   if (explicit) return explicit;
+  const production = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  if (production) return `https://${production}`;
   const vercel = process.env.VERCEL_URL;
   if (vercel) return `https://${vercel}`;
   return null;

@@ -5,6 +5,7 @@ import {
   enrichPeopleWithContacts,
   isContactableInSearch,
   resolveApolloPersonId,
+  webhookBaseUrl,
 } from "./apollo-enrich";
 import { getPhoneWebhookHealth, getPortfolioApolloIds, recordProspeccionCredits } from "./db";
 
@@ -520,7 +521,7 @@ export async function searchCompanyContacts(
   if (input.dryRun) {
     try {
       debug.phone_webhook = {
-        base_url: process.env.APOLLO_WEBHOOK_BASE_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null),
+        base_url: webhookBaseUrl(),
         ...(await getPhoneWebhookHealth()),
       };
     } catch (e) {
