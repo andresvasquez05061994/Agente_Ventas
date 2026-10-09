@@ -46,17 +46,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Cantidad de contactos no válida." }, { status: 400 });
     }
 
-    const orgId = typeof body.organization_id === "string" ? body.organization_id.trim() : "";
+    const orgIds = Array.isArray(body.organization_ids)
+      ? body.organization_ids.map((id) => String(id).trim()).filter(Boolean)
+      : [];
     const orgName = typeof body.organization_name === "string" ? body.organization_name.trim() : "";
+
+    const alias = typeof body.alias === "string" ? cleanCompanyName(body.alias) || null : null;
 
     const result = await searchCompanyContacts({
       company,
+      alias,
       country,
       titles,
       allRoles,
       seniority,
       perCompany,
-      organization: orgId && orgName ? { id: orgId, name: orgName, domain: null } : null,
+      organization:
+        orgIds.length && orgName
+          ? { id: orgIds[0], ids: orgIds, name: orgName, domain: null, score: 100 }
+          : null,
+      dryRun: body.dry_run === true,
     });
     return NextResponse.json(result);
   } catch (e) {

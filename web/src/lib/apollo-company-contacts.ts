@@ -1,6 +1,6 @@
 import type { ApolloPerson } from "./types";
 import { ApolloApiError } from "./apollo";
-import { normalizeOrgName, organizationMatches } from "./apollo-filters";
+import { normalizeOrgName } from "./apollo-filters";
 import {
   enrichSinglePersonWithContacts,
   isContactableInSearch,
@@ -15,7 +15,10 @@ const PEOPLE_SEARCH_URL = `${BASE_URL}/mixed_people/api_search`;
 const TIME_BUDGET_MS = 48000;
 const PEOPLE_PAGE_SIZE = 25;
 const MAX_PEOPLE_PAGES = 5;
+/** Puntaje mínimo para aceptar la mejor coincidencia. */
 const MIN_ORG_SCORE = 60;
+/** Desde este puntaje se consideran el mismo negocio y se fusionan (duplicados en Apollo). */
+const STRONG_ORG_SCORE = 95;
 
 const LEGAL_TOKENS = new Set([
   "s", "a", "sa", "sas", "ltda", "limitada", "esp", "e", "p", "bic", "inc", "corp",
@@ -28,9 +31,30 @@ const STOP_TOKENS = new Set([
 ]);
 
 export type ResolvedOrganization = {
+  /** Registro principal (el de mayor puntaje). */
+  id: string;
+  /** Todos los registros de Apollo que corresponden a la misma empresa. */
+  ids: string[];
+  name: string;
+  domain: string | null;
+  score: number;
+};
+
+export type OrganizationCandidate = {
   id: string;
   name: string;
   domain: string | null;
+  score: number;
+  source: "companies" | "people";
+};
+
+export type ResolutionDebug = {
+  company: string;
+  queries: string[];
+  candidates: OrganizationCandidate[];
+  selected: string[];
+  /** Solo en dry run: muestra de personas que devuelve Apollo para los registros elegidos. */
+  sample?: Array<{ nombre: string; cargo: unknown; empresa: unknown }>;
 };
 
 export type CompanyContactsStatus = "found" | "no_contacts" | "not_found";
@@ -44,16 +68,21 @@ export type CompanyContactsResult = {
   portfolio_skipped: number;
   rejected_other_company: number;
   timed_out: boolean;
+  debug?: ResolutionDebug;
 };
 
 export type CompanyContactsInput = {
   company: string;
+  /** Sigla o nombre comercial detectado en el Excel. */
+  alias?: string | null;
   country: string;
   titles: string[];
   allRoles: boolean;
   seniority: string;
   perCompany: number;
   organization?: ResolvedOrganization | null;
+  /** Solo resuelve la empresa y cuenta personas; no gasta créditos de enriquecimiento. */
+  dryRun?: boolean;
 };
 
 function headers() {
@@ -92,10 +121,25 @@ async function postApollo(url: string, payload: Record<string, unknown>) {
   return (await res.json()) as Record<string, unknown>;
 }
 
+/** Tokens del nombre sin la forma jurídica final (S.A., S.A.S., E.S.P., Ltda…). */
 function coreTokens(name: string): string[] {
-  return normalizeOrgName(name)
+  const tokens = normalizeOrgName(name)
     .split(" ")
-    .filter((t) => t.length > 0 && !LEGAL_TOKENS.has(t));
+    .filter((t) => t.length > 0);
+  while (tokens.length > 1 && LEGAL_TOKENS.has(tokens[tokens.length - 1])) tokens.pop();
+  while (tokens.length > 1 && STOP_TOKENS.has(tokens[tokens.length - 1])) tokens.pop();
+  return tokens;
+}
+
+/** Mejor puntaje del candidato contra la razón social o su sigla. */
+export function companyMatchScore(
+  candidate: string,
+  company: string,
+  alias?: string | null
+): number {
+  const base = organizationNameScore(candidate, company);
+  if (!alias) return base;
+  return Math.max(base, organizationNameScore(candidate, alias));
 }
 
 function meaningful(tokens: string[]): string[] {
@@ -132,7 +176,7 @@ export function organizationNameScore(candidate: string, target: string): number
 }
 
 /** Variantes del nombre para buscar en Apollo (sin sufijos legales, sigla, primeras palabras). */
-export function organizationQueries(name: string): string[] {
+export function organizationQueries(name: string, alias?: string | null): string[] {
   const queries: string[] = [];
   const push = (value: string) => {
     const v = value.replace(/\s+/g, " ").trim();
@@ -143,6 +187,7 @@ export function organizationQueries(name: string): string[] {
 
   const core = coreTokens(name);
   push(core.join(" "));
+  if (alias) push(coreTokens(alias).join(" "));
 
   for (const segment of name.split(/\s[-–]\s|\//)) {
     const seg = coreTokens(segment);
@@ -152,58 +197,112 @@ export function organizationQueries(name: string): string[] {
   const words = meaningful(core);
   if (words.length > 3) push(words.slice(0, 3).join(" "));
 
-  return queries.slice(0, 3);
+  return queries.slice(0, 4);
 }
 
-async function searchOrganizations(
-  query: string,
-  country: string | null
-): Promise<ResolvedOrganization[]> {
-  const payload: Record<string, unknown> = { page: 1, per_page: 10, q_organization_name: query };
-  if (country) payload.organization_locations = [country];
-  const data = await postApollo(ORG_SEARCH_URL, payload);
+type RawOrg = { id: string; name: string; domain: string | null };
+
+function toRawOrg(org: Record<string, unknown> | undefined | null): RawOrg | null {
+  if (!org) return null;
+  const id = String(org.organization_id ?? org.id ?? "").trim();
+  const name = String(org.name ?? "").trim();
+  if (!id || !name) return null;
+  return { id, name, domain: (org.primary_domain as string | undefined) ?? null };
+}
+
+/**
+ * Búsqueda de empresas por nombre (1 crédito). Sin filtro de país: Apollo oculta
+ * registros válidos cuando se envía `organization_locations`.
+ */
+async function searchOrganizations(query: string): Promise<RawOrg[]> {
+  const data = await postApollo(ORG_SEARCH_URL, { page: 1, per_page: 25, q_organization_name: query });
   const orgs = (data.organizations ?? data.accounts ?? []) as Array<Record<string, unknown>>;
-  return orgs
-    .map((org) => ({
-      id: String(org.organization_id ?? org.id ?? "").trim(),
-      name: String(org.name ?? "").trim(),
-      domain: (org.primary_domain as string | undefined) ?? null,
-    }))
-    .filter((org) => org.id && org.name);
+  return orgs.map(toRawOrg).filter((org): org is RawOrg => org !== null);
 }
 
-/** Ubica la empresa del Excel en Apollo. Cada consulta de empresas cuesta 1 crédito. */
+/**
+ * Descubrimiento gratuito: busca personas por palabra clave y toma las empresas
+ * donde trabajan. Encuentra los registros de Apollo que realmente tienen personas.
+ */
+async function organizationsFromPeople(query: string): Promise<RawOrg[]> {
+  const data = await postApollo(PEOPLE_SEARCH_URL, { page: 1, per_page: 25, q_keywords: query });
+  const people = (data.people ?? data.contacts ?? []) as Record<string, unknown>[];
+  const seen = new Set<string>();
+  const out: RawOrg[] = [];
+  for (const person of people) {
+    const org = toRawOrg(person.organization as Record<string, unknown> | undefined);
+    if (!org || seen.has(org.id)) continue;
+    seen.add(org.id);
+    out.push(org);
+  }
+  return out;
+}
+
+/** Ubica la empresa del Excel en Apollo y fusiona registros duplicados. */
 export async function resolveOrganization(
   company: string,
-  country: string
-): Promise<{ organization: ResolvedOrganization | null; credits: number }> {
-  const queries = organizationQueries(company);
-  const candidates: ResolvedOrganization[] = [];
+  alias: string | null = null
+): Promise<{ organization: ResolvedOrganization | null; credits: number; debug: ResolutionDebug }> {
+  const queries = organizationQueries(company, alias);
+  const byId = new Map<string, OrganizationCandidate>();
   let credits = 0;
 
-  const bestOf = () => {
-    let top: { org: ResolvedOrganization; score: number } | null = null;
-    for (const org of candidates) {
-      const score = organizationNameScore(org.name, company);
-      if (!top || score > top.score) top = { org, score };
+  const add = (orgs: RawOrg[], source: OrganizationCandidate["source"]) => {
+    for (const org of orgs) {
+      if (byId.has(org.id)) continue;
+      byId.set(org.id, { ...org, score: companyMatchScore(org.name, company, alias), source });
     }
-    return top;
   };
+  const best = () => Math.max(0, ...[...byId.values()].map((c) => c.score));
 
   for (const query of queries) {
-    candidates.push(...(await searchOrganizations(query, country || null)));
+    add(await searchOrganizations(query), "companies");
     credits++;
-    if ((bestOf()?.score ?? 0) >= 90) break;
+    if (best() >= STRONG_ORG_SCORE) break;
   }
 
-  if ((bestOf()?.score ?? 0) < MIN_ORG_SCORE && country && queries[0]) {
-    candidates.push(...(await searchOrganizations(queries[0], null)));
-    credits++;
+  for (const query of queries.slice(0, alias ? 2 : 1)) {
+    try {
+      add(await organizationsFromPeople(query), "people");
+    } catch (e) {
+      if (e instanceof ApolloApiError && (e.status === 429 || e.status === 402)) throw e;
+    }
   }
 
-  const top = bestOf();
-  if (!top || top.score < MIN_ORG_SCORE) return { organization: null, credits };
-  return { organization: top.org, credits };
+  const candidates = [...byId.values()].sort((a, b) => b.score - a.score);
+  const strong = candidates.filter((c) => c.score >= STRONG_ORG_SCORE);
+  const chosen = strong.length ? strong : candidates.slice(0, 1).filter((c) => c.score >= MIN_ORG_SCORE);
+  const debug: ResolutionDebug = { company, queries, candidates, selected: chosen.map((c) => c.id) };
+
+  if (!chosen.length) return { organization: null, credits, debug };
+  const top = chosen[0];
+  return {
+    organization: {
+      id: top.id,
+      ids: chosen.map((c) => c.id),
+      name: top.name,
+      domain: top.domain ?? chosen.find((c) => c.domain)?.domain ?? null,
+      score: top.score,
+    },
+    credits,
+    debug,
+  };
+}
+
+/** ¿El empleador actual de la persona es la empresa del Excel (o uno de sus registros en Apollo)? */
+function employerMatches(
+  employer: string | null | undefined,
+  organization: ResolvedOrganization,
+  company: string,
+  alias: string | null,
+  candidates: OrganizationCandidate[]
+): boolean {
+  if (!employer) return false;
+  if (companyMatchScore(employer, company, alias) >= MIN_ORG_SCORE) return true;
+  if (organizationNameScore(employer, organization.name) >= STRONG_ORG_SCORE) return true;
+  return candidates.some(
+    (c) => organization.ids.includes(c.id) && organizationNameScore(employer, c.name) >= STRONG_ORG_SCORE
+  );
 }
 
 function maxEnrichAttempts(target: number): number {
@@ -219,10 +318,14 @@ export async function searchCompanyContacts(
   let credits = 0;
 
   let organization = input.organization ?? null;
+  let debug: ResolutionDebug | undefined;
+  let candidates: OrganizationCandidate[] = [];
   if (!organization) {
-    const resolved = await resolveOrganization(input.company, input.country);
+    const resolved = await resolveOrganization(input.company, input.alias ?? null);
     credits += resolved.credits;
     organization = resolved.organization;
+    debug = resolved.debug;
+    candidates = resolved.debug.candidates;
   }
 
   if (!organization) {
@@ -236,6 +339,41 @@ export async function searchCompanyContacts(
       portfolio_skipped: 0,
       rejected_other_company: 0,
       timed_out: false,
+      debug,
+    };
+  }
+
+  const org: ResolvedOrganization = organization;
+  const buildPeoplePayload = (page: number, perPage: number) => {
+    const payload: Record<string, unknown> = {
+      page,
+      per_page: perPage,
+      organization_ids: org.ids,
+      contact_email_status: ["verified", "likely to engage"],
+    };
+    if (!input.allRoles && input.titles.length) payload.person_titles = input.titles;
+    if (input.seniority) payload.person_seniorities = [input.seniority];
+    return payload;
+  };
+
+  if (input.dryRun) {
+    const data = await postApollo(PEOPLE_SEARCH_URL, buildPeoplePayload(1, 5));
+    const pagination = data.pagination as { total_entries?: number } | undefined;
+    const sample = ((data.people ?? data.contacts ?? []) as Record<string, unknown>[]).map((p) => {
+      const org = p.organization as Record<string, unknown> | undefined;
+      return { nombre: `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim(), cargo: p.title, empresa: org?.name };
+    });
+    if (credits > 0) await recordProspeccionCredits(credits, 0, "search");
+    return {
+      status: "no_contacts",
+      organization,
+      results: [],
+      total_people: Number(data.total_entries ?? pagination?.total_entries ?? 0) || 0,
+      credits_consumed: credits,
+      portfolio_skipped: 0,
+      rejected_other_company: 0,
+      timed_out: false,
+      debug: debug ? { ...debug, sample } : undefined,
     };
   }
 
@@ -257,16 +395,7 @@ export async function searchCompanyContacts(
       break;
     }
 
-    const payload: Record<string, unknown> = {
-      page,
-      per_page: PEOPLE_PAGE_SIZE,
-      organization_ids: [organization.id],
-      contact_email_status: ["verified", "likely to engage"],
-    };
-    if (!input.allRoles && input.titles.length) payload.person_titles = input.titles;
-    if (input.seniority) payload.person_seniorities = [input.seniority];
-
-    const data = await postApollo(PEOPLE_SEARCH_URL, payload);
+    const data = await postApollo(PEOPLE_SEARCH_URL, buildPeoplePayload(page, PEOPLE_PAGE_SIZE));
     const people = (data.people ?? data.contacts ?? []) as Record<string, unknown>[];
     const pagination = data.pagination as { total_entries?: number; total_pages?: number } | undefined;
     totalPeople = Number(data.total_entries ?? pagination?.total_entries ?? totalPeople) || totalPeople;
@@ -292,15 +421,11 @@ export async function searchCompanyContacts(
       credits += enriched.stats.credits_consumed;
       if (!enriched.person) continue;
 
-      const employer = enriched.person.empresa;
-      if (
-        !organizationMatches(employer, organization.name) &&
-        !organizationMatches(employer, input.company)
-      ) {
+      if (!employerMatches(enriched.person.empresa, org, input.company, input.alias ?? null, candidates)) {
         rejected++;
         continue;
       }
-      collected.push({ ...enriched.person, empresa: organization.name });
+      collected.push({ ...enriched.person, empresa: org.name });
     }
 
     if (timedOut) break;
@@ -313,12 +438,13 @@ export async function searchCompanyContacts(
 
   return {
     status: collected.length ? "found" : "no_contacts",
-    organization,
+    organization: org,
     results: collected,
     total_people: totalPeople,
     credits_consumed: credits,
     portfolio_skipped: portfolioSkipped,
     rejected_other_company: rejected,
     timed_out: timedOut,
+    debug,
   };
 }

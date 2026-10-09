@@ -255,12 +255,13 @@ export default function ProspeccionPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             company: entry.name,
+            alias: entry.alias ?? undefined,
             country,
             titles: allRoles ? [] : titles,
             all_roles: allRoles,
             seniority,
             per_company: perPage,
-            organization_id: entry.apolloId ?? undefined,
+            organization_ids: entry.apolloIds.length ? entry.apolloIds : undefined,
             organization_name: entry.apolloName ?? undefined,
           }),
         });
@@ -295,7 +296,7 @@ export default function ProspeccionPage() {
                     ...item,
                     status: data.status,
                     contacts: item.contacts + people.length,
-                    apolloId: data.organization?.id ?? item.apolloId,
+                    apolloIds: data.organization?.ids?.length ? data.organization.ids : item.apolloIds,
                     apolloName: data.organization?.name ?? item.apolloName,
                   }
                 : item

@@ -187,7 +187,16 @@ export function ExcelCompanySearch({
         <ul>
           {queue.entries.map((entry) => (
             <li key={entry.name}>
-              <span className="excel-companies__name" title={entry.apolloName ? `En Apollo: ${entry.apolloName}` : entry.name}>
+              <span
+                className="excel-companies__name"
+                title={[
+                  entry.rawName !== entry.name ? `Celda: ${entry.rawName}` : "",
+                  entry.alias ? `Sigla: ${entry.alias}` : "",
+                  entry.apolloName ? `En Apollo: ${entry.apolloName}` : "",
+                ]
+                  .filter(Boolean)
+                  .join("\n") || entry.name}
+              >
                 {entry.name}
               </span>
               <span className={`excel-chip excel-chip--${entry.status}`}>{statusLabel(entry)}</span>
