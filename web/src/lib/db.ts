@@ -148,6 +148,19 @@ export async function initDb() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS knowledge_personas (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL DEFAULT '',
+      role TEXT NOT NULL DEFAULT '',
+      sector TEXT NOT NULL DEFAULT '',
+      characteristics TEXT NOT NULL DEFAULT '',
+      value_for_client TEXT NOT NULL DEFAULT '',
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
 }
 
 export async function getPortfolioApolloIds(): Promise<Set<string>> {

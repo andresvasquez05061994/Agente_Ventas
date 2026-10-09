@@ -257,6 +257,127 @@ export function profileToCompanyShape(profile: KnowledgeProfile) {
   };
 }
 
+export const MAX_BUYER_PERSONAS = 20;
+
+export type BuyerPersona = {
+  id: number;
+  name: string;
+  role: string;
+  sector: string;
+  characteristics: string;
+  value_for_client: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BuyerPersonaInput = {
+  name: string;
+  role: string;
+  sector: string;
+  characteristics: string;
+  value_for_client: string;
+  active?: boolean;
+};
+
+function mapPersona(row: Record<string, unknown>): BuyerPersona {
+  return {
+    id: Number(row.id),
+    name: String(row.name ?? ""),
+    role: String(row.role ?? ""),
+    sector: String(row.sector ?? ""),
+    characteristics: String(row.characteristics ?? ""),
+    value_for_client: String(row.value_for_client ?? ""),
+    active: Boolean(row.active),
+    created_at: new Date(String(row.created_at)).toISOString(),
+    updated_at: new Date(String(row.updated_at)).toISOString(),
+  };
+}
+
+function trimPersona(input: BuyerPersonaInput): BuyerPersonaInput {
+  return {
+    name: input.name.trim().slice(0, 80),
+    role: input.role.trim().slice(0, 120),
+    sector: input.sector.trim().slice(0, 120),
+    characteristics: input.characteristics.trim().slice(0, 600),
+    value_for_client: input.value_for_client.trim().slice(0, 500),
+    active: input.active !== false,
+  };
+}
+
+export async function listBuyerPersonas(): Promise<BuyerPersona[]> {
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT * FROM knowledge_personas ORDER BY updated_at DESC
+  `) as Record<string, unknown>[];
+  return rows.map(mapPersona);
+}
+
+export async function listActiveBuyerPersonas(): Promise<BuyerPersona[]> {
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT * FROM knowledge_personas WHERE active = TRUE ORDER BY updated_at DESC
+  `) as Record<string, unknown>[];
+  return rows.map(mapPersona);
+}
+
+export async function countBuyerPersonas(): Promise<number> {
+  const sql = getSql();
+  const [row] = (await sql`SELECT COUNT(*)::int AS total FROM knowledge_personas`) as Array<{
+    total: number;
+  }>;
+  return row?.total ?? 0;
+}
+
+export async function insertBuyerPersona(input: BuyerPersonaInput): Promise<BuyerPersona> {
+  const sql = getSql();
+  const data = trimPersona(input);
+  if (!data.name) throw new Error("Ponle un nombre al buyer persona.");
+  const rows = (await sql`
+    INSERT INTO knowledge_personas (
+      name, role, sector, characteristics, value_for_client, active, created_at, updated_at
+    ) VALUES (
+      ${data.name},
+      ${data.role},
+      ${data.sector},
+      ${data.characteristics},
+      ${data.value_for_client},
+      ${data.active},
+      NOW(),
+      NOW()
+    )
+    RETURNING *
+  `) as Record<string, unknown>[];
+  return mapPersona(rows[0]);
+}
+
+export async function updateBuyerPersona(id: number, input: BuyerPersonaInput): Promise<BuyerPersona | null> {
+  const sql = getSql();
+  const data = trimPersona(input);
+  if (!data.name) throw new Error("Ponle un nombre al buyer persona.");
+  const rows = (await sql`
+    UPDATE knowledge_personas SET
+      name = ${data.name},
+      role = ${data.role},
+      sector = ${data.sector},
+      characteristics = ${data.characteristics},
+      value_for_client = ${data.value_for_client},
+      active = ${data.active},
+      updated_at = NOW()
+    WHERE id = ${id}
+    RETURNING *
+  `) as Record<string, unknown>[];
+  return rows[0] ? mapPersona(rows[0]) : null;
+}
+
+export async function deleteBuyerPersona(id: number): Promise<boolean> {
+  const sql = getSql();
+  const rows = (await sql`
+    DELETE FROM knowledge_personas WHERE id = ${id} RETURNING id
+  `) as Array<{ id: number }>;
+  return Boolean(rows[0]);
+}
+
 export function collectDocumentServices(docs: KnowledgeDocumentRecord[]): IACSolution[] {
   const seen = new Set<string>();
   const out: IACSolution[] = [];

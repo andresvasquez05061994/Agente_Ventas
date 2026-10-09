@@ -8,8 +8,10 @@ import { ensureDb } from "./db";
 import {
   collectDocumentServices,
   getKnowledgeProfile,
+  listActiveBuyerPersonas,
   listActiveKnowledgeDocuments,
   profileToCompanyShape,
+  type BuyerPersona,
   type KnowledgeDocumentRecord,
   type KnowledgeProfile,
 } from "./knowledge-store";
@@ -152,24 +154,52 @@ export function rankCatalogForProspect(
   return ranked;
 }
 
+export function matchBuyerPersona(
+  personas: BuyerPersona[],
+  cargo: string | null | undefined,
+  hints: string
+): BuyerPersona | null {
+  if (!personas.length) return null;
+  const hay = fold(`${cargo ?? ""} ${hints}`);
+  let best: { persona: BuyerPersona; score: number } | null = null;
+  for (const persona of personas) {
+    let score = 0;
+    const roleTokens = queryTokens(`${persona.role} ${persona.name}`);
+    const sectorTokens = queryTokens(persona.sector);
+    const charTokens = queryTokens(persona.characteristics);
+    for (const token of roleTokens) if (hay.includes(token)) score += 6;
+    for (const token of sectorTokens) if (hay.includes(token)) score += 4;
+    for (const token of charTokens) if (hay.includes(token)) score += 2;
+    if (persona.role && fold(cargo ?? "").includes(fold(persona.role))) score += 8;
+    if (!best || score > best.score) best = { persona, score };
+  }
+  if (!best || best.score < 6) return null;
+  return best.persona;
+}
+
 export type LiveKnowledge = {
   profile: KnowledgeProfile;
   company: ReturnType<typeof profileToCompanyShape>;
   documents: KnowledgeDocumentRecord[];
   services: IACSolution[];
+  personas: BuyerPersona[];
   fromDocuments: boolean;
 };
 
 export async function loadLiveKnowledge(): Promise<LiveKnowledge> {
   await ensureDb();
   const profile = await getKnowledgeProfile();
-  const documents = await listActiveKnowledgeDocuments();
+  const [documents, personas] = await Promise.all([
+    listActiveKnowledgeDocuments(),
+    listActiveBuyerPersonas(),
+  ]);
   const services = collectDocumentServices(documents);
   return {
     profile,
     company: profileToCompanyShape(profile),
     documents,
     services,
+    personas,
     fromDocuments: documents.length > 0,
   };
 }

@@ -6,8 +6,10 @@ import {
   rankSolutionsForProspect,
   type IACSolution,
 } from "./iac-portfolio-knowledge";
+import type { BuyerPersona } from "./knowledge-store";
 import {
   loadLiveKnowledge,
+  matchBuyerPersona,
   pickRelevantExcerpts,
   rankCatalogForProspect,
   solutionsForKnowledge,
@@ -34,6 +36,7 @@ export type ProspectContext = {
   company_profile: typeof IAC_COMPANY_PROFILE;
   knowledge_excerpt: string;
   knowledge_from_documents: boolean;
+  buyer_persona: BuyerPersona | null;
 };
 
 const FETCH_TIMEOUT_MS = 9000;
@@ -196,7 +199,12 @@ export async function gatherProspectContext(input: ProspectInput): Promise<Prosp
     hints = `${hints} linkedin`;
   }
 
-  const query = `${hints} ${company_web_summary ?? ""}`;
+  let query = `${hints} ${company_web_summary ?? ""}`;
+  const buyer_persona = matchBuyerPersona(live.personas, input.cargo, query);
+  if (buyer_persona) {
+    intel_sources.push(`buyer persona: ${buyer_persona.name}`);
+    query = `${query} ${buyer_persona.role} ${buyer_persona.sector} ${buyer_persona.characteristics} ${buyer_persona.value_for_client}`;
+  }
   const catalog = solutionsForKnowledge(live);
   const ranked = live.fromDocuments
     ? rankCatalogForProspect(catalog, input.cargo, query)
@@ -235,6 +243,7 @@ export async function gatherProspectContext(input: ProspectInput): Promise<Prosp
     },
     knowledge_excerpt,
     knowledge_from_documents: live.fromDocuments,
+    buyer_persona,
   };
 }
 
@@ -273,6 +282,19 @@ export function formatProspectContextBlock(
     lines.push(
       `- Solución complementaria (opcional): ${formatSolutionNames(context.recommended_solutions)[1]}`
     );
+  }
+
+  if (context.buyer_persona) {
+    const persona = context.buyer_persona;
+    lines.push("", "### Buyer persona (configurado en Conocimiento)");
+    lines.push(`- Perfil: ${persona.name}`);
+    if (persona.role) lines.push(`- Rol típico: ${persona.role}`);
+    if (persona.sector) lines.push(`- Sector: ${persona.sector}`);
+    if (persona.characteristics) lines.push(`- Características del cliente: ${persona.characteristics}`);
+    if (persona.value_for_client) {
+      lines.push(`- Qué genera valor para este cliente: ${persona.value_for_client}`);
+    }
+    lines.push("- El mensaje debe articular ESE valor, no un valor genérico.");
   }
 
   return lines.join("\n");

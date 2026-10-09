@@ -64,9 +64,13 @@ function commercialRules(context: ProspectContext): string {
   const demandRule = context.knowledge_from_documents
     ? "- Ofrece SOLO servicios del portafolio activo y de los extractos de documentos. No inventes productos ni casos de clientes."
     : "- NO mencionar «Predicción de Demanda» salvo que aparezca como solución principal o complementaria en el portafolio recomendado para este prospecto.";
+  const personaRule = context.buyer_persona?.value_for_client
+    ? `- Este contacto encaja con el buyer persona «${context.buyer_persona.name}». El mensaje debe responder qué genera valor para él: ${context.buyer_persona.value_for_client}`
+    : "- Conecta el dolor detectado (cargo, sector, web, intereses) con la solución principal recomendada.";
   const erpRule = context.knowledge_from_documents
-    ? "- Conecta el dolor detectado (cargo, sector, web, intereses) con la solución principal recomendada."
-    : "- Si el contexto habla de ERP, software a medida, procesos o automatización → prioriza Centro de Automatización, no predicción de demanda.";
+    ? personaRule
+    : `${personaRule}
+- Si el contexto habla de ERP, software a medida, procesos o automatización → prioriza Centro de Automatización, no predicción de demanda.`;
   return `Reglas comerciales (obligatorias):
 - Español profesional, directo y cercano. Sin hype ni promesas irreales.
 - Personaliza con cargo, empresa, país y AL MENOS UNA observación concreta del sitio web, notas o contexto de prospección.

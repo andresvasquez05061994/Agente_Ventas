@@ -11,13 +11,30 @@ import {
 } from "@/components/ui";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { parseApiResponse } from "@/lib/parse-api-response";
-import type { KnowledgeDocument, KnowledgeProfile } from "@/lib/knowledge-store";
+import type { BuyerPersona, KnowledgeDocument, KnowledgeProfile } from "@/lib/knowledge-store";
 
 type KnowledgePayload = {
   profile: KnowledgeProfile;
   documents: KnowledgeDocument[];
-  meta?: { total: number; active: number };
+  personas: BuyerPersona[];
+  meta?: { total: number; active: number; personas?: number };
   error?: string;
+};
+
+type PersonaDraft = {
+  name: string;
+  role: string;
+  sector: string;
+  characteristics: string;
+  value_for_client: string;
+};
+
+const EMPTY_DRAFT: PersonaDraft = {
+  name: "",
+  role: "",
+  sector: "",
+  characteristics: "",
+  value_for_client: "",
 };
 
 const EMPTY_PROFILE: KnowledgeProfile = {
@@ -47,9 +64,13 @@ export default function ConocimientoPage() {
   const { feedback, showError, showSuccess, showInfo, clear } = useActionFeedback();
   const [profile, setProfile] = useState<KnowledgeProfile>(EMPTY_PROFILE);
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
+  const [personas, setPersonas] = useState<BuyerPersona[]>([]);
+  const [edits, setEdits] = useState<Record<number, PersonaDraft>>({});
+  const [draft, setDraft] = useState<PersonaDraft>(EMPTY_DRAFT);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [personaBusy, setPersonaBusy] = useState<number | "new" | null>(null);
 
   async function reload() {
     const res = await fetch("/api/conocimiento");
@@ -57,6 +78,7 @@ export default function ConocimientoPage() {
     if (error || data?.error) throw new Error(error ?? data?.error ?? "No se pudo cargar");
     setProfile(data?.profile ?? EMPTY_PROFILE);
     setDocuments(data?.documents ?? []);
+    setPersonas(data?.personas ?? []);
   }
 
   useEffect(() => {
@@ -68,6 +90,7 @@ export default function ConocimientoPage() {
         if (error || data?.error) throw new Error(error ?? data?.error ?? "No se pudo cargar");
         setProfile(data?.profile ?? EMPTY_PROFILE);
         setDocuments(data?.documents ?? []);
+        setPersonas(data?.personas ?? []);
       })
       .catch((e) => {
         if (!cancelled) {
@@ -161,8 +184,95 @@ export default function ConocimientoPage() {
     }
   }
 
+  function personaFields(persona: BuyerPersona): PersonaDraft {
+    return edits[persona.id] ?? {
+      name: persona.name,
+      role: persona.role,
+      sector: persona.sector,
+      characteristics: persona.characteristics,
+      value_for_client: persona.value_for_client,
+    };
+  }
+
+  function patchEdit(id: number, key: keyof PersonaDraft, value: string) {
+    setEdits((current) => {
+      const persona = personas.find((item) => item.id === id);
+      const base = current[id] ?? {
+        name: persona?.name ?? "",
+        role: persona?.role ?? "",
+        sector: persona?.sector ?? "",
+        characteristics: persona?.characteristics ?? "",
+        value_for_client: persona?.value_for_client ?? "",
+      };
+      return { ...current, [id]: { ...base, [key]: value } };
+    });
+  }
+
+  async function savePersona(id: number) {
+    const fields = personaFields(personas.find((item) => item.id === id)!);
+    setPersonaBusy(id);
+    clear();
+    try {
+      const res = await fetch(`/api/conocimiento/personas/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      });
+      const { data, error } = await parseApiResponse<{ persona?: BuyerPersona; error?: string }>(res);
+      if (error || data?.error || !data?.persona) throw new Error(error ?? data?.error);
+      setPersonas((list) => list.map((item) => (item.id === id ? data.persona! : item)));
+      setEdits((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      showSuccess("El Mensaje IA usará este buyer persona cuando el contacto coincida.", "Buyer persona guardado");
+    } catch (e) {
+      showError(e instanceof Error ? e.message : "No se pudo guardar", "Buyer persona");
+    } finally {
+      setPersonaBusy(null);
+    }
+  }
+
+  async function createPersona() {
+    setPersonaBusy("new");
+    clear();
+    try {
+      const res = await fetch("/api/conocimiento/personas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      const { data, error } = await parseApiResponse<{ persona?: BuyerPersona; error?: string }>(res);
+      if (error || data?.error || !data?.persona) throw new Error(error ?? data?.error);
+      setPersonas((list) => [data.persona!, ...list]);
+      setDraft(EMPTY_DRAFT);
+      showSuccess("Quedó en el listado. El Mensaje IA lo usará según cargo, sector y características.", "Buyer persona creado");
+    } catch (e) {
+      showError(e instanceof Error ? e.message : "No se pudo crear", "Buyer persona");
+    } finally {
+      setPersonaBusy(null);
+    }
+  }
+
+  async function removePersona(persona: BuyerPersona) {
+    if (!window.confirm(`¿Eliminar el buyer persona «${persona.name}»?`)) return;
+    setPersonaBusy(persona.id);
+    try {
+      const res = await fetch(`/api/conocimiento/personas/${persona.id}`, { method: "DELETE" });
+      const { error } = await parseApiResponse<{ error?: string }>(res);
+      if (error) throw new Error(error);
+      setPersonas((list) => list.filter((item) => item.id !== persona.id));
+      showSuccess("Ya no se usará en los mensajes.", "Buyer persona eliminado");
+    } catch (e) {
+      showError(e instanceof Error ? e.message : "No se pudo eliminar", "Buyer persona");
+    } finally {
+      setPersonaBusy(null);
+    }
+  }
+
   const activeCount = documents.filter((doc) => doc.active).length;
-  const busy = loading || saving || uploading;
+  const busy = loading || saving || uploading || personaBusy !== null;
 
   return (
     <main className="app-content flex-1 py-6 lg:py-8">
@@ -170,8 +280,8 @@ export default function ConocimientoPage() {
         <div>
           <PageTitle>Conocimiento</PageTitle>
           <PageSubtitle>
-            Portafolio y documentos que alimentan el Mensaje IA según el cargo, la investigación y los
-            intereses de cada cliente.
+            Perfil comercial, buyer personas y documentos que alimentan el Mensaje IA según el cargo,
+            la investigación y lo que genera valor para cada cliente.
           </PageSubtitle>
         </div>
       </header>
@@ -249,6 +359,140 @@ export default function ConocimientoPage() {
           </section>
 
           <section className="knowledge-card">
+            <p className="knowledge-card__title">Buyer personas</p>
+            <p className="text-micro mb-3">
+              Fichas editables. El Mensaje IA elige la que coincida con el cargo, el sector y las
+              características del contacto.
+            </p>
+
+            <div className="persona-card persona-card--new">
+              <p className="persona-card__label">Nuevo buyer persona</p>
+              <FieldLabel>Nombre</FieldLabel>
+              <input
+                className="input-field"
+                value={draft.name}
+                onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+                placeholder="Ej. Director de operaciones en manufactura"
+              />
+              <div className="knowledge-grid mt-2">
+                <div>
+                  <FieldLabel>Cargo / rol</FieldLabel>
+                  <input
+                    className="input-field"
+                    value={draft.role}
+                    onChange={(e) => setDraft((d) => ({ ...d, role: e.target.value }))}
+                    placeholder="COO, Gerente de planta…"
+                  />
+                </div>
+                <div>
+                  <FieldLabel>Sector</FieldLabel>
+                  <input
+                    className="input-field"
+                    value={draft.sector}
+                    onChange={(e) => setDraft((d) => ({ ...d, sector: e.target.value }))}
+                    placeholder="Manufactura, retail…"
+                  />
+                </div>
+              </div>
+              <FieldLabel className="!mt-2">Características del cliente</FieldLabel>
+              <textarea
+                className="input-field knowledge-notes"
+                rows={2}
+                value={draft.characteristics}
+                onChange={(e) => setDraft((d) => ({ ...d, characteristics: e.target.value }))}
+                placeholder="Dolores, prioridades, cómo decide, contexto típico…"
+              />
+              <FieldLabel className="!mt-2">¿Qué genera valor para este cliente?</FieldLabel>
+              <textarea
+                className="input-field knowledge-notes"
+                rows={2}
+                value={draft.value_for_client}
+                onChange={(e) => setDraft((d) => ({ ...d, value_for_client: e.target.value }))}
+                placeholder="El beneficio concreto que debe articular el Mensaje IA…"
+              />
+              <button
+                type="button"
+                className="btn-primary mt-3 w-full"
+                onClick={() => void createPersona()}
+                disabled={busy || !draft.name.trim()}
+              >
+                {personaBusy === "new" ? "Guardando…" : "Agregar buyer persona"}
+              </button>
+            </div>
+
+            {personas.length === 0 ? (
+              <p className="text-micro mt-3">Aún no hay fichas. Agrega la primera para personalizar los mensajes.</p>
+            ) : (
+              <ul className="persona-list">
+                {personas.map((persona) => {
+                  const fields = personaFields(persona);
+                  return (
+                    <li key={persona.id} className="persona-card">
+                      <FieldLabel>Nombre</FieldLabel>
+                      <input
+                        className="input-field"
+                        value={fields.name}
+                        onChange={(e) => patchEdit(persona.id, "name", e.target.value)}
+                      />
+                      <div className="knowledge-grid mt-2">
+                        <div>
+                          <FieldLabel>Cargo / rol</FieldLabel>
+                          <input
+                            className="input-field"
+                            value={fields.role}
+                            onChange={(e) => patchEdit(persona.id, "role", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>Sector</FieldLabel>
+                          <input
+                            className="input-field"
+                            value={fields.sector}
+                            onChange={(e) => patchEdit(persona.id, "sector", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <FieldLabel className="!mt-2">Características del cliente</FieldLabel>
+                      <textarea
+                        className="input-field knowledge-notes"
+                        rows={2}
+                        value={fields.characteristics}
+                        onChange={(e) => patchEdit(persona.id, "characteristics", e.target.value)}
+                      />
+                      <FieldLabel className="!mt-2">¿Qué genera valor para este cliente?</FieldLabel>
+                      <textarea
+                        className="input-field knowledge-notes"
+                        rows={2}
+                        value={fields.value_for_client}
+                        onChange={(e) => patchEdit(persona.id, "value_for_client", e.target.value)}
+                      />
+                      <div className="persona-card__actions">
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          onClick={() => void savePersona(persona.id)}
+                          disabled={busy}
+                        >
+                          {personaBusy === persona.id ? "Guardando…" : "Guardar"}
+                        </button>
+                        <button
+                          type="button"
+                          className="knowledge-doc__delete"
+                          onClick={() => void removePersona(persona)}
+                          disabled={busy}
+                          aria-label={`Eliminar ${persona.name}`}
+                        >
+                          <Trash2 size={14} strokeWidth={1.75} />
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
+          <section className="knowledge-card knowledge-card--docs">
             <p className="knowledge-card__title">Documentos del portafolio</p>
             <p className="text-micro mb-3">
               {activeCount} activo{activeCount === 1 ? "" : "s"} de {documents.length}. PDF, Word o Excel. Máx. 4 MB.
