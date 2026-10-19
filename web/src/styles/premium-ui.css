@@ -351,6 +351,7 @@ body {
   padding: 8px 12px;
   font-size: 11px;
   color: var(--color-text-secondary);
+  text-decoration: none;
 }
 
 .app-credits-pill strong {
@@ -365,6 +366,87 @@ body {
 
 .app-credits-pill--warn strong {
   color: var(--color-warning);
+}
+
+.settings-panel {
+  max-width: 640px;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  padding: 20px;
+}
+
+.credit-meter {
+  margin-top: 16px;
+}
+
+.credit-meter__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.credit-meter__head strong {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-accent);
+}
+
+.credit-meter__track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+}
+
+.credit-meter__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transition: width 200ms ease;
+}
+
+.credit-meter__fill--warn {
+  background: var(--color-warning);
+}
+
+.credit-meter__fill--full {
+  background: var(--color-error);
+}
+
+.credit-meter__meta {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.credit-meter__form {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.credit-meter__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.credit-meter__row .input-field {
+  width: 180px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .credit-meter__fill {
+    transition: none;
+  }
 }
 
 .prospect-next-lote {

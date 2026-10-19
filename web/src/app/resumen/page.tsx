@@ -195,7 +195,7 @@ export default function ResumenPage() {
           <SectionBlock
             label="Apollo"
             title="Consumo de créditos"
-            description="Tope mensual para no gastar créditos Apollo de más. Ajústalo con APOLLO_MONTHLY_CREDIT_BUDGET."
+            description="Cada mes empieza en 2.500. Configuración puede subirlo solo hasta el cierre de este mes."
           >
             <KpiGrid className="kpi-grid--4">
               <KpiCard
@@ -241,6 +241,11 @@ export default function ResumenPage() {
                 tag={{ positive: true, label: "enriquecimiento" }}
               />
             </KpiGrid>
+            <p className="text-caption mt-3">
+              <Link href="/configuracion" className="btn-link">
+                Ajustar tope en Configuración
+              </Link>
+            </p>
           </SectionBlock>
 
           {stats.total === 0 ? (

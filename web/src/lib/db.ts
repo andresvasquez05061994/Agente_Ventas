@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { decodeMonthlyBudget, encodeMonthlyBudget } from "./credit-policy";
 import { applyMigrations } from "./migrations";
 import { phoneMatchCandidates, toE164 } from "./phone";
 import type {
@@ -261,6 +262,27 @@ export async function recordProspeccionCredits(
   await sql`
     INSERT INTO apollo_prospeccion_credits (credits, contactos_enriquecidos, source)
     VALUES (${Math.max(0, credits)}, ${Math.max(0, contactos)}, ${source})
+  `;
+}
+
+const APOLLO_BUDGET_SETTING = "apollo_monthly_budget";
+
+export async function getStoredApolloMonthlyBudget(): Promise<number | null> {
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT value FROM app_settings WHERE key = ${APOLLO_BUDGET_SETTING}
+  `) as Array<{ value: string }>;
+  return decodeMonthlyBudget(rows[0]?.value);
+}
+
+export async function setStoredApolloMonthlyBudget(budget: number): Promise<void> {
+  const sql = getSql();
+  const value = encodeMonthlyBudget(budget);
+  await sql`
+    INSERT INTO app_settings (key, value, updated_at)
+    VALUES (${APOLLO_BUDGET_SETTING}, ${value}, NOW())
+    ON CONFLICT (key) DO UPDATE
+      SET value = EXCLUDED.value, updated_at = NOW()
   `;
 }
 

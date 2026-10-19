@@ -14,6 +14,7 @@ import {
   Moon,
   Plus,
   Search,
+  Settings,
   Sun,
   Users,
 } from "lucide-react";
@@ -27,6 +28,7 @@ const NAV = [
   { href: "/portafolio", label: "Portafolio", icon: Users },
   { href: "/conocimiento", label: "Conocimiento", icon: BookOpen },
   { href: "/conversaciones", label: "Conversaciones", icon: MessageSquare },
+  { href: "/configuracion", label: "Configuración", mobile: "Ajustes", icon: Settings },
 ] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -56,18 +58,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (isLogin) return;
-    fetch("/api/stats")
-      .then((r) => {
-        if (redirectToLoginIfUnauthorized(r)) return null;
-        return r.json();
-      })
-      .then((d) => {
-        if (d && !d.error) {
-          setCreditsMonth(d.apollo?.credits_this_month ?? 0);
-          setCreditsBudget(d.apollo?.monthly_budget ?? null);
-        }
-      })
-      .catch(() => {});
+    let cancelled = false;
+
+    async function loadCredits() {
+      try {
+        const response = await fetch("/api/stats");
+        if (redirectToLoginIfUnauthorized(response)) return;
+        const data = await response.json();
+        if (cancelled || !data || data.error) return;
+        setCreditsMonth(data.apollo?.credits_this_month ?? 0);
+        setCreditsBudget(data.apollo?.monthly_budget ?? null);
+      } catch {
+        /* la píldora queda en blanco si el resumen no responde */
+      }
+    }
+
+    void loadCredits();
+    const onBudgetChange = () => {
+      void loadCredits();
+    };
+    window.addEventListener("apollo-budget-changed", onBudgetChange);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("apollo-budget-changed", onBudgetChange);
+    };
   }, [isLogin]);
 
   async function logout() {
@@ -140,7 +154,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               Salir
             </button>
           )}
-          <div
+          <Link
+            href="/configuracion"
             className={`app-credits-pill${
               creditsMonth != null &&
               creditsBudget != null &&
@@ -149,7 +164,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 ? " app-credits-pill--warn"
                 : ""
             }`}
-            title="Créditos Apollo usados este mes vs presupuesto"
+            title="Créditos Apollo usados este mes. Abrir Configuración para cambiar el tope."
           >
             <Coins
               size={14}
@@ -161,7 +176,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               Apollo: <strong>{creditsMonth ?? "—"}</strong>
               {creditsBudget != null ? ` / ${creditsBudget}` : ""} créd. / mes
             </span>
-          </div>
+          </Link>
         </div>
       </aside>
 
@@ -182,7 +197,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               className={`app-mobile-nav__item${active ? " app-mobile-nav__item--active" : ""}`}
             >
               <Icon size={20} strokeWidth={1.5} aria-hidden />
-              <span>{item.label.split(" ")[0]}</span>
+              <span>{"mobile" in item ? item.mobile : item.label.split(" ")[0]}</span>
             </Link>
           );
         })}

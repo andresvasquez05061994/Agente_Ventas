@@ -177,9 +177,20 @@ async function migration002PhoneSearch(sql: Sql) {
   }
 }
 
+async function migration003AppSettings(sql: Sql) {
+  await sql`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+}
+
 const MIGRATIONS: Migration[] = [
   { id: "001_init", run: migration001Init },
   { id: "002_phone_search", run: migration002PhoneSearch },
+  { id: "003_app_settings", run: migration003AppSettings },
 ];
 
 export async function applyMigrations(sql: Sql) {

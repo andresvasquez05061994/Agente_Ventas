@@ -1,11 +1,12 @@
-import { getApolloProspeccionCredits } from "./db";
+import { getApolloProspeccionCredits, getStoredApolloMonthlyBudget } from "./db";
 import {
   APOLLO_RATE_MAX,
   APOLLO_RATE_WINDOW_MS,
   MISTRAL_RATE_MAX,
   MISTRAL_RATE_WINDOW_MS,
-  apolloMonthlyBudget,
   remainingCredits,
+  resolveApolloMonthlyBudget,
+  usagePercent,
 } from "./credit-policy";
 
 export class UsageLimitError extends Error {
@@ -64,7 +65,7 @@ export async function assertApolloBudget(minRemaining = 1) {
   if (snapshot.remaining < minRemaining) {
     throw new UsageLimitError(
       `Presupuesto mensual de Apollo agotado (${snapshot.used}/${snapshot.budget} créditos). ` +
-        "Sube APOLLO_MONTHLY_CREDIT_BUDGET en Vercel o espera al próximo mes.",
+        "Súbelo en Configuración para este mes, o espera al día 1: el tope vuelve a 2.500 y el consumo empieza de cero.",
       "apollo_budget"
     );
   }
@@ -72,12 +73,16 @@ export async function assertApolloBudget(minRemaining = 1) {
 }
 
 export async function getApolloBudgetSnapshot() {
-  const budget = apolloMonthlyBudget();
+  const stored = await getStoredApolloMonthlyBudget();
+  const resolved = resolveApolloMonthlyBudget(stored);
   const credits = await getApolloProspeccionCredits();
   const used = credits.credits_this_month;
+  const budget = resolved.budget;
   return {
     ...credits,
     monthly_budget: budget,
+    budget_source: resolved.source,
+    used_percent: usagePercent(used, budget),
     remaining: remainingCredits(used, budget),
     used,
     budget,

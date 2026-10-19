@@ -21,7 +21,8 @@ APOLLO_API_KEY=...
 APOLLO_WEBHOOK_BASE_URL=https://tu-dominio.vercel.app
 APP_PASSWORD=...          # obligatorio en Vercel
 AUTH_SECRET=...           # firma de sesión; genera una cadena larga
-APOLLO_MONTHLY_CREDIT_BUDGET=2500  # tope mensual (opcional; default 2500)
+# Tope Apollo de la app: 2500 créditos, se reinicia cada mes (UTC).
+# Configuración puede cambiarlo solo para el mes en curso.
 ```
 
 En producción la app pide contraseña en `/login`. Los webhooks de Apollo y WhatsApp no usan esa sesión: van con `?token=` (Apollo lo añade solo) o header `x-webhook-secret`.
