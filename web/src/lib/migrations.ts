@@ -208,19 +208,23 @@ async function migration004Users(sql: Sql) {
   await sql`DROP INDEX IF EXISTS idx_leads_telefono_e164_uidx`;
   await sql`CREATE INDEX IF NOT EXISTS idx_leads_owner_created ON leads (owner_id, created_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_credits_owner_created ON apollo_prospeccion_credits (owner_id, created_at DESC)`;
-  await sql`CREATE SEQUENCE IF NOT EXISTS knowledge_profile_id_seq`;
-  await sql`
-    SELECT setval(
-      'knowledge_profile_id_seq',
-      COALESCE((SELECT MAX(id) FROM knowledge_profile), 0) + 1,
-      false
-    )
-  `;
-  await sql`
-    ALTER TABLE knowledge_profile
-    ALTER COLUMN id SET DEFAULT nextval('knowledge_profile_id_seq')
-  `;
-  await sql`ALTER SEQUENCE knowledge_profile_id_seq OWNED BY knowledge_profile.id`;
+  try {
+    await sql`CREATE SEQUENCE IF NOT EXISTS knowledge_profile_id_seq`;
+    await sql`
+      SELECT setval(
+        'knowledge_profile_id_seq',
+        GREATEST(COALESCE((SELECT MAX(id) FROM knowledge_profile), 0), 1),
+        true
+      )
+    `;
+    await sql`
+      ALTER TABLE knowledge_profile
+      ALTER COLUMN id SET DEFAULT nextval('knowledge_profile_id_seq')
+    `;
+    await sql`ALTER SEQUENCE knowledge_profile_id_seq OWNED BY knowledge_profile.id`;
+  } catch {
+    /* el perfil comercial puede seguir en la fila existente si la secuencia no se puede ajustar */
+  }
 }
 
 const MIGRATIONS: Migration[] = [

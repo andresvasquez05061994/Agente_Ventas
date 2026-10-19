@@ -38,8 +38,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Solicitud inválida" }, { status: 400 });
   }
 
-  await ensureDb();
-  const user = await getUserByEmail(email);
+  let user;
+  try {
+    await ensureDb();
+    user = await getUserByEmail(email);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "No se pudo preparar el acceso";
+    return NextResponse.json({ error: msg.slice(0, 300) }, { status: 500 });
+  }
   if (!user || !verifyPasswordHash(password, user.password_hash)) {
     return NextResponse.json({ error: "Correo o contraseña incorrectos." }, { status: 401 });
   }

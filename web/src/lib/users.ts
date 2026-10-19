@@ -165,6 +165,31 @@ export async function ensurePlatform(): Promise<void> {
   await sql`UPDATE knowledge_personas SET owner_id = ${admin.id} WHERE owner_id IS NULL`;
   await sql`UPDATE apollo_prospeccion_credits SET owner_id = ${admin.id} WHERE owner_id IS NULL`;
 
+  await sql`
+    UPDATE leads AS older
+    SET apollo_id = older.apollo_id || ':' || older.id::text
+    FROM (
+      SELECT id
+      FROM (
+        SELECT id, ROW_NUMBER() OVER (
+          PARTITION BY owner_id, apollo_id
+          ORDER BY updated_at DESC NULLS LAST, id DESC
+        ) AS rn
+        FROM leads
+        WHERE owner_id IS NOT NULL
+      ) ranked
+      WHERE rn > 1
+    ) dup
+    WHERE older.id = dup.id
+  `;
+  await sql`
+    DELETE FROM knowledge_profile
+    WHERE owner_id IS NOT NULL
+      AND id NOT IN (
+        SELECT MAX(id) FROM knowledge_profile WHERE owner_id IS NOT NULL GROUP BY owner_id
+      )
+  `;
+
   const legacy = (await sql`
     SELECT value FROM app_settings WHERE key = 'apollo_monthly_budget'
   `) as Array<{ value: string }>;
@@ -182,7 +207,7 @@ export async function ensurePlatform(): Promise<void> {
     ON leads (owner_id, apollo_id)
   `;
   await sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_owner_phone
+    CREATE INDEX IF NOT EXISTS idx_leads_owner_phone
     ON leads (owner_id, telefono_e164)
     WHERE telefono_e164 IS NOT NULL
   `;
