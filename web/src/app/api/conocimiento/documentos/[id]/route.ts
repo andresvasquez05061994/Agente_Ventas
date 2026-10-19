@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAdmin, requireUser } from "@/lib/current-user";
 import { ensureDb } from "@/lib/db";
 import { deleteKnowledgeDocument, setKnowledgeDocumentActive } from "@/lib/knowledge-store";
 
@@ -9,6 +10,8 @@ type Ctx = { params: Promise<{ id: string }> };
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
     await ensureDb();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
     const { id: raw } = await ctx.params;
     const id = Number(raw);
     if (!Number.isInteger(id) || id <= 0) {
@@ -18,7 +21,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (typeof body.active !== "boolean") {
       return NextResponse.json({ error: "Indica si el documento queda activo." }, { status: 400 });
     }
-    const document = await setKnowledgeDocumentActive(id, body.active);
+    const document = await setKnowledgeDocumentActive(id, body.active, actor.id);
     if (!document) return NextResponse.json({ error: "Documento no encontrado." }, { status: 404 });
     return NextResponse.json({ document });
   } catch (e) {
@@ -30,6 +33,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 export async function DELETE(_req: NextRequest, ctx: Ctx) {
   try {
     await ensureDb();
+    const actor = await requireUser(_req);
+    if (actor instanceof NextResponse) return actor;
+    const denied = requireAdmin(actor);
+    if (denied) return denied;
     const { id: raw } = await ctx.params;
     const id = Number(raw);
     if (!Number.isInteger(id) || id <= 0) {

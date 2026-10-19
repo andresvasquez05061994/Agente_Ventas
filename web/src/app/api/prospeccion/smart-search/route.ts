@@ -4,6 +4,8 @@ import {
   interpretSmartSearch,
   verifyMistralHealth,
 } from "@/lib/smart-search";
+import { requireUser } from "@/lib/current-user";
+import { ensureDb } from "@/lib/db";
 import { assertMistralRateLimit, UsageLimitError } from "@/lib/usage-guard";
 
 export async function GET() {
@@ -18,6 +20,9 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureDb();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
     assertMistralRateLimit();
     const body = await req.json();
     const query = String(body.query ?? "").trim();

@@ -5,6 +5,7 @@ import {
   searchApolloOrganizations,
 } from "@/lib/apollo-organizations";
 import { APOLLO_COUNTRIES } from "@/lib/apollo-filters";
+import { dataOwnerId, requireUser } from "@/lib/current-user";
 import { ensureDb, searchDistinctCompanies } from "@/lib/db";
 
 const COUNTRY_VALUES = new Set(APOLLO_COUNTRIES.map((c) => c.value));
@@ -23,7 +24,9 @@ export async function GET(req: NextRequest) {
     }
 
     await ensureDb();
-    const portfolio = await searchDistinctCompanies(q, 6);
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
+    const portfolio = await searchDistinctCompanies(q, 6, dataOwnerId(actor));
 
     let apollo: Awaited<ReturnType<typeof searchApolloOrganizations>> = [];
     try {

@@ -45,6 +45,7 @@ export interface Lead {
   fuente_busqueda: string | null;
   created_at: string;
   updated_at: string;
+  owner_email?: string | null;
 }
 
 export interface WhatsAppMessage {

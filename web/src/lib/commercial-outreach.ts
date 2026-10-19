@@ -345,12 +345,13 @@ function parseEmailJson(
 
 export async function generateOutreachMessage(
   input: OutreachInput,
-  channel: OutreachChannel
+  channel: OutreachChannel,
+  ownerId: number
 ): Promise<OutreachResult> {
   const nombre = input.nombre?.trim();
   if (!nombre) throw new OutreachError("Nombre del contacto requerido.");
 
-  const context = await gatherProspectContext(input);
+  const context = await gatherProspectContext(input, ownerId);
 
   if (!isMistralConfigured()) {
     return channel === "email" ? ruleBasedEmail(input, context) : ruleBasedCall(input, context);

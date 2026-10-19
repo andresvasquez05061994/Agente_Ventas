@@ -186,12 +186,12 @@ export type LiveKnowledge = {
   fromDocuments: boolean;
 };
 
-export async function loadLiveKnowledge(): Promise<LiveKnowledge> {
+export async function loadLiveKnowledge(ownerId: number): Promise<LiveKnowledge> {
   await ensureDb();
-  const profile = await getKnowledgeProfile();
+  const profile = await getKnowledgeProfile(ownerId);
   const [documents, personas] = await Promise.all([
-    listActiveKnowledgeDocuments(),
-    listActiveBuyerPersonas(),
+    listActiveKnowledgeDocuments(ownerId),
+    listActiveBuyerPersonas(ownerId),
   ]);
   const services = collectDocumentServices(documents);
   return {

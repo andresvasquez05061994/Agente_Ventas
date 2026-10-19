@@ -42,7 +42,9 @@ export type ProspeccionSearchMeta = {
   };
 };
 
-const SESSION_STORAGE_KEY = "iac.prospeccion.v1";
+function sessionStorageKey(userId: number): string {
+  return `iac.prospeccion.v1.${userId}`;
+}
 
 type ProspeccionSessionState = {
   country: string;
@@ -125,10 +127,10 @@ function persistable(state: ProspeccionSessionState): ProspeccionSessionState {
   };
 }
 
-function readStoredSession(): ProspeccionSessionState | null {
+function readStoredSession(userId: number): ProspeccionSessionState | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
+    const raw = window.sessionStorage.getItem(sessionStorageKey(userId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<ProspeccionSessionState>;
     if (!parsed || typeof parsed !== "object") return null;
@@ -163,10 +165,10 @@ function readStoredSession(): ProspeccionSessionState | null {
   }
 }
 
-function writeStoredSession(state: ProspeccionSessionState) {
+function writeStoredSession(userId: number, state: ProspeccionSessionState) {
   if (typeof window === "undefined") return;
   try {
-    window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(persistable(state)));
+    window.sessionStorage.setItem(sessionStorageKey(userId), JSON.stringify(persistable(state)));
   } catch {
     /* quota or private mode */
   }
@@ -174,20 +176,31 @@ function writeStoredSession(state: ProspeccionSessionState) {
 
 const ProspeccionSessionContext = createContext<ProspeccionSessionContextValue | null>(null);
 
-export function ProspeccionSessionProvider({ children }: { children: ReactNode }) {
+export function ProspeccionSessionProvider({
+  children,
+  userId,
+}: {
+  children: ReactNode;
+  userId: number | null;
+}) {
   const [state, setState] = useState<ProspeccionSessionState>(createInitialState);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    const stored = readStoredSession();
-    if (stored) setState(stored);
+    setHydrated(false);
+    if (!userId) {
+      setState(createInitialState());
+      setHydrated(true);
+      return;
+    }
+    setState(readStoredSession(userId) ?? createInitialState());
     setHydrated(true);
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
-    if (!hydrated) return;
-    writeStoredSession(state);
-  }, [hydrated, state]);
+    if (!hydrated || !userId) return;
+    writeStoredSession(userId, state);
+  }, [hydrated, state, userId]);
 
   const selected = useMemo(() => new Set(state.selectedIds), [state.selectedIds]);
 

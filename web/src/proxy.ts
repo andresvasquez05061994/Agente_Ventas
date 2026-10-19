@@ -7,7 +7,13 @@ import {
   unauthorizedJson,
 } from "@/lib/auth";
 
-const PUBLIC_PREFIXES = ["/login", "/api/auth/login", "/api/auth/session", "/api/health"];
+const PUBLIC_PREFIXES = [
+  "/login",
+  "/api/auth/login",
+  "/api/auth/register",
+  "/api/auth/session",
+  "/api/health",
+];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((path) => pathname === path || pathname.startsWith(`${path}/`));
@@ -33,7 +39,7 @@ export function proxy(request: NextRequest) {
   if (!isAuthConfigured()) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json(
-        { error: "APP_PASSWORD no configurada en el servidor." },
+        { error: "ADMIN_EMAIL no configurada en el servidor." },
         { status: 503 }
       );
     }

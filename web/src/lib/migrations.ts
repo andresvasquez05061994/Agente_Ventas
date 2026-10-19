@@ -187,10 +187,47 @@ async function migration003AppSettings(sql: Sql) {
   `;
 }
 
+async function migration004Users(sql: Sql) {
+  await sql`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'disabled')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES users(id)`;
+  await sql`ALTER TABLE knowledge_profile ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES users(id)`;
+  await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES users(id)`;
+  await sql`ALTER TABLE knowledge_personas ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES users(id)`;
+  await sql`ALTER TABLE apollo_prospeccion_credits ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES users(id)`;
+  await sql`ALTER TABLE leads DROP CONSTRAINT IF EXISTS leads_apollo_id_key`;
+  await sql`DROP INDEX IF EXISTS idx_leads_telefono_e164_uidx`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_leads_owner_created ON leads (owner_id, created_at DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_credits_owner_created ON apollo_prospeccion_credits (owner_id, created_at DESC)`;
+  await sql`CREATE SEQUENCE IF NOT EXISTS knowledge_profile_id_seq`;
+  await sql`
+    SELECT setval(
+      'knowledge_profile_id_seq',
+      COALESCE((SELECT MAX(id) FROM knowledge_profile), 0) + 1,
+      false
+    )
+  `;
+  await sql`
+    ALTER TABLE knowledge_profile
+    ALTER COLUMN id SET DEFAULT nextval('knowledge_profile_id_seq')
+  `;
+  await sql`ALTER SEQUENCE knowledge_profile_id_seq OWNED BY knowledge_profile.id`;
+}
+
 const MIGRATIONS: Migration[] = [
   { id: "001_init", run: migration001Init },
   { id: "002_phone_search", run: migration002PhoneSearch },
   { id: "003_app_settings", run: migration003AppSettings },
+  { id: "004_users", run: migration004Users },
 ];
 
 export async function applyMigrations(sql: Sql) {

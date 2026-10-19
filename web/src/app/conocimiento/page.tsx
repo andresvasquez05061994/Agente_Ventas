@@ -97,6 +97,14 @@ export default function ConocimientoPage() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [personaBusy, setPersonaBusy] = useState<number | "new" | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((data: { user?: { role?: string } | null }) => setIsAdmin(data.user?.role === "admin"))
+      .catch(() => setIsAdmin(false));
+  }, []);
 
   async function reload() {
     const res = await fetch("/api/conocimiento");
@@ -407,15 +415,17 @@ export default function ConocimientoPage() {
                       <button type="button" className="btn-secondary" onClick={() => void toggleDoc(doc)} disabled={busy}>
                         {doc.active ? "Pausar" : "Activar"}
                       </button>
-                      <button
-                        type="button"
-                        className="knowledge-doc__delete"
-                        onClick={() => void removeDoc(doc)}
-                        disabled={busy}
-                        aria-label={`Eliminar ${doc.filename}`}
-                      >
-                        <Trash2 size={14} strokeWidth={1.75} />
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          className="knowledge-doc__delete"
+                          onClick={() => void removeDoc(doc)}
+                          disabled={busy}
+                          aria-label={`Eliminar ${doc.filename}`}
+                        >
+                          <Trash2 size={14} strokeWidth={1.75} />
+                        </button>
+                      ) : null}
                     </div>
                   </li>
                 ))}
@@ -621,15 +631,17 @@ export default function ConocimientoPage() {
                               >
                                 {personaBusy === persona.id ? "Guardando…" : "Guardar"}
                               </button>
-                              <button
-                                type="button"
-                                className="knowledge-doc__delete"
-                                onClick={() => void removePersona(persona)}
-                                disabled={busy}
-                                aria-label={`Eliminar ${persona.name}`}
-                              >
-                                <Trash2 size={14} strokeWidth={1.75} />
-                              </button>
+                              {isAdmin ? (
+                                <button
+                                  type="button"
+                                  className="knowledge-doc__delete"
+                                  onClick={() => void removePersona(persona)}
+                                  disabled={busy}
+                                  aria-label={`Eliminar ${persona.name}`}
+                                >
+                                  <Trash2 size={14} strokeWidth={1.75} />
+                                </button>
+                              ) : null}
                             </div>
                           </div>
                         </details>

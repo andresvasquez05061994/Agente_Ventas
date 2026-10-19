@@ -12,12 +12,12 @@ const LOGIN_MAX_ATTEMPTS = 8;
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 
 export function isAuthRequired(): boolean {
-  if (process.env.APP_PASSWORD?.trim()) return true;
+  if (process.env.ADMIN_EMAIL?.trim() || process.env.APP_PASSWORD?.trim()) return true;
   return process.env.VERCEL === "1";
 }
 
 export function isAuthConfigured(): boolean {
-  return Boolean(process.env.APP_PASSWORD?.trim());
+  return Boolean(process.env.ADMIN_EMAIL?.trim() || process.env.APP_PASSWORD?.trim());
 }
 
 function signingSecret(): string {
@@ -49,21 +49,28 @@ export function timingSafeStringEqual(a: string, b: string): boolean {
   return timingSafeEqual(left, right);
 }
 
-export function createSessionValue(): string | null {
+export function createSessionValue(userId: number): string | null {
+  const secret = signingSecret();
+  if (!secret || !Number.isInteger(userId) || userId <= 0) return null;
+  const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SEC;
+  return `v2.${userId}.${exp}.${hmac(`v2:${userId}:${exp}`, secret)}`;
+}
+
+export function readSessionUserId(value: string | undefined | null): number | null {
+  if (!value) return null;
   const secret = signingSecret();
   if (!secret) return null;
-  const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SEC;
-  return `${exp}.${hmac(`v1:${exp}`, secret)}`;
+  const [version, userRaw, expRaw, sig] = value.split(".");
+  const userId = Number(userRaw);
+  const exp = Number(expRaw);
+  if (version !== "v2" || !sig || !Number.isInteger(userId) || userId <= 0) return null;
+  if (!Number.isFinite(exp) || exp * 1000 < Date.now()) return null;
+  if (!timingSafeStringEqual(sig, hmac(`v2:${userId}:${exp}`, secret))) return null;
+  return userId;
 }
 
 export function verifySessionValue(value: string | undefined | null): boolean {
-  if (!value) return false;
-  const secret = signingSecret();
-  if (!secret) return false;
-  const [expRaw, sig] = value.split(".");
-  const exp = Number(expRaw);
-  if (!expRaw || !sig || !Number.isFinite(exp) || exp * 1000 < Date.now()) return false;
-  return timingSafeStringEqual(sig, hmac(`v1:${exp}`, secret));
+  return readSessionUserId(value) != null;
 }
 
 export function hasSession(req: NextRequest): boolean {
@@ -80,8 +87,8 @@ export function sessionCookieOptions() {
   };
 }
 
-export function attachSessionCookie(res: NextResponse): NextResponse {
-  const value = createSessionValue();
+export function attachSessionCookie(res: NextResponse, userId: number): NextResponse {
+  const value = createSessionValue(userId);
   if (!value) return res;
   res.cookies.set(SESSION_COOKIE, value, sessionCookieOptions());
   return res;

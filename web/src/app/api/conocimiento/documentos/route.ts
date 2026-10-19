@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireUser } from "@/lib/current-user";
 import { ensureDb } from "@/lib/db";
 import {
   extractKnowledgeText,
@@ -16,8 +17,10 @@ export const maxDuration = 60;
 export async function POST(req: NextRequest) {
   try {
     await ensureDb();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
     assertMistralRateLimit();
-    const count = await countKnowledgeDocuments();
+    const count = await countKnowledgeDocuments(actor.id);
     if (count >= MAX_KNOWLEDGE_DOCS) {
       return NextResponse.json(
         { error: `Máximo ${MAX_KNOWLEDGE_DOCS} documentos. Elimina alguno para cargar otro.` },
@@ -46,7 +49,7 @@ export async function POST(req: NextRequest) {
     const summary =
       structured?.services[0]?.summary ?? summarizeExtract(extracted.text);
 
-    const document = await insertKnowledgeDocument({
+    const document = await insertKnowledgeDocument(actor.id, {
       filename: file.name,
       mime: file.type || null,
       kind: extracted.kind,

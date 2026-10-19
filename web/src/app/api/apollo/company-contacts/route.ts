@@ -8,6 +8,7 @@ import {
   normalizeJobTitles,
 } from "@/lib/apollo-filters";
 import { cleanCompanyName, parseCompanyCell } from "@/lib/excel-companies";
+import { requireUser } from "@/lib/current-user";
 import { ensureDb } from "@/lib/db";
 import { assertApolloBudget, assertApolloRateLimit, UsageLimitError } from "@/lib/usage-guard";
 
@@ -19,8 +20,10 @@ const SENIORITIES = new Set<string>(APOLLO_SENIORITIES.map((s) => s.value));
 export async function POST(req: NextRequest) {
   try {
     await ensureDb();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
     assertApolloRateLimit();
-    await assertApolloBudget();
+    await assertApolloBudget(actor.id);
     const body = (await req.json()) as Record<string, unknown>;
 
     const company = cleanCompanyName(String(body.company ?? ""));
@@ -72,7 +75,7 @@ export async function POST(req: NextRequest) {
           ? { id: orgIds[0], ids: orgIds, name: orgName, domain: null, score: 100 }
           : null,
       dryRun: body.dry_run === true,
-    });
+    }, actor.id);
     return NextResponse.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error buscando contactos de la empresa";

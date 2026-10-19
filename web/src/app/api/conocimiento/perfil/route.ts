@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireUser } from "@/lib/current-user";
 import { ensureDb } from "@/lib/db";
 import { saveKnowledgeProfile } from "@/lib/knowledge-store";
 
@@ -7,8 +8,10 @@ export const dynamic = "force-dynamic";
 export async function PUT(req: NextRequest) {
   try {
     await ensureDb();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
     const body = (await req.json()) as Record<string, unknown>;
-    const profile = await saveKnowledgeProfile({
+    const profile = await saveKnowledgeProfile(actor.id, {
       name: String(body.name ?? ""),
       tagline: String(body.tagline ?? ""),
       experience: String(body.experience ?? ""),

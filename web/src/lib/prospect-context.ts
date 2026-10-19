@@ -158,8 +158,11 @@ function guessDomainFromEmail(email: string | null | undefined): string | null {
   return normalizeDomain(domain);
 }
 
-export async function gatherProspectContext(input: ProspectInput): Promise<ProspectContext> {
-  const live = await loadLiveKnowledge();
+export async function gatherProspectContext(
+  input: ProspectInput,
+  ownerId: number
+): Promise<ProspectContext> {
+  const live = await loadLiveKnowledge(ownerId);
   const intel_sources: string[] = live.fromDocuments
     ? ["conocimiento del proyecto"]
     : ["portafolio IAC"];

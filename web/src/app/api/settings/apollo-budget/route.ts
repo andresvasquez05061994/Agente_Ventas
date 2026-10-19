@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { hasSession, isAuthRequired, unauthorizedJson } from "@/lib/auth";
 import {
   APOLLO_BUDGET_MAX,
   APOLLO_BUDGET_MIN,
   parsePositiveInt,
 } from "@/lib/credit-policy";
+import { requireUser } from "@/lib/current-user";
 import { ensureDb, setStoredApolloMonthlyBudget } from "@/lib/db";
 import { getApolloBudgetSnapshot } from "@/lib/usage-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     await ensureDb();
-    const snapshot = await getApolloBudgetSnapshot();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
+    const snapshot = await getApolloBudgetSnapshot(actor.id);
     return NextResponse.json(snapshot);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "No se pudo leer el tope de Apollo";
@@ -22,10 +24,10 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
-  if (isAuthRequired() && !hasSession(req)) return unauthorizedJson();
-
   try {
     await ensureDb();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
     const body = (await req.json().catch(() => null)) as { budget?: unknown } | null;
     const budget = parsePositiveInt(
       body?.budget == null ? undefined : String(body.budget),
@@ -39,8 +41,8 @@ export async function PUT(req: NextRequest) {
         { status: 400 }
       );
     }
-    await setStoredApolloMonthlyBudget(budget);
-    const snapshot = await getApolloBudgetSnapshot();
+    await setStoredApolloMonthlyBudget(actor.id, budget);
+    const snapshot = await getApolloBudgetSnapshot(actor.id);
     return NextResponse.json(snapshot);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "No se pudo guardar el tope de Apollo";

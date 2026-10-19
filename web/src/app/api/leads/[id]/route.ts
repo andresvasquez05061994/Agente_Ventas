@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { dataOwnerId, requireAdmin, requireUser } from "@/lib/current-user";
 import { deleteLead, ensureDb, updateLeadNotes, updateLeadStatus } from "@/lib/db";
 import { isLeadStatus } from "@/lib/types";
 
@@ -10,6 +11,8 @@ export async function PATCH(
 ) {
   try {
     await ensureDb();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
     const { id } = await params;
     const leadId = Number(id);
     if (!Number.isFinite(leadId) || leadId <= 0) {
@@ -22,12 +25,12 @@ export async function PATCH(
       if (!isLeadStatus(body.lead_status)) {
         return NextResponse.json({ error: "Estado de lead no válido" }, { status: 400 });
       }
-      const lead = await updateLeadStatus(leadId, body.lead_status);
+      const lead = await updateLeadStatus(leadId, body.lead_status, dataOwnerId(actor));
       return NextResponse.json({ ok: true, lead });
     }
 
     if (body.notas !== undefined) {
-      const lead = await updateLeadNotes(leadId, String(body.notas ?? ""));
+      const lead = await updateLeadNotes(leadId, String(body.notas ?? ""), dataOwnerId(actor));
       return NextResponse.json({ ok: true, lead });
     }
 
@@ -45,6 +48,10 @@ export async function DELETE(
 ) {
   try {
     await ensureDb();
+    const actor = await requireUser(_req);
+    if (actor instanceof NextResponse) return actor;
+    const denied = requireAdmin(actor);
+    if (denied) return denied;
     const { id } = await params;
     const leadId = Number(id);
     if (!Number.isFinite(leadId) || leadId <= 0) {

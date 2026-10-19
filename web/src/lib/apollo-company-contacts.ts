@@ -361,7 +361,8 @@ type PeopleSource =
  *     empresas de Apollo no devuelve.
  */
 export async function searchCompanyContacts(
-  input: CompanyContactsInput
+  input: CompanyContactsInput,
+  ownerId: number
 ): Promise<CompanyContactsResult> {
   const started = Date.now();
   const deadlineMs = started + TIME_BUDGET_MS;
@@ -411,7 +412,9 @@ export async function searchCompanyContacts(
     results: ApolloPerson[],
     extra: Partial<CompanyContactsResult> = {}
   ): Promise<CompanyContactsResult> => {
-    if (credits > 0 || results.length) await recordProspeccionCredits(credits, results.length, "search");
+    if (credits > 0 || results.length) {
+      await recordProspeccionCredits(credits, results.length, "search", ownerId);
+    }
     return {
       status,
       organization,
@@ -428,7 +431,7 @@ export async function searchCompanyContacts(
 
   if (!sources.length) return finish("not_found", []);
 
-  const portfolioIds = input.dryRun ? new Set<string>() : await getPortfolioApolloIds();
+  const portfolioIds = input.dryRun ? new Set<string>() : await getPortfolioApolloIds(ownerId);
   const target = input.perCompany;
   const wanted = candidateBudget(target);
   let candidatesToEnrich: Array<{ raw: Record<string, unknown>; via: string; employer: string }> = [];

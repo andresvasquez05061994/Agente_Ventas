@@ -1,15 +1,20 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import {
   generateOutreachMessage,
   OutreachError,
   type OutreachChannel,
 } from "@/lib/commercial-outreach";
+import { requireUser } from "@/lib/current-user";
+import { ensureDb } from "@/lib/db";
 import { assertMistralRateLimit, UsageLimitError } from "@/lib/usage-guard";
 
 export const maxDuration = 60;
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
+    await ensureDb();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
     const body = (await req.json()) as Record<string, unknown>;
     const channel = body.channel === "email" ? "email" : "call";
 
@@ -25,7 +30,8 @@ export async function POST(req: Request) {
         fuente: body.fuente != null ? String(body.fuente) : null,
         linkedin_url: body.linkedin_url != null ? String(body.linkedin_url) : null,
       },
-      channel as OutreachChannel
+      channel as OutreachChannel,
+      actor.id
     );
 
     return NextResponse.json(result);

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireUser } from "@/lib/current-user";
 import { ensureDb } from "@/lib/db";
 import {
   countBuyerPersonas,
@@ -11,7 +12,9 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   try {
     await ensureDb();
-    const total = await countBuyerPersonas();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
+    const total = await countBuyerPersonas(actor.id);
     if (total >= MAX_BUYER_PERSONAS) {
       return NextResponse.json(
         { error: `Máximo ${MAX_BUYER_PERSONAS} buyer personas.` },
@@ -19,7 +22,7 @@ export async function POST(req: NextRequest) {
       );
     }
     const body = (await req.json()) as Record<string, unknown>;
-    const persona = await insertBuyerPersona({
+    const persona = await insertBuyerPersona(actor.id, {
       name: String(body.name ?? ""),
       role: String(body.role ?? ""),
       sector: String(body.sector ?? ""),

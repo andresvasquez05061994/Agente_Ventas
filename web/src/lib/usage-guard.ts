@@ -60,8 +60,8 @@ export function assertMistralRateLimit() {
   }
 }
 
-export async function assertApolloBudget(minRemaining = 1) {
-  const snapshot = await getApolloBudgetSnapshot();
+export async function assertApolloBudget(userId: number, minRemaining = 1) {
+  const snapshot = await getApolloBudgetSnapshot(userId);
   if (snapshot.remaining < minRemaining) {
     throw new UsageLimitError(
       `Presupuesto mensual de Apollo agotado (${snapshot.used}/${snapshot.budget} créditos). ` +
@@ -72,10 +72,10 @@ export async function assertApolloBudget(minRemaining = 1) {
   return snapshot;
 }
 
-export async function getApolloBudgetSnapshot() {
-  const stored = await getStoredApolloMonthlyBudget();
+export async function getApolloBudgetSnapshot(userId: number) {
+  const stored = await getStoredApolloMonthlyBudget(userId);
   const resolved = resolveApolloMonthlyBudget(stored);
-  const credits = await getApolloProspeccionCredits();
+  const credits = await getApolloProspeccionCredits(userId);
   const used = credits.credits_this_month;
   const budget = resolved.budget;
   return {

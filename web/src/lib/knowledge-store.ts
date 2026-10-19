@@ -92,45 +92,26 @@ function mapDocument(row: Record<string, unknown>, includeText = false): Knowled
   };
 }
 
-export async function getKnowledgeProfile(): Promise<KnowledgeProfile> {
+export async function getKnowledgeProfile(ownerId: number): Promise<KnowledgeProfile> {
   const sql = getSql();
-  const rows = (await sql`SELECT * FROM knowledge_profile WHERE id = 1 LIMIT 1`) as Record<
-    string,
-    unknown
-  >[];
-  if (!rows[0]) {
-    await sql`
-      INSERT INTO knowledge_profile (
-        id, name, tagline, experience, scale, sectors, consultant, consultant_role, email, phone, web, notes
-      ) VALUES (
-        1,
-        ${DEFAULT_PROFILE.name},
-        ${DEFAULT_PROFILE.tagline},
-        ${DEFAULT_PROFILE.experience},
-        ${DEFAULT_PROFILE.scale},
-        ${DEFAULT_PROFILE.sectors},
-        ${DEFAULT_PROFILE.consultant},
-        ${DEFAULT_PROFILE.consultant_role},
-        ${DEFAULT_PROFILE.email},
-        ${DEFAULT_PROFILE.phone},
-        ${DEFAULT_PROFILE.web},
-        ${DEFAULT_PROFILE.notes}
-      )
-      ON CONFLICT (id) DO NOTHING
-    `;
-    return { ...DEFAULT_PROFILE };
-  }
+  const rows = (await sql`
+    SELECT * FROM knowledge_profile WHERE owner_id = ${ownerId} LIMIT 1
+  `) as Record<string, unknown>[];
+  if (!rows[0]) return { ...DEFAULT_PROFILE };
   return mapProfile(rows[0]);
 }
 
-export async function saveKnowledgeProfile(input: Omit<KnowledgeProfile, "updated_at">): Promise<KnowledgeProfile> {
+export async function saveKnowledgeProfile(
+  ownerId: number,
+  input: Omit<KnowledgeProfile, "updated_at">
+): Promise<KnowledgeProfile> {
   const sql = getSql();
   const trim = (value: string, max: number) => value.trim().slice(0, max);
   const rows = (await sql`
     INSERT INTO knowledge_profile (
-      id, name, tagline, experience, scale, sectors, consultant, consultant_role, email, phone, web, notes, updated_at
+      owner_id, name, tagline, experience, scale, sectors, consultant, consultant_role, email, phone, web, notes, updated_at
     ) VALUES (
-      1,
+      ${ownerId},
       ${trim(input.name, 80)},
       ${trim(input.tagline, 160)},
       ${trim(input.experience, 200)},
@@ -144,7 +125,7 @@ export async function saveKnowledgeProfile(input: Omit<KnowledgeProfile, "update
       ${trim(input.notes, 2000)},
       NOW()
     )
-    ON CONFLICT (id) DO UPDATE SET
+    ON CONFLICT (owner_id) DO UPDATE SET
       name = EXCLUDED.name,
       tagline = EXCLUDED.tagline,
       experience = EXCLUDED.experience,
@@ -162,25 +143,28 @@ export async function saveKnowledgeProfile(input: Omit<KnowledgeProfile, "update
   return mapProfile(rows[0]);
 }
 
-export async function listKnowledgeDocuments(): Promise<KnowledgeDocument[]> {
+export async function listKnowledgeDocuments(ownerId: number): Promise<KnowledgeDocument[]> {
   const sql = getSql();
   const rows = (await sql`
     SELECT id, filename, mime, kind, summary, structured, char_count, active, created_at, updated_at
     FROM knowledge_documents
+    WHERE owner_id = ${ownerId}
     ORDER BY created_at DESC
   `) as Record<string, unknown>[];
   return rows.map((row) => mapDocument(row, false));
 }
 
-export async function countKnowledgeDocuments(): Promise<number> {
+export async function countKnowledgeDocuments(ownerId: number): Promise<number> {
   const sql = getSql();
-  const [row] = (await sql`SELECT COUNT(*)::int AS total FROM knowledge_documents`) as Array<{
+  const [row] = (await sql`
+    SELECT COUNT(*)::int AS total FROM knowledge_documents WHERE owner_id = ${ownerId}
+  `) as Array<{
     total: number;
   }>;
   return row?.total ?? 0;
 }
 
-export async function insertKnowledgeDocument(input: {
+export async function insertKnowledgeDocument(ownerId: number, input: {
   filename: string;
   mime: string | null;
   kind: KnowledgeKind;
@@ -192,8 +176,9 @@ export async function insertKnowledgeDocument(input: {
   const structuredJson = input.structured ? JSON.stringify(input.structured) : null;
   const rows = (await sql`
     INSERT INTO knowledge_documents (
-      filename, mime, kind, extracted_text, summary, structured, char_count, active, created_at, updated_at
+      owner_id, filename, mime, kind, extracted_text, summary, structured, char_count, active, created_at, updated_at
     ) VALUES (
+      ${ownerId},
       ${input.filename.slice(0, 180)},
       ${input.mime},
       ${input.kind},
@@ -210,12 +195,16 @@ export async function insertKnowledgeDocument(input: {
   return mapDocument(rows[0], false);
 }
 
-export async function setKnowledgeDocumentActive(id: number, active: boolean): Promise<KnowledgeDocument | null> {
+export async function setKnowledgeDocumentActive(
+  id: number,
+  active: boolean,
+  ownerId: number
+): Promise<KnowledgeDocument | null> {
   const sql = getSql();
   const rows = (await sql`
     UPDATE knowledge_documents
     SET active = ${active}, updated_at = NOW()
-    WHERE id = ${id}
+    WHERE id = ${id} AND owner_id = ${ownerId}
     RETURNING id, filename, mime, kind, summary, structured, char_count, active, created_at, updated_at
   `) as Record<string, unknown>[];
   return rows[0] ? mapDocument(rows[0], false) : null;
@@ -229,10 +218,12 @@ export async function deleteKnowledgeDocument(id: number): Promise<boolean> {
   return Boolean(rows[0]);
 }
 
-export async function listActiveKnowledgeDocuments(): Promise<KnowledgeDocumentRecord[]> {
+export async function listActiveKnowledgeDocuments(ownerId: number): Promise<KnowledgeDocumentRecord[]> {
   const sql = getSql();
   const rows = (await sql`
-    SELECT * FROM knowledge_documents WHERE active = TRUE ORDER BY updated_at DESC
+    SELECT * FROM knowledge_documents
+    WHERE active = TRUE AND owner_id = ${ownerId}
+    ORDER BY updated_at DESC
   `) as Record<string, unknown>[];
   return rows.map((row) => mapDocument(row, true));
 }
@@ -305,38 +296,43 @@ function trimPersona(input: BuyerPersonaInput): BuyerPersonaInput {
   };
 }
 
-export async function listBuyerPersonas(): Promise<BuyerPersona[]> {
+export async function listBuyerPersonas(ownerId: number): Promise<BuyerPersona[]> {
   const sql = getSql();
   const rows = (await sql`
-    SELECT * FROM knowledge_personas ORDER BY updated_at DESC
+    SELECT * FROM knowledge_personas WHERE owner_id = ${ownerId} ORDER BY updated_at DESC
   `) as Record<string, unknown>[];
   return rows.map(mapPersona);
 }
 
-export async function listActiveBuyerPersonas(): Promise<BuyerPersona[]> {
+export async function listActiveBuyerPersonas(ownerId: number): Promise<BuyerPersona[]> {
   const sql = getSql();
   const rows = (await sql`
-    SELECT * FROM knowledge_personas WHERE active = TRUE ORDER BY updated_at DESC
+    SELECT * FROM knowledge_personas
+    WHERE active = TRUE AND owner_id = ${ownerId}
+    ORDER BY updated_at DESC
   `) as Record<string, unknown>[];
   return rows.map(mapPersona);
 }
 
-export async function countBuyerPersonas(): Promise<number> {
+export async function countBuyerPersonas(ownerId: number): Promise<number> {
   const sql = getSql();
-  const [row] = (await sql`SELECT COUNT(*)::int AS total FROM knowledge_personas`) as Array<{
+  const [row] = (await sql`
+    SELECT COUNT(*)::int AS total FROM knowledge_personas WHERE owner_id = ${ownerId}
+  `) as Array<{
     total: number;
   }>;
   return row?.total ?? 0;
 }
 
-export async function insertBuyerPersona(input: BuyerPersonaInput): Promise<BuyerPersona> {
+export async function insertBuyerPersona(ownerId: number, input: BuyerPersonaInput): Promise<BuyerPersona> {
   const sql = getSql();
   const data = trimPersona(input);
   if (!data.name) throw new Error("Ponle un nombre al buyer persona.");
   const rows = (await sql`
     INSERT INTO knowledge_personas (
-      name, role, sector, characteristics, value_for_client, active, created_at, updated_at
+      owner_id, name, role, sector, characteristics, value_for_client, active, created_at, updated_at
     ) VALUES (
+      ${ownerId},
       ${data.name},
       ${data.role},
       ${data.sector},
@@ -351,7 +347,11 @@ export async function insertBuyerPersona(input: BuyerPersonaInput): Promise<Buye
   return mapPersona(rows[0]);
 }
 
-export async function updateBuyerPersona(id: number, input: BuyerPersonaInput): Promise<BuyerPersona | null> {
+export async function updateBuyerPersona(
+  id: number,
+  input: BuyerPersonaInput,
+  ownerId: number
+): Promise<BuyerPersona | null> {
   const sql = getSql();
   const data = trimPersona(input);
   if (!data.name) throw new Error("Ponle un nombre al buyer persona.");
@@ -364,7 +364,7 @@ export async function updateBuyerPersona(id: number, input: BuyerPersonaInput): 
       value_for_client = ${data.value_for_client},
       active = ${data.active},
       updated_at = NOW()
-    WHERE id = ${id}
+    WHERE id = ${id} AND owner_id = ${ownerId}
     RETURNING *
   `) as Record<string, unknown>[];
   return rows[0] ? mapPersona(rows[0]) : null;

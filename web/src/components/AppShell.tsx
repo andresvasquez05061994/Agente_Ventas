@@ -16,6 +16,7 @@ import {
   Plus,
   Search,
   Settings,
+  Shield,
   Sun,
   Users,
 } from "lucide-react";
@@ -33,6 +34,8 @@ const NAV = [
   { href: "/configuracion", label: "Configuración", mobile: "Ajustes", icon: Settings },
 ] as const;
 
+const ADMIN_NAV = { href: "/usuarios", label: "Usuarios", mobile: "Admin", icon: Shield } as const;
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { theme, setTheme } = useTheme();
@@ -40,6 +43,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [creditsMonth, setCreditsMonth] = useState<number | null>(null);
   const [creditsBudget, setCreditsBudget] = useState<number | null>(null);
   const [canLogout, setCanLogout] = useState(false);
+  const [sessionUserId, setSessionUserId] = useState<number | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const isLogin = pathname === "/login";
 
   const isDark = theme === "dark";
@@ -52,8 +57,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (isLogin) return;
     fetch("/api/auth/session")
       .then((r) => r.json())
-      .then((d: { required?: boolean; authenticated?: boolean }) => {
+      .then((d: { required?: boolean; authenticated?: boolean; user?: { id?: number; role?: string } | null }) => {
         setCanLogout(Boolean(d.required || d.authenticated));
+        setSessionUserId(typeof d.user?.id === "number" ? d.user.id : null);
+        setIsAdmin(d.user?.role === "admin");
       })
       .catch(() => {});
   }, [isLogin]);
@@ -91,6 +98,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     window.location.assign("/login");
   }
 
+  const nav = isAdmin ? [...NAV, ADMIN_NAV] : [...NAV];
+
   if (isLogin) {
     return <>{children}</>;
   }
@@ -114,7 +123,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </Link>
 
         <nav className="app-sidebar__nav">
-          {NAV.map((item) => {
+          {nav.map((item) => {
             const active = pathname.startsWith(item.href);
             const Icon = item.icon;
             return (
@@ -184,12 +193,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <div className="app-main">
         <div className={`${isWide || isProspeccion ? "w-full" : "app-content"}`}>
-          <ProspeccionSessionProvider>{children}</ProspeccionSessionProvider>
+          <ProspeccionSessionProvider userId={sessionUserId}>{children}</ProspeccionSessionProvider>
         </div>
       </div>
 
       <nav className="app-mobile-nav" aria-label="Navegación móvil">
-        {NAV.map((item) => {
+        {nav.map((item) => {
           const active = pathname.startsWith(item.href);
           const Icon = item.icon;
           return (

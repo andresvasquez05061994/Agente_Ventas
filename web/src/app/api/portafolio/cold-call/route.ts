@@ -1,10 +1,15 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { generateOutreachMessage, OutreachError } from "@/lib/commercial-outreach";
+import { requireUser } from "@/lib/current-user";
+import { ensureDb } from "@/lib/db";
 import { assertMistralRateLimit, UsageLimitError } from "@/lib/usage-guard";
 
 /** @deprecated Usar /api/portafolio/outreach */
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
+    await ensureDb();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
     const body = (await req.json()) as Record<string, unknown>;
     assertMistralRateLimit();
     const result = await generateOutreachMessage(
@@ -17,7 +22,8 @@ export async function POST(req: Request) {
         notas: body.notas != null ? String(body.notas) : null,
         fuente: body.fuente != null ? String(body.fuente) : null,
       },
-      "call"
+      "call",
+      actor.id
     );
     return NextResponse.json(result);
   } catch (e) {

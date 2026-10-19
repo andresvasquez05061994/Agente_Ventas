@@ -1,16 +1,19 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { requireUser } from "@/lib/current-user";
 import { ensureDb } from "@/lib/db";
 import { getKnowledgeProfile, listBuyerPersonas, listKnowledgeDocuments } from "@/lib/knowledge-store";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     await ensureDb();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
     const [profile, documents, personas] = await Promise.all([
-      getKnowledgeProfile(),
-      listKnowledgeDocuments(),
-      listBuyerPersonas(),
+      getKnowledgeProfile(actor.id),
+      listKnowledgeDocuments(actor.id),
+      listBuyerPersonas(actor.id),
     ]);
     const active = documents.filter((doc) => doc.active).length;
     return NextResponse.json({

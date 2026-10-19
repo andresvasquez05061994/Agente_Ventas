@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
+import { dataOwnerId, requireUser } from "@/lib/current-user";
 import { ensureDb, listPortfolioContacts } from "@/lib/db";
 import { documentMatrix } from "@/lib/excel-document";
 
@@ -11,6 +12,8 @@ const MAX_BYTES = 2 * 1024 * 1024;
 export async function POST(req: NextRequest) {
   try {
     await ensureDb();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
     const form = await req.formData();
     const file = form.get("file");
     if (!(file instanceof File)) {
@@ -35,7 +38,7 @@ export async function POST(req: NextRequest) {
       defval: "",
     }) as unknown[][];
 
-    const contacts = await listPortfolioContacts();
+    const contacts = await listPortfolioContacts(dataOwnerId(actor));
     const documented = documentMatrix(matrix, contacts);
 
     const out = XLSX.utils.book_new();

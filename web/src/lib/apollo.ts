@@ -151,11 +151,11 @@ async function fetchSearchPage(
   return { data: lastData, industry_relaxed: false };
 }
 
-export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
+export async function searchApolloWithContacts(input: ValidatedSearchRequest, ownerId: number) {
   const target = input.per_page;
   const countryFilter = input.person_locations[0] ?? "";
   const companyFilter = input.organization_name?.trim() ?? "";
-  const portfolioIds = await getPortfolioApolloIds();
+  const portfolioIds = await getPortfolioApolloIds(ownerId);
   const collected: ApolloPerson[] = [];
   const seen = new Set<string>();
   let totalEntries = 0;
@@ -259,10 +259,11 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest) {
     await recordProspeccionCredits(
       enrichStats.credits_consumed,
       collected.length,
-      "search"
+      "search",
+      ownerId
     );
   } else if (scanned > 0) {
-    await recordProspeccionCredits(0, collected.length, "search");
+    await recordProspeccionCredits(0, collected.length, "search", ownerId);
   }
 
   const totalPages = Math.max(

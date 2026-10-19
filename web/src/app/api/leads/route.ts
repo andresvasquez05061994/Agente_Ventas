@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { dataOwnerId, requireUser } from "@/lib/current-user";
 import { ensureDb, getLeads, saveLeads } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -6,6 +7,8 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   try {
     await ensureDb();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
     const { searchParams } = new URL(req.url);
     const all = searchParams.get("all") === "true";
     const page = Math.max(1, Number(searchParams.get("page") ?? 1) || 1);
@@ -17,7 +20,8 @@ export async function GET(req: NextRequest) {
         search: searchParams.get("search") ?? undefined,
         contact: searchParams.get("contact") ?? undefined,
       },
-      { page, perPage, all }
+      { page, perPage, all },
+      dataOwnerId(actor)
     );
 
     return NextResponse.json(result);
@@ -30,6 +34,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     await ensureDb();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
     const body = await req.json();
     const leads = (body.leads ?? []) as Array<{
       apollo_id: string;
@@ -61,7 +67,7 @@ export async function POST(req: NextRequest) {
       linkedin_url: l.linkedin_url ?? null,
     }));
 
-    const result = await saveLeads(normalized, body.fuente ?? "Apollo");
+    const result = await saveLeads(normalized, body.fuente ?? "Apollo", actor.id);
     return NextResponse.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error al guardar leads";

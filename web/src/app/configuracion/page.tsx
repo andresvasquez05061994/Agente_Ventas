@@ -118,7 +118,7 @@ export default function ConfiguracionPage() {
       <header className="page-header">
         <PageTitle>Configuración</PageTitle>
         <PageSubtitle>
-          Tope mensual de créditos Apollo de la app. El cambio aplica en la siguiente búsqueda.
+          Tope mensual de créditos Apollo de tu cuenta. El cambio aplica en la siguiente búsqueda y no afecta a los demás usuarios.
         </PageSubtitle>
       </header>
 

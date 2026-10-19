@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAdmin, requireUser } from "@/lib/current-user";
 import { ensureDb } from "@/lib/db";
 import { deleteBuyerPersona, updateBuyerPersona } from "@/lib/knowledge-store";
 
@@ -14,6 +15,8 @@ function parseId(raw: string): number | null {
 export async function PUT(req: NextRequest, ctx: Ctx) {
   try {
     await ensureDb();
+    const actor = await requireUser(req);
+    if (actor instanceof NextResponse) return actor;
     const id = parseId((await ctx.params).id);
     if (!id) return NextResponse.json({ error: "Buyer persona no válido." }, { status: 400 });
     const body = (await req.json()) as Record<string, unknown>;
@@ -24,7 +27,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
       characteristics: String(body.characteristics ?? ""),
       value_for_client: String(body.value_for_client ?? ""),
       active: body.active !== false,
-    });
+    }, actor.id);
     if (!persona) return NextResponse.json({ error: "Buyer persona no encontrado." }, { status: 404 });
     return NextResponse.json({ persona });
   } catch (e) {
@@ -36,6 +39,10 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
 export async function DELETE(_req: NextRequest, ctx: Ctx) {
   try {
     await ensureDb();
+    const actor = await requireUser(_req);
+    if (actor instanceof NextResponse) return actor;
+    const denied = requireAdmin(actor);
+    if (denied) return denied;
     const id = parseId((await ctx.params).id);
     if (!id) return NextResponse.json({ error: "Buyer persona no válido." }, { status: 400 });
     const ok = await deleteBuyerPersona(id);

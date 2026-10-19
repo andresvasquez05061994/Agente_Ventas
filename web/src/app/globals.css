@@ -76,6 +76,19 @@ body {
   color: var(--iac-text-muted);
 }
 
+.login-card__switch {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent, var(--iac-accent));
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+}
+
 .login-card__error {
   margin-top: 10px;
   font-size: 12px;

@@ -590,5 +590,6 @@ export async function persistPhoneWebhook(body: unknown) {
   return {
     phones_saved: rows.length,
     credits_consumed: extractWebhookCredits(body),
+    apollo_ids: rows.map((row) => row.apollo_id),
   };
 }

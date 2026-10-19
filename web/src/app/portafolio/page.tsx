@@ -204,6 +204,14 @@ function PortafolioContent() {
   const [messageIAError, setMessageIAError] = useState("");
   const [messageIALeadId, setMessageIALeadId] = useState<number | null>(null);
   const [statusSavingId, setStatusSavingId] = useState<number | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((data: { user?: { role?: string } | null }) => setIsAdmin(data.user?.role === "admin"))
+      .catch(() => setIsAdmin(false));
+  }, []);
 
   const pendingSearch = search !== debouncedSearch;
   const showLoading = loading || pendingSearch;
@@ -549,7 +557,7 @@ function PortafolioContent() {
   async function clearPortfolio() {
     if (
       !window.confirm(
-        "¿Eliminar todos los contactos del portafolio? Esta acción no se puede deshacer."
+        "Esto borra los contactos de todos los usuarios, no solo los tuyos. No se puede deshacer."
       )
     ) {
       return;
@@ -642,7 +650,7 @@ function PortafolioContent() {
               >
                 {exporting ? "Exportando…" : `Exportar CSV (${total})`}
               </button>
-              {selected.size > 0 && (
+              {isAdmin && selected.size > 0 && (
                 <button
                   type="button"
                   onClick={deleteSelected}
@@ -656,14 +664,16 @@ function PortafolioContent() {
                       : `Eliminar seleccionados (${selected.size})`}
                 </button>
               )}
-              <button
-                type="button"
-                onClick={clearPortfolio}
-                disabled={clearing || deleting || busy}
-                className="btn-danger"
-              >
-                {clearing ? "Vaciando..." : "Vaciar portafolio"}
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={clearPortfolio}
+                  disabled={clearing || deleting || busy}
+                  className="btn-danger"
+                >
+                  {clearing ? "Vaciando..." : "Vaciar portafolio"}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -748,6 +758,7 @@ function PortafolioContent() {
                 <col style={{ width: "11%" }} />
                 <col style={{ width: 180 }} />
                 <col style={{ width: "10%" }} />
+                {isAdmin ? <col style={{ width: 140 }} /> : null}
                 <col style={{ width: "17%" }} />
                 <col style={{ width: 108 }} />
                 <col style={{ width: 96 }} />
@@ -767,6 +778,7 @@ function PortafolioContent() {
                   <th className="portfolio-table__name">Nombre</th>
                   <th className="portfolio-table__role">Cargo</th>
                   <th className="portfolio-table__company">Empresa</th>
+                  {isAdmin ? <th>Dueño</th> : null}
                   <th className="portfolio-table__email">Email</th>
                   <th className="portfolio-table__phone">Teléfono</th>
                   <th className="portfolio-table__status">Estado</th>
@@ -797,6 +809,7 @@ function PortafolioContent() {
                     <td className="portfolio-table__company" title={l.empresa ?? undefined}>
                       {l.empresa ?? "—"}
                     </td>
+                    {isAdmin ? <td title={l.owner_email ?? undefined}>{l.owner_email ?? "—"}</td> : null}
                     <td className="portfolio-table__email">
                       {l.email ? (
                         <a href={`mailto:${l.email}`} title={l.email}>

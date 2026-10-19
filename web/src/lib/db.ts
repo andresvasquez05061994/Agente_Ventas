@@ -45,20 +45,24 @@ export function ensureDb(): Promise<void> {
 
 export async function initDb() {
   await applyMigrations(getSql());
+  const { ensurePlatform } = await import("./users");
+  await ensurePlatform();
 }
 
-export async function getPortfolioApolloIds(): Promise<Set<string>> {
+export async function getPortfolioApolloIds(ownerId: number): Promise<Set<string>> {
   const sql = getSql();
   const rows = (await sql`
     SELECT apollo_id FROM leads
-    WHERE apollo_id IS NOT NULL AND TRIM(apollo_id) <> ''
+    WHERE owner_id = ${ownerId}
+      AND apollo_id IS NOT NULL AND TRIM(apollo_id) <> ''
   `) as Array<{ apollo_id: string }>;
   return new Set(rows.map((r) => String(r.apollo_id).trim()).filter(Boolean));
 }
 
 export async function searchDistinctCompanies(
   query: string,
-  limit = 6
+  limit = 6,
+  ownerId: number | null = null
 ): Promise<string[]> {
   const sql = getSql();
   const term = query.trim();
@@ -70,6 +74,7 @@ export async function searchDistinctCompanies(
     FROM leads
     WHERE empresa IS NOT NULL
       AND TRIM(empresa) <> ''
+      AND (${ownerId}::int IS NULL OR owner_id = ${ownerId})
       AND empresa ILIKE ${pattern}
     ORDER BY empresa ASC
     LIMIT ${limit}
@@ -80,7 +85,7 @@ export async function searchDistinctCompanies(
     .filter(Boolean);
 }
 
-export async function listPortfolioContacts(): Promise<
+export async function listPortfolioContacts(ownerId: number | null = null): Promise<
   Array<{
     nombre: string;
     cargo: string | null;
@@ -102,6 +107,7 @@ export async function listPortfolioContacts(): Promise<
            lead_status, whatsapp_status, notas, fuente_busqueda
     FROM leads
     WHERE empresa IS NOT NULL AND TRIM(empresa) <> ''
+      AND (${ownerId}::int IS NULL OR owner_id = ${ownerId})
     ORDER BY empresa ASC, nombre ASC
     LIMIT 10000
   `) as Array<{
@@ -126,7 +132,8 @@ export async function getLeads(
     search?: string;
     contact?: string;
   },
-  pagination?: { page?: number; perPage?: number; all?: boolean }
+  pagination?: { page?: number; perPage?: number; all?: boolean },
+  ownerId: number | null = null
 ): Promise<LeadsPage> {
   const sql = getSql();
   const status =
@@ -136,12 +143,16 @@ export async function getLeads(
   const contact =
     filters?.contact && filters.contact !== "Todos" ? filters.contact : null;
 
-  const [allRow] = await sql`SELECT COUNT(*)::int AS total FROM leads`;
+  const [allRow] = await sql`
+    SELECT COUNT(*)::int AS total FROM leads
+    WHERE (${ownerId}::int IS NULL OR owner_id = ${ownerId})
+  `;
   const unfilteredTotal = (allRow as { total: number })?.total ?? 0;
 
   const [countRow] = await sql`
     SELECT COUNT(*)::int AS total FROM leads
-    WHERE (${status}::text IS NULL OR lead_status = ${status})
+    WHERE (${ownerId}::int IS NULL OR owner_id = ${ownerId})
+      AND (${status}::text IS NULL OR lead_status = ${status})
       AND (
         ${pattern}::text IS NULL
         OR nombre ILIKE ${pattern}
@@ -172,8 +183,11 @@ export async function getLeads(
   const offset = (page - 1) * perPage;
 
   const leads = (await sql`
-    SELECT * FROM leads
-    WHERE (${status}::text IS NULL OR lead_status = ${status})
+    SELECT leads.*, users.email AS owner_email
+    FROM leads
+    LEFT JOIN users ON users.id = leads.owner_id
+    WHERE (${ownerId}::int IS NULL OR leads.owner_id = ${ownerId})
+      AND (${status}::text IS NULL OR lead_status = ${status})
       AND (
         ${pattern}::text IS NULL
         OR nombre ILIKE ${pattern}
@@ -186,10 +200,10 @@ export async function getLeads(
         ${contact}::text IS NULL
         OR (${contact} = 'Con teléfono' AND telefono IS NOT NULL AND telefono <> '')
         OR (${contact} = 'Sin teléfono' AND (telefono IS NULL OR telefono = ''))
-        OR (${contact} = 'Con email' AND email IS NOT NULL AND email <> '')
-        OR (${contact} = 'Sin email' AND (email IS NULL OR email = ''))
+        OR (${contact} = 'Con email' AND leads.email IS NOT NULL AND leads.email <> '')
+        OR (${contact} = 'Sin email' AND (leads.email IS NULL OR leads.email = ''))
       )
-    ORDER BY created_at ASC, id ASC
+    ORDER BY leads.created_at ASC, leads.id ASC
     LIMIT ${perPage}
     OFFSET ${offset}
   `) as Lead[];
@@ -208,7 +222,8 @@ export async function saveLeads(
     pais: string | null;
     linkedin_url: string | null;
   }[],
-  fuente: string
+  fuente: string,
+  ownerId: number
 ) {
   const sql = getSql();
   let inserted = 0;
@@ -228,13 +243,13 @@ export async function saveLeads(
     const rows = await sql`
       INSERT INTO leads (
         apollo_id, nombre, cargo, empresa, email, telefono, telefono_e164,
-        pais, linkedin_url, lead_status, fuente_busqueda, created_at, updated_at
+        pais, linkedin_url, lead_status, fuente_busqueda, owner_id, created_at, updated_at
       ) VALUES (
         ${lead.apollo_id}, ${lead.nombre}, ${lead.cargo}, ${lead.empresa},
         ${email}, ${telefono}, ${telefonoE164}, ${lead.pais}, ${lead.linkedin_url},
-        'Nuevo', ${fuente}, NOW(), NOW()
+        'Nuevo', ${fuente}, ${ownerId}, NOW(), NOW()
       )
-      ON CONFLICT (apollo_id) DO UPDATE SET
+      ON CONFLICT (owner_id, apollo_id) DO UPDATE SET
         nombre = EXCLUDED.nombre,
         cargo = EXCLUDED.cargo,
         empresa = EXCLUDED.empresa,
@@ -258,7 +273,7 @@ export async function saveLeads(
   return { inserted, updated, skipped };
 }
 
-export async function getStats() {
+export async function getStats(ownerId: number | null = null) {
   const sql = getSql();
   const [row] = await sql`
     SELECT
@@ -270,6 +285,7 @@ export async function getStats() {
       COUNT(*) FILTER (WHERE telefono IS NOT NULL AND telefono != '')::int AS with_phone,
       COUNT(*) FILTER (WHERE email IS NOT NULL AND email != '')::int AS with_email
     FROM leads
+    WHERE (${ownerId}::int IS NULL OR owner_id = ${ownerId})
   `;
   const r = row as {
     total: number;
@@ -280,7 +296,7 @@ export async function getStats() {
     with_phone: number;
     with_email: number;
   };
-  const conversations = await getConversationStats();
+  const conversations = await getConversationStats(ownerId);
   return {
     total: r?.total ?? 0,
     nuevo: r?.nuevo ?? 0,
@@ -296,37 +312,41 @@ export async function getStats() {
 export async function recordProspeccionCredits(
   credits: number,
   contactos: number,
-  source: "search" | "phone_webhook" = "search"
+  source: "search" | "phone_webhook" = "search",
+  ownerId?: number | null
 ) {
   const sql = getSql();
   await sql`
-    INSERT INTO apollo_prospeccion_credits (credits, contactos_enriquecidos, source)
-    VALUES (${Math.max(0, credits)}, ${Math.max(0, contactos)}, ${source})
+    INSERT INTO apollo_prospeccion_credits (credits, contactos_enriquecidos, source, owner_id)
+    VALUES (${Math.max(0, credits)}, ${Math.max(0, contactos)}, ${source}, ${ownerId ?? null})
   `;
 }
 
-const APOLLO_BUDGET_SETTING = "apollo_monthly_budget";
+function budgetKey(userId: number): string {
+  return `apollo_monthly_budget:u${userId}`;
+}
 
-export async function getStoredApolloMonthlyBudget(): Promise<number | null> {
+export async function getStoredApolloMonthlyBudget(userId: number): Promise<number | null> {
   const sql = getSql();
   const rows = (await sql`
-    SELECT value FROM app_settings WHERE key = ${APOLLO_BUDGET_SETTING}
+    SELECT value FROM app_settings WHERE key = ${budgetKey(userId)}
   `) as Array<{ value: string }>;
   return decodeMonthlyBudget(rows[0]?.value);
 }
 
-export async function setStoredApolloMonthlyBudget(budget: number): Promise<void> {
+export async function setStoredApolloMonthlyBudget(userId: number, budget: number): Promise<void> {
   const sql = getSql();
   const value = encodeMonthlyBudget(budget);
+  const key = budgetKey(userId);
   await sql`
     INSERT INTO app_settings (key, value, updated_at)
-    VALUES (${APOLLO_BUDGET_SETTING}, ${value}, NOW())
+    VALUES (${key}, ${value}, NOW())
     ON CONFLICT (key) DO UPDATE
       SET value = EXCLUDED.value, updated_at = NOW()
   `;
 }
 
-export async function getApolloProspeccionCredits() {
+export async function getApolloProspeccionCredits(ownerId: number | null = null) {
   const sql = getSql();
   const [totals] = await sql`
     SELECT
@@ -337,6 +357,7 @@ export async function getApolloProspeccionCredits() {
       ), 0)::int AS credits_this_month,
       COUNT(*) FILTER (WHERE source = 'search' AND created_at >= date_trunc('month', NOW() AT TIME ZONE 'UTC'))::int AS searches_this_month
     FROM apollo_prospeccion_credits
+    WHERE (${ownerId}::int IS NULL OR owner_id = ${ownerId})
   `;
   const row = totals as {
     total_credits: number;
@@ -352,7 +373,11 @@ export async function getApolloProspeccionCredits() {
   };
 }
 
-export async function updateLeadStatus(id: number, status: LeadStatus): Promise<Lead> {
+export async function updateLeadStatus(
+  id: number,
+  status: LeadStatus,
+  ownerId: number | null = null
+): Promise<Lead> {
   if (!isLeadStatus(status)) {
     throw new Error(`Estado de lead no válido: ${String(status)}`);
   }
@@ -367,6 +392,7 @@ export async function updateLeadStatus(id: number, status: LeadStatus): Promise<
     UPDATE leads
     SET lead_status = ${status}, updated_at = NOW()
     WHERE id = ${leadId}
+      AND (${ownerId}::int IS NULL OR owner_id = ${ownerId})
     RETURNING *
   `) as Lead[];
 
@@ -377,7 +403,11 @@ export async function updateLeadStatus(id: number, status: LeadStatus): Promise<
   return lead;
 }
 
-export async function updateLeadNotes(id: number, notas: string): Promise<Lead> {
+export async function updateLeadNotes(
+  id: number,
+  notas: string,
+  ownerId: number | null = null
+): Promise<Lead> {
   const sql = getSql();
   const leadId = Number(id);
   if (!Number.isFinite(leadId) || leadId <= 0) {
@@ -387,6 +417,7 @@ export async function updateLeadNotes(id: number, notas: string): Promise<Lead> 
   const rows = (await sql`
     UPDATE leads SET notas = ${notas}, updated_at = NOW()
     WHERE id = ${leadId}
+      AND (${ownerId}::int IS NULL OR owner_id = ${ownerId})
     RETURNING *
   `) as Lead[];
 
@@ -502,7 +533,7 @@ export async function getPhoneCache(apolloIds: string[]): Promise<Map<string, st
   return map;
 }
 
-export async function getConversationStats(): Promise<ConversationStats> {
+export async function getConversationStats(ownerId: number | null = null): Promise<ConversationStats> {
   const sql = getSql();
   const [row] = await sql`
     SELECT
@@ -527,6 +558,7 @@ export async function getConversationStats(): Promise<ConversationStats> {
           )
       )::int AS awaiting_reply
     FROM leads
+    WHERE (${ownerId}::int IS NULL OR owner_id = ${ownerId})
   `;
   const r = row as ConversationStats;
   return {
@@ -541,7 +573,8 @@ export async function getConversationStats(): Promise<ConversationStats> {
 
 export async function getConversationThreads(
   filter: string = "all",
-  search?: string
+  search?: string,
+  ownerId: number | null = null
 ): Promise<ConversationThread[]> {
   const sql = getSql();
   const term = search?.trim() || null;
@@ -579,6 +612,7 @@ export async function getConversationThreads(
       latest.content IS NOT NULL
       OR l.whatsapp_status <> 'No iniciado'
     )
+    AND (${ownerId}::int IS NULL OR l.owner_id = ${ownerId})
     AND (
       ${pattern}::text IS NULL
       OR l.nombre ILIKE ${pattern}
@@ -612,10 +646,25 @@ export async function getConversationThreads(
   return rows;
 }
 
-export async function getLeadById(id: number): Promise<Lead | null> {
+export async function getLeadById(id: number, ownerId: number | null = null): Promise<Lead | null> {
   const sql = getSql();
-  const rows = (await sql`SELECT * FROM leads WHERE id = ${id}`) as Lead[];
+  const rows = (await sql`
+    SELECT * FROM leads
+    WHERE id = ${id}
+      AND (${ownerId}::int IS NULL OR owner_id = ${ownerId})
+  `) as Lead[];
   return rows[0] ?? null;
+}
+
+export async function latestOwnerForApollo(apolloId: string): Promise<number | null> {
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT owner_id FROM leads
+    WHERE apollo_id = ${apolloId} AND owner_id IS NOT NULL
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `) as Array<{ owner_id: number }>;
+  return rows[0]?.owner_id ?? null;
 }
 
 export async function getLeadByPhone(telefono: string): Promise<Lead | null> {

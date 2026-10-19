@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { dataOwnerId, requireUser } from "@/lib/current-user";
 import { ensureDb, getLeadById, getMessagesForLead } from "@/lib/db";
 
 export async function GET(
@@ -7,6 +8,8 @@ export async function GET(
 ) {
   try {
     await ensureDb();
+    const actor = await requireUser(_req);
+    if (actor instanceof NextResponse) return actor;
     const { id } = await params;
     const leadId = Number(id);
     if (!Number.isFinite(leadId)) {
@@ -14,7 +17,7 @@ export async function GET(
     }
 
     const [lead, messages] = await Promise.all([
-      getLeadById(leadId),
+      getLeadById(leadId, dataOwnerId(actor)),
       getMessagesForLead(leadId),
     ]);
 
