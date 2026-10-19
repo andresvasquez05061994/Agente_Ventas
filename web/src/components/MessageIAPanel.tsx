@@ -147,7 +147,7 @@ export function MessageIAPanel({
       >
         <header className="cold-call-modal__header">
           <div className="cold-call-modal__header-text">
-            <p className="cold-call-modal__eyebrow">Mensaje IA · prospección comercial</p>
+            <p className="cold-call-modal__eyebrow">Mensaje IA</p>
             <h2 id="message-ia-title" className="cold-call-modal__title">
               {lead.nombre}
             </h2>
@@ -169,7 +169,7 @@ export function MessageIAPanel({
             onClick={() => onChannelChange("call")}
             disabled={loading}
           >
-            Llamada en frío
+            Llamada
           </button>
           <button
             type="button"
@@ -179,7 +179,7 @@ export function MessageIAPanel({
             onClick={() => onChannelChange("email")}
             disabled={loading}
           >
-            Correo electrónico en frío
+            Correo
           </button>
         </div>
 

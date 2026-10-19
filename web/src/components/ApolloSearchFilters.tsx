@@ -14,6 +14,7 @@ import {
   isValidJobTitle,
   sanitizeJobTitle,
 } from "@/lib/apollo-filters";
+import { HelpTip } from "@/components/HelpTip";
 import { FieldLabel, SectionLabel, ActionBanner } from "@/components/ui";
 import { CompanyAutocomplete } from "@/components/CompanyAutocomplete";
 import { ExcelCompanySearch } from "@/components/ExcelCompanySearch";
@@ -141,12 +142,14 @@ export function ApolloSearchFilters({
         onSearch={onSearchCompanies}
       />
 
-      <SectionLabel>{excelMode ? "Filtros para las empresas del archivo" : "Filtros Apollo"}</SectionLabel>
-      {!excelMode && (
-        <p className="text-caption mb-3">
-          Solo listas validadas. Cada contacto incluye email y teléfono enriquecidos.
-        </p>
-      )}
+      <div className="field-label-row">
+        <SectionLabel>{excelMode ? "Filtros del archivo" : "Filtros Apollo"}</SectionLabel>
+        <HelpTip label="Filtros">
+          {excelMode
+            ? "Con un Excel cargado, la búsqueda general queda en pausa. Quita el archivo para volver a buscar por filtros."
+            : "Cada resultado trae email y teléfono. Apollo cobra esos créditos en tu cuenta."}
+        </HelpTip>
+      </div>
 
       <FieldLabel>{excelMode ? "País de las empresas" : "País"}</FieldLabel>
       <select
@@ -171,7 +174,14 @@ export function ApolloSearchFilters({
       )}
 
       <div className="apollo-titles-header">
-        <FieldLabel className="!mb-0">Cargos</FieldLabel>
+        <div className="field-label-row">
+          <FieldLabel className="!mb-0">Cargos</FieldLabel>
+          <HelpTip label="Cargos">
+            {excelMode
+              ? "Todos trae cualquier cargo que Apollo tenga en la empresa. Si marcas cargos, solo trae esos."
+              : "Marca cargos de la lista o agrega uno libre. En inglés suele encontrar más en Apollo."}
+          </HelpTip>
+        </div>
         <div className="apollo-titles-header__actions">
           <button
             type="button"
@@ -267,16 +277,9 @@ export function ApolloSearchFilters({
         </div>
       )}
 
-      <p className="text-micro apollo-titles-hint">
-        {excelMode
-          ? allPresetsSelected
-            ? "Todos: se traen todos los cargos que Apollo tenga en cada empresa, también los que no están en esta lista."
-            : "Solo se traen personas con los cargos marcados. Pulsa Todos para traer cualquier cargo de la empresa."
-          : "Selecciona de la lista o agrega cargos libres (ideal en inglés para Apollo)."}
-        {titles.length > 0 && !(excelMode && allPresetsSelected) && (
-          <span className="apollo-titles-count"> · {titles.length} seleccionados</span>
-        )}
-      </p>
+      {titles.length > 0 && !(excelMode && allPresetsSelected) ? (
+        <p className="text-micro apollo-titles-hint">{titles.length} cargos seleccionados</p>
+      ) : null}
 
       {!excelMode && (
         <>
@@ -325,7 +328,14 @@ export function ApolloSearchFilters({
         </>
       )}
 
-      <SectionLabel>{excelMode ? "Contactos por empresa" : "Resultados por lote"}</SectionLabel>
+      <div className="field-label-row">
+        <SectionLabel>{excelMode ? "Contactos por empresa" : "Resultados por lote"}</SectionLabel>
+        {!excelMode ? (
+          <HelpTip label="Resultados por lote">
+            Máximo 25 por lote. Si hay más coincidencias, carga el siguiente lote. Cada lote nuevo gasta créditos.
+          </HelpTip>
+        ) : null}
+      </div>
       <select
         className={`input-field ${excelMode ? "mb-4" : "mb-2"}`}
         value={perPage}
@@ -337,27 +347,19 @@ export function ApolloSearchFilters({
           </option>
         ))}
       </select>
-      {!excelMode && (
-        <p className="text-micro mb-4">
-          Máximo 25 por lote (límite de Apollo). Si hay más coincidencias verás «Cargar siguiente
-          lote»; cada lote gasta créditos nuevos.
-        </p>
-      )}
-
       {excelMode ? (
-        <p className="text-micro">
-          La búsqueda general está pausada mientras haya un archivo cargado. Usa el botón del panel
-          de Excel; para volver a la búsqueda general, quita el archivo.
-        </p>
+        <p className="text-micro">Búsqueda general en pausa mientras el Excel esté cargado.</p>
       ) : (
+        <div className="filter-action">
         <button
           type="button"
           onClick={onSearch}
           disabled={loading}
           className="btn-primary w-full disabled:opacity-60"
         >
-          {loading ? "Buscando y enriqueciendo..." : "Ejecutar búsqueda"}
+          {loading ? "Buscando…" : "Ejecutar búsqueda"}
         </button>
+        </div>
       )}
     </>
   );

@@ -2,6 +2,7 @@
 
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { HelpTip } from "@/components/HelpTip";
 import { parseApiResponse } from "@/lib/parse-api-response";
 
 function LoginForm() {
@@ -76,12 +77,14 @@ function LoginForm() {
     <main className="login-page">
       <form className="login-card" onSubmit={(event) => void onSubmit(event)}>
         <p className="login-card__kicker">IAC · Agente Ventas</p>
-        <h1 className="login-card__title">{mode === "login" ? "Entrar" : "Crear cuenta"}</h1>
-        <p className="login-card__hint">
-          {mode === "login"
-            ? "Usa el correo y la contraseña de tu cuenta. Si acabas de registrarte, espera la aprobación."
-            : "La cuenta queda pendiente hasta que el administrador la apruebe."}
-        </p>
+        <div className="page-heading">
+          <h1 className="login-card__title">{mode === "login" ? "Entrar" : "Crear cuenta"}</h1>
+          <HelpTip label={mode === "login" ? "Cómo entrar" : "Cómo crear la cuenta"}>
+            {mode === "login"
+              ? "Usa el correo y la contraseña de tu cuenta. Si acabas de registrarte, podrás entrar cuando el administrador apruebe la solicitud."
+              : "La cuenta queda pendiente hasta que el administrador la apruebe. La contraseña necesita al menos 8 caracteres."}
+          </HelpTip>
+        </div>
         <label className="field-label" htmlFor="login-email">
           Correo
         </label>
@@ -107,7 +110,6 @@ function LoginForm() {
           onChange={(e) => setPassword(e.target.value)}
           required
         />
-        {mode === "register" ? <p className="login-card__hint">Mínimo 8 caracteres.</p> : null}
         {notice ? <p className="login-card__hint">{notice}</p> : null}
         {error ? <p className="login-card__error">{error}</p> : null}
         <button type="submit" className="btn-primary mt-4 w-full" disabled={busy || !canSubmit}>

@@ -16,6 +16,7 @@ import {
 } from "@/lib/whatsapp";
 import { useConversationPoll } from "@/hooks/use-conversation-poll";
 import { useDebounce } from "@/hooks/use-debounce";
+import { PageHeading } from "@/components/HelpTip";
 import { KpiCard, KpiGrid } from "@/components/ui";
 
 function WhatsAppIcon({ className }: { className?: string }) {
@@ -124,10 +125,10 @@ export function ConversationConsole() {
     <div className="conv-console">
       <div className="conv-console__header">
         <div>
-          <h1 className="page-title">Conversaciones</h1>
-          <p className="text-caption mt-1">
-            Centro de control WhatsApp — bandeja unificada con actualización automática cada 4 s.
-          </p>
+          <PageHeading
+            title="Conversaciones"
+            help="Hilos de WhatsApp de tus contactos. La bandeja se actualiza sola. Un contacto aparece aquí cuando hay un mensaje enviado o recibido."
+          />
         </div>
         <LiveDot />
       </div>
@@ -185,10 +186,7 @@ export function ConversationConsole() {
               <div className="conv-empty-inbox">
                 <WhatsAppIcon className="h-10 w-10 text-[#25D366] opacity-60" />
                 <p className="text-body-strong mt-3">Sin conversaciones aún</p>
-                <p className="text-caption mt-1 px-4 text-center">
-                  Aparecerán aquí cuando el agente envíe o reciba mensajes por WhatsApp. Aprueba
-                  leads en Portafolio para iniciar el contacto.
-                </p>
+                <p className="text-caption mt-1 px-4 text-center">Aún no hay mensajes.</p>
               </div>
             ) : (
               threads.map((t) => {
@@ -240,10 +238,7 @@ export function ConversationConsole() {
             <div className="conv-thread__placeholder">
               <WhatsAppIcon className="h-12 w-12 text-[#25D366] opacity-40" />
               <p className="text-body-strong mt-4">Selecciona una conversación</p>
-              <p className="text-caption mt-1 max-w-sm text-center">
-                El hilo de mensajes y el contexto del lead aparecerán aquí, como en un panel de
-                Service Cloud.
-              </p>
+              <p className="text-caption mt-1 max-w-sm text-center">Elige un contacto de la lista.</p>
             </div>
           ) : (
             <>

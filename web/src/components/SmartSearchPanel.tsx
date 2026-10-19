@@ -136,7 +136,7 @@ export function SmartSearchPanel({ disabled, onApply }: SmartSearchPanelProps) {
         >
           {loading ? "Interpretando con IA…" : "Interpretar y buscar"}
         </button>
-        <p className="text-micro smart-search-hint">Enter para buscar · Shift+Enter para nueva línea</p>
+        <p className="text-micro smart-search-hint">Enter busca · Shift+Enter baja de línea</p>
       </div>
 
       {(panelFeedback || micError) && (

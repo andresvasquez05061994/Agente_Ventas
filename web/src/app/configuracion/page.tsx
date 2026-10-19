@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { ActionBanner, FeedbackAnchor, FieldLabel, PageSubtitle, PageTitle } from "@/components/ui";
+import { PageHeading } from "@/components/HelpTip";
+import { ActionBanner, FeedbackAnchor, FieldLabel } from "@/components/ui";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { DEFAULT_APOLLO_MONTHLY_BUDGET } from "@/lib/credit-policy";
 import { parseApiResponse } from "@/lib/parse-api-response";
@@ -116,10 +117,10 @@ export default function ConfiguracionPage() {
   return (
     <main className="app-content flex-1 py-6 lg:py-8">
       <header className="page-header">
-        <PageTitle>Configuración</PageTitle>
-        <PageSubtitle>
-          Tope mensual de créditos Apollo de tu cuenta. El cambio aplica en la siguiente búsqueda y no afecta a los demás usuarios.
-        </PageSubtitle>
+        <PageHeading
+          title="Configuración"
+          help={`Tope de créditos Apollo de tu cuenta. ${SOURCE_HINT[budget?.budget_source ?? "predeterminado"]} El ajuste no afecta a los demás usuarios. El consumo vuelve a cero con el mes, y los créditos reales se compran en Apollo.io.`}
+        />
       </header>
 
       {feedback && (
@@ -143,7 +144,6 @@ export default function ConfiguracionPage() {
         <div className="settings-panel mt-6">
           <p className="section-label">Apollo</p>
           <h2 className="section-block__title">Uso del mes</h2>
-          <p className="section-block__desc">{SOURCE_HINT[budget.budget_source]}</p>
 
           <div
             className="credit-meter"
@@ -194,10 +194,6 @@ export default function ConfiguracionPage() {
                 {saving ? "Guardando..." : "Guardar tope"}
               </button>
             </div>
-            <p className="text-micro">
-              El número vale solo este mes. El consumo también vuelve a cero al empezar el mes, y los
-              créditos reales se siguen comprando en Apollo.io.
-            </p>
           </form>
         </div>
       )}

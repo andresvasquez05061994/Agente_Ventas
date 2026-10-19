@@ -9,6 +9,7 @@ import { ApolloSearchFilters } from "@/components/ApolloSearchFilters";
 import { MAX_EXCEL_COMPANIES, type ExcelCompanyQueue } from "@/lib/excel-companies";
 import type { CompanyContactsResult } from "@/lib/apollo-company-contacts";
 import { SmartSearchPanel } from "@/components/SmartSearchPanel";
+import { PageHeading } from "@/components/HelpTip";
 import { ActionBanner, FeedbackAnchor } from "@/components/ui";
 import { useProspeccionSession } from "@/contexts/prospeccion-session";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
@@ -495,10 +496,10 @@ export default function ProspeccionPage() {
 
       <main className="min-w-0 flex-1 p-5 lg:p-6">
         <div className="page-header flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="page-title">Prospección</h1>
-            <p className="text-micro mt-1">Motor de búsqueda Apollo + IA</p>
-          </div>
+          <PageHeading
+            title="Prospección"
+            help="Busca en Apollo por país, empresa y cargo, dicta la búsqueda o carga un Excel de empresas. Solo se muestran contactos con email y teléfono. Guardar no vuelve a cobrar: Apollo cobra al revelar esos datos. Cada lote nuevo gasta créditos de tu cuenta."
+          />
           {meta?.credits_consumed != null && status !== "loading" && (
             <span className="ui-badge ui-badge--accent">
               ~{meta.credits_consumed} créditos usados
@@ -537,11 +538,8 @@ export default function ProspeccionPage() {
         {status === "idle" && !hasResults && !feedback && (
           <div className="empty-state mt-6">
             <Search className="empty-state__icon" size={48} strokeWidth={1.5} aria-hidden />
-            <p className="empty-state__title">Configura tu búsqueda</p>
-            <p className="empty-state__desc">
-              Describe tu prospecto ideal, usa voz, ajusta filtros o carga un Excel con empresas.
-              Solo verás contactos con email y teléfono confirmados.
-            </p>
+            <p className="empty-state__title">Sin resultados todavía</p>
+            <p className="empty-state__desc">Ajusta los filtros y ejecuta la búsqueda.</p>
           </div>
         )}
 
@@ -568,11 +566,23 @@ export default function ProspeccionPage() {
                 Seleccionar todos
               </button>
             </div>
-            <p className="text-micro mt-2">
-              {excelMode
-                ? "Los contactos nuevos no se marcan solos. Elige quién entra al portafolio o usa «Seleccionar todos»."
-                : "Apollo cobra créditos al revelar email y teléfono. Este lote muestra solo contactos ya completos; el resto de coincidencias no se cobra hasta que pidas otro lote."}
-            </p>
+            <div className="prospect-savebar">
+              <span className="text-caption">
+                {selected.size > 0 ? `${selected.size} listos para guardar` : "Marca los contactos que entran al portafolio"}
+              </span>
+              <button
+                type="button"
+                onClick={() => void save()}
+                disabled={busy || selected.size === 0}
+                className="btn-primary"
+              >
+                {saving
+                  ? "Guardando…"
+                  : selected.size > 0
+                    ? `Guardar (${selected.size})`
+                    : "Guardar"}
+              </button>
+            </div>
             <ul className="mt-4 flex flex-col gap-3">
               {results.map((r: ApolloPerson) => (
                 <li key={r.apollo_id} className="prospect-card">
@@ -622,13 +632,9 @@ export default function ProspeccionPage() {
             </ul>
             {!excelMode && Boolean(meta?.has_more && meta.next_page) && (
               <div className="prospect-next-lote mt-5">
-                <p className="text-micro">
-                  Hay más perfiles en Apollo que coinciden. El siguiente lote parte de la página{" "}
-                  {meta?.next_page} y gastará créditos nuevos solo en esos contactos.
-                </p>
                 <button
                   type="button"
-                  className="btn-secondary mt-2"
+                  className="btn-secondary"
                   disabled={busy}
                   onClick={() => void search({ page: meta?.next_page ?? undefined, append: true })}
                 >
@@ -636,18 +642,6 @@ export default function ProspeccionPage() {
                 </button>
               </div>
             )}
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={busy || selected.size === 0}
-              className="btn-primary mt-6 w-full sm:w-auto"
-            >
-              {saving
-                ? "Guardando en portafolio…"
-                : selected.size > 0
-                  ? `Guardar en portafolio (${selected.size})`
-                  : "Guardar en portafolio"}
-            </button>
           </>
         )}
       </main>

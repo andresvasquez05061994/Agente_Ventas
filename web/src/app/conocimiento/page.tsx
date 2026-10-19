@@ -2,12 +2,11 @@
 
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { ChevronDown, FileSpreadsheet, FileText, Trash2, Upload } from "lucide-react";
+import { HelpTip, PageHeading } from "@/components/HelpTip";
 import {
   ActionBanner,
   FeedbackAnchor,
   FieldLabel,
-  PageSubtitle,
-  PageTitle,
 } from "@/components/ui";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { parseApiResponse } from "@/lib/parse-api-response";
@@ -75,8 +74,8 @@ function KnowledgeFold({
       <summary className="knowledge-fold__summary">
         <span className="knowledge-fold__text">
           <span className="knowledge-card__title">{title}</span>
-          <span className="text-micro">{hint}</span>
         </span>
+        <HelpTip label={title}>{hint}</HelpTip>
         {meta ? <span className="knowledge-fold__meta">{meta}</span> : null}
         <ChevronDown className="knowledge-fold__chevron" size={16} strokeWidth={1.75} aria-hidden />
       </summary>
@@ -318,11 +317,10 @@ export default function ConocimientoPage() {
     <main className="app-content flex-1 py-6 lg:py-8">
       <header className="page-header">
         <div>
-          <PageTitle>Conocimiento</PageTitle>
-          <PageSubtitle>
-            El portafolio alimenta el Mensaje IA. Despliega el perfil comercial o un buyer persona
-            solo cuando quieras configurarlos.
-          </PageSubtitle>
+          <PageHeading
+            title="Conocimiento"
+            help="Lo que el Mensaje IA usa de tu cuenta: documentos, perfil comercial y buyer personas. No se comparte con otros usuarios."
+          />
         </div>
       </header>
 
@@ -343,11 +341,12 @@ export default function ConocimientoPage() {
           <section className="knowledge-card knowledge-card--docs">
             <div className="knowledge-docs-head">
               <div>
-                <p className="knowledge-card__title">Documentos del portafolio</p>
-                <p className="knowledge-docs-head__lead">
-                  Base del Mensaje IA. El agente usa el texto y los servicios extraídos según cargo,
-                  sector e investigación del cliente.
-                </p>
+                <div className="page-heading">
+                  <p className="knowledge-card__title">Documentos del portafolio</p>
+                  <HelpTip label="Documentos del portafolio">
+                    El Mensaje IA usa el texto y los servicios de estos archivos según el cargo, el sector y la empresa del contacto.
+                  </HelpTip>
+                </div>
               </div>
               <ul className="knowledge-kpis" aria-label="Resumen del portafolio">
                 <li>
@@ -372,7 +371,7 @@ export default function ConocimientoPage() {
               <Upload size={20} strokeWidth={1.5} aria-hidden />
               <span>
                 {uploading ? "Leyendo y estructurando…" : "Cargar PDF, Word o Excel"}
-                <small>Máx. 4 MB. El contenido pasa a estar disponible para el Mensaje IA.</small>
+                <small>Máx. 4 MB</small>
               </span>
             </label>
             <input
@@ -504,7 +503,6 @@ export default function ConocimientoPage() {
                 <summary className="persona-card__summary">
                   <span className="persona-card__text">
                     <span className="persona-card__name">Nuevo buyer persona</span>
-                    <span className="text-micro">Completa cargo, sector, características y qué genera valor.</span>
                   </span>
                   <ChevronDown className="knowledge-fold__chevron" size={16} strokeWidth={1.75} aria-hidden />
                 </summary>

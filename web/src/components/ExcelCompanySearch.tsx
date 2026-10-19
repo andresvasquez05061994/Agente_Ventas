@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import { FileSpreadsheet, X } from "lucide-react";
+import { HelpTip } from "@/components/HelpTip";
 import { ActionBanner } from "@/components/ui";
 import {
   createExcelQueue,
@@ -84,10 +85,12 @@ export function ExcelCompanySearch({
   if (!queue) {
     return (
       <div className="excel-card">
-        <p className="excel-card__title">Empresas desde Excel</p>
-        <p className="text-micro mb-2">
-          Busca contactos solo dentro de las empresas de tu archivo (columna Empresa, Compañía o Company).
-        </p>
+        <div className="page-heading mb-2">
+          <p className="excel-card__title">Empresas desde Excel</p>
+          <HelpTip label="Empresas desde Excel">
+            Busca contactos solo en las empresas del archivo. La columna debe llamarse Empresa, Compañía o Company.
+          </HelpTip>
+        </div>
         <label
           htmlFor={inputId}
           className={`btn-secondary w-full cursor-pointer ${disabled || reading ? "pointer-events-none opacity-50" : ""}`}
@@ -128,7 +131,12 @@ export function ExcelCompanySearch({
     <div className="excel-card">
       <div className="excel-card__head">
         <div className="min-w-0">
-          <p className="excel-card__title">Empresas desde Excel</p>
+          <div className="page-heading">
+            <p className="excel-card__title">Empresas desde Excel</p>
+            <HelpTip label="Empresas desde Excel">
+              Revisa el archivo por lotes. Quitar el archivo vuelve a la búsqueda general.
+            </HelpTip>
+          </div>
           <p className="excel-card__file" title={queue.fileLabel}>
             {queue.fileLabel}
           </p>

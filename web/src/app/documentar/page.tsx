@@ -2,7 +2,8 @@
 
 import { useState, type FormEvent } from "react";
 import { Download, FileSpreadsheet } from "lucide-react";
-import { ActionBanner, FeedbackAnchor, PageSubtitle, PageTitle } from "@/components/ui";
+import { PageHeading } from "@/components/HelpTip";
+import { ActionBanner, FeedbackAnchor } from "@/components/ui";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { parseApiResponse } from "@/lib/parse-api-response";
 
@@ -82,11 +83,10 @@ export default function DocumentarPage() {
   return (
     <main className="app-content flex-1 py-6 lg:py-8">
       <header className="page-header">
-        <PageTitle>Documentar Excel</PageTitle>
-        <PageSubtitle>
-          Sube el archivo con las empresas y las columnas a entregar. Se completan desde el
-          portafolio, sin gastar créditos de Apollo.
-        </PageSubtitle>
+        <PageHeading
+          title="Documentar Excel"
+          help="Completa las columnas del archivo con contactos del portafolio. No gasta créditos de Apollo. Una empresa coincide si un nombre contiene al otro. Solo entran contactos con móvil y correo. Si hay varios, cada uno queda en su fila. Si la empresa no está, las columnas pedidas dicen «empresa no existente en el portafolio»."
+        />
       </header>
 
       {feedback && (
@@ -103,12 +103,6 @@ export default function DocumentarPage() {
       <form className="settings-panel mt-6" onSubmit={(event) => void generate(event)}>
         <p className="section-label">Archivo</p>
         <h2 className="section-block__title">Empresas a documentar</h2>
-        <p className="section-block__desc">
-          Una empresa cuenta si su nombre contiene al del portafolio, o al revés. Solo se escriben
-          contactos que ya tienen móvil y correo. Si hay varios, cada uno sale en su propia fila con
-          el mismo nombre de empresa del Excel. Si no está en el portafolio, las columnas pedidas
-          quedan como «empresa no existente en el portafolio».
-        </p>
         <div className="document-upload">
           <input
             id="excel-file"
@@ -143,8 +137,8 @@ export default function DocumentarPage() {
               <p className="kpi-card__sub">{stats.contactsWritten.toLocaleString("es-CO")} filas</p>
             </article>
             <article className="kpi-card kpi-card--amber">
-              <p className="kpi-card__label" title="En portafolio, sin móvil y correo">
-                En portafolio, sin móvil y correo
+              <p className="kpi-card__label" title="En el portafolio, sin móvil y correo">
+                Sin contacto completo
               </p>
               <p className="kpi-card__value">{stats.withoutCompleteContact.toLocaleString("es-CO")}</p>
             </article>

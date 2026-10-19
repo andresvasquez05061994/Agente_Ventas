@@ -101,6 +101,106 @@ body {
   max-width: 42rem;
 }
 
+.page-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.page-heading .page-title,
+.page-heading .section-block__title,
+.page-heading .login-card__title,
+.page-heading .excel-card__title,
+.page-heading .knowledge-card__title {
+  margin: 0;
+}
+
+.field-label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.field-label-row .field-label,
+.field-label-row .section-label {
+  margin-bottom: 0;
+}
+
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.help-tip__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.help-tip__btn:hover,
+.help-tip__btn[aria-expanded="true"] {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.help-tip__pop {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(280px, 72vw);
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.12);
+}
+
+.help-tip__pop--above {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.prospect-savebar,
+.filter-action {
+  position: sticky;
+  z-index: 5;
+}
+
+.prospect-savebar {
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-secondary);
+}
+
+.filter-action {
+  bottom: 0;
+  margin-top: 8px;
+  padding: 10px 0 2px;
+  background: var(--color-bg-secondary);
+}
+
 .section-label {
   margin-bottom: 8px;
   font-size: 11px;

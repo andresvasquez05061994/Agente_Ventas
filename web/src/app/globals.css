@@ -70,6 +70,10 @@ body {
   color: var(--iac-text);
 }
 
+.page-heading .login-card__title {
+  margin: 0 0 8px;
+}
+
 .login-card__hint {
   margin-bottom: 16px;
   font-size: 12px;

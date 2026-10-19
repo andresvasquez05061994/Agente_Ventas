@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ActionBanner, FeedbackAnchor, PageSubtitle, PageTitle } from "@/components/ui";
+import { PageHeading } from "@/components/HelpTip";
+import { ActionBanner, FeedbackAnchor } from "@/components/ui";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { parseApiResponse } from "@/lib/parse-api-response";
 
@@ -99,11 +100,10 @@ export default function UsuariosPage() {
   return (
     <main className="app-content flex-1 py-6 lg:py-8">
       <header className="page-header">
-        <PageTitle>Usuarios</PageTitle>
-        <PageSubtitle>
-          Aprueba solicitudes, da de baja el acceso y revisa el portafolio y los créditos Apollo de cada cuenta.
-          Cada usuario aprobado tiene su propio tope de 2.500 créditos al mes.
-        </PageSubtitle>
+        <PageHeading
+          title="Usuarios"
+          help="Aprueba o rechaza solicitudes y da de baja el acceso. Los datos se conservan. Cada usuario aprobado tiene su propio tope de 2.500 créditos Apollo al mes. Aquí ves sus contactos y el consumo del mes."
+        />
       </header>
 
       {feedback && (

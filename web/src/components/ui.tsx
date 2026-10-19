@@ -1,3 +1,5 @@
+import { HelpTip } from "@/components/HelpTip";
+
 export function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="section-label">{children}</p>;
 }
@@ -155,8 +157,10 @@ export function SectionBlock({
   return (
     <section className="section-block">
       <SectionLabel>{label}</SectionLabel>
-      <h2 className="section-block__title">{title}</h2>
-      <p className="section-block__desc">{description}</p>
+      <div className="page-heading">
+        <h2 className="section-block__title">{title}</h2>
+        <HelpTip label={`Ayuda de ${title}`}>{description}</HelpTip>
+      </div>
       {children}
     </section>
   );

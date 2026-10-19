@@ -9,10 +9,9 @@ import {
   FeedbackAnchor,
   KpiCard,
   KpiGrid,
-  PageSubtitle,
-  PageTitle,
   SectionBlock,
 } from "@/components/ui";
+import { PageHeading } from "@/components/HelpTip";
 
 type Stats = {
   total: number;
@@ -66,10 +65,10 @@ export default function ResumenPage() {
   return (
     <main className="app-content flex-1 py-6 lg:py-8">
       <header className="page-header">
-        <PageTitle>Resumen</PageTitle>
-        <PageSubtitle>
-          Actividad comercial del portafolio y consumo de créditos Apollo.
-        </PageSubtitle>
+        <PageHeading
+          title="Resumen"
+          help="Actividad de tu portafolio y créditos Apollo de este mes. Cada cuenta tiene su propio tope, que vuelve a 2.500 al empezar el mes."
+        />
       </header>
 
       {error && (

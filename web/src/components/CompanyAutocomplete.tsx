@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import type { CompanySuggestion } from "@/lib/apollo-organizations";
+import { HelpTip } from "@/components/HelpTip";
 import { FieldLabel } from "@/components/ui";
 import { useDebounce } from "@/hooks/use-debounce";
 
@@ -103,7 +104,10 @@ export function CompanyAutocomplete({
 
   return (
     <div ref={rootRef} className="company-autocomplete mb-3">
-      <FieldLabel htmlFor={`${listId}-input`}>Empresa</FieldLabel>
+      <div className="field-label-row">
+        <FieldLabel htmlFor={`${listId}-input`}>Empresa</FieldLabel>
+        <HelpTip label="Empresa">Sugerencias de Apollo y de tu portafolio. Escribe al menos 2 letras.</HelpTip>
+      </div>
       <input
         id={`${listId}-input`}
         type="text"
@@ -131,10 +135,6 @@ export function CompanyAutocomplete({
         aria-autocomplete="list"
         autoComplete="off"
       />
-      <p className="text-micro company-autocomplete__hint">
-        Sugerencias desde Apollo y tu portafolio (mín. 2 letras).
-      </p>
-
       {showList && (
         <ul
           id={`${listId}-listbox`}

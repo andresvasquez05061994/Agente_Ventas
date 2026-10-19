@@ -3,7 +3,8 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Lead, LeadStatus } from "@/lib/types";
-import { EmptyState, FieldLabel, PageSubtitle, SectionLabel, ActionBanner, FeedbackAnchor } from "@/components/ui";
+import { PageHeading } from "@/components/HelpTip";
+import { EmptyState, FieldLabel, SectionLabel, ActionBanner, FeedbackAnchor } from "@/components/ui";
 import { MessageIAPanel } from "@/components/MessageIAPanel";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { useDebounce } from "@/hooks/use-debounce";
@@ -639,7 +640,15 @@ function PortafolioContent() {
 
       <main className="min-w-0 flex-1 p-5 lg:p-7">
         <div className="page-header flex flex-wrap items-start justify-between gap-3">
-          <h1 className="page-title">Portafolio</h1>
+          <div>
+            <PageHeading
+              title="Portafolio"
+              help="Contactos guardados con email y teléfono. El orden es del más antiguo al más reciente: los nuevos quedan al final. Selecciona filas para cambiar el estado. Solo el administrador puede borrar."
+            />
+            {total > 0 ? (
+              <p className="text-micro mt-1">{total.toLocaleString("es-CO")} contactos</p>
+            ) : null}
+          </div>
           {total > 0 && (
             <div className="flex flex-wrap gap-2">
               <button
@@ -677,14 +686,6 @@ function PortafolioContent() {
             </div>
           )}
         </div>
-        <PageSubtitle>
-          {total > 0
-            ? `${total.toLocaleString("es-CO")} contacto(s) guardados · ${PER_PAGE} por página. Orden: del más antiguo al más reciente (los nuevos al final).`
-            : filtersActive
-              ? "Ningún contacto coincide con los filtros actuales."
-              : "Cada contacto guardado incluye email y teléfono verificados en la prospección."}
-        </PageSubtitle>
-
         <div className="mt-4 lg:hidden">
           <PortfolioFilters
             status={status}
