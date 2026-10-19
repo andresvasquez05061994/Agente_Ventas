@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
     const result = await getLeads(
       {
         status: searchParams.get("status") ?? undefined,
+        resultado: searchParams.get("resultado") ?? undefined,
         search: searchParams.get("search") ?? undefined,
         contact: searchParams.get("contact") ?? undefined,
       },

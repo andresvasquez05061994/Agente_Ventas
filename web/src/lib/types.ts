@@ -1,18 +1,31 @@
-export type LeadStatus =
-  | "Nuevo"
-  | "En revisión"
-  | "Aprobado para contacto"
-  | "Descartado";
+export type LeadStatus = "Nuevo" | "En revisión";
 
-export const LEAD_STATUSES: LeadStatus[] = [
-  "Nuevo",
-  "En revisión",
-  "Aprobado para contacto",
-  "Descartado",
-];
+export const LEAD_STATUSES: LeadStatus[] = ["Nuevo", "En revisión"];
 
 export function isLeadStatus(value: unknown): value is LeadStatus {
   return typeof value === "string" && (LEAD_STATUSES as string[]).includes(value);
+}
+
+export type GestionResultado =
+  | "Interesado"
+  | "En seguimiento"
+  | "No interesado"
+  | "No contesta";
+
+export const GESTION_RESULTADOS: GestionResultado[] = [
+  "Interesado",
+  "En seguimiento",
+  "No interesado",
+  "No contesta",
+];
+
+export function isGestionResultado(value: unknown): value is GestionResultado {
+  return typeof value === "string" && (GESTION_RESULTADOS as string[]).includes(value);
+}
+
+/** No interesado y No contesta salen de la lista de trabajo. */
+export function isOpenGestion(value: string | null | undefined): boolean {
+  return !value || value === "Interesado" || value === "En seguimiento";
 }
 
 export type WhatsAppStatus =
@@ -39,6 +52,7 @@ export interface Lead {
   pais: string | null;
   linkedin_url: string | null;
   lead_status: LeadStatus;
+  resultado_gestion?: GestionResultado | null;
   whatsapp_status: WhatsAppStatus | string;
   mistral_conversation_id?: string | null;
   notas: string | null;

@@ -10,7 +10,7 @@ import type {
   MessageDirection,
   WhatsAppMessage,
 } from "./types";
-import { isLeadStatus } from "./types";
+import { isGestionResultado, isLeadStatus, type GestionResultado } from "./types";
 
 const LEADS_PAGE_SIZE = 20;
 const LEADS_EXPORT_MAX = 10_000;
@@ -57,6 +57,38 @@ export async function getPortfolioApolloIds(ownerId: number): Promise<Set<string
       AND apollo_id IS NOT NULL AND TRIM(apollo_id) <> ''
   `) as Array<{ apollo_id: string }>;
   return new Set(rows.map((r) => String(r.apollo_id).trim()).filter(Boolean));
+}
+
+export type BlockedContacts = { phones: Set<string>; emails: Set<string> };
+
+/** Móvil y correo de contactos marcados No contesta. La búsqueda no los vuelve a ofrecer. */
+export async function getNoContestaContacts(ownerId: number): Promise<BlockedContacts> {
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT telefono_e164, email
+    FROM leads
+    WHERE owner_id = ${ownerId}
+      AND resultado_gestion = 'No contesta'
+  `) as Array<{ telefono_e164: string | null; email: string | null }>;
+  const phones = new Set<string>();
+  const emails = new Set<string>();
+  for (const row of rows) {
+    const phone = row.telefono_e164?.replace(/\D/g, "");
+    const email = row.email?.trim().toLowerCase();
+    if (phone) phones.add(phone);
+    if (email) emails.add(email);
+  }
+  return { phones, emails };
+}
+
+export function isNoContestaContact(
+  person: { email?: string | null; telefono?: string | null; pais?: string | null },
+  blocked: BlockedContacts
+): boolean {
+  const email = person.email?.trim().toLowerCase();
+  if (email && blocked.emails.has(email)) return true;
+  const phone = (toE164(person.telefono, person.pais) ?? "").replace(/\D/g, "");
+  return Boolean(phone) && blocked.phones.has(phone);
 }
 
 export async function searchDistinctCompanies(
@@ -129,6 +161,7 @@ export async function listPortfolioContacts(ownerId: number | null = null): Prom
 export async function getLeads(
   filters?: {
     status?: string;
+    resultado?: string;
     search?: string;
     contact?: string;
   },
@@ -138,6 +171,13 @@ export async function getLeads(
   const sql = getSql();
   const status =
     filters?.status && filters.status !== "Todos" ? filters.status : null;
+  const resultadoRaw = filters?.resultado?.trim() || "";
+  const gestionMode = !resultadoRaw || resultadoRaw === "Todos"
+    ? "all"
+    : resultadoRaw === "En curso"
+      ? "open"
+      : "exact";
+  const gestionExact = gestionMode === "exact" ? resultadoRaw : null;
   const term = filters?.search?.trim() || null;
   const pattern = term ? `%${term}%` : null;
   const contact =
@@ -153,6 +193,17 @@ export async function getLeads(
     SELECT COUNT(*)::int AS total FROM leads
     WHERE (${ownerId}::int IS NULL OR owner_id = ${ownerId})
       AND (${status}::text IS NULL OR lead_status = ${status})
+      AND (
+        ${gestionMode} = 'all'
+        OR (
+          ${gestionMode} = 'open'
+          AND (
+            resultado_gestion IS NULL
+            OR resultado_gestion IN ('Interesado', 'En seguimiento')
+          )
+        )
+        OR (${gestionMode} = 'exact' AND resultado_gestion = ${gestionExact})
+      )
       AND (
         ${pattern}::text IS NULL
         OR nombre ILIKE ${pattern}
@@ -188,6 +239,17 @@ export async function getLeads(
     LEFT JOIN users ON users.id = leads.owner_id
     WHERE (${ownerId}::int IS NULL OR leads.owner_id = ${ownerId})
       AND (${status}::text IS NULL OR lead_status = ${status})
+      AND (
+        ${gestionMode} = 'all'
+        OR (
+          ${gestionMode} = 'open'
+          AND (
+            resultado_gestion IS NULL
+            OR resultado_gestion IN ('Interesado', 'En seguimiento')
+          )
+        )
+        OR (${gestionMode} = 'exact' AND resultado_gestion = ${gestionExact})
+      )
       AND (
         ${pattern}::text IS NULL
         OR nombre ILIKE ${pattern}
@@ -280,8 +342,10 @@ export async function getStats(ownerId: number | null = null) {
       COUNT(*)::int AS total,
       COUNT(*) FILTER (WHERE lead_status = 'Nuevo')::int AS nuevo,
       COUNT(*) FILTER (WHERE lead_status = 'En revisión')::int AS en_revision,
-      COUNT(*) FILTER (WHERE lead_status = 'Aprobado para contacto')::int AS aprobado,
-      COUNT(*) FILTER (WHERE lead_status = 'Descartado')::int AS descartado,
+      COUNT(*) FILTER (WHERE resultado_gestion = 'Interesado')::int AS interesado,
+      COUNT(*) FILTER (WHERE resultado_gestion = 'En seguimiento')::int AS en_seguimiento,
+      COUNT(*) FILTER (WHERE resultado_gestion = 'No interesado')::int AS no_interesado,
+      COUNT(*) FILTER (WHERE resultado_gestion = 'No contesta')::int AS no_contesta,
       COUNT(*) FILTER (WHERE telefono IS NOT NULL AND telefono != '')::int AS with_phone,
       COUNT(*) FILTER (WHERE email IS NOT NULL AND email != '')::int AS with_email
     FROM leads
@@ -291,8 +355,10 @@ export async function getStats(ownerId: number | null = null) {
     total: number;
     nuevo: number;
     en_revision: number;
-    aprobado: number;
-    descartado: number;
+    interesado: number;
+    en_seguimiento: number;
+    no_interesado: number;
+    no_contesta: number;
     with_phone: number;
     with_email: number;
   };
@@ -301,8 +367,10 @@ export async function getStats(ownerId: number | null = null) {
     total: r?.total ?? 0,
     nuevo: r?.nuevo ?? 0,
     en_revision: r?.en_revision ?? 0,
-    aprobado: r?.aprobado ?? 0,
-    descartado: r?.descartado ?? 0,
+    interesado: r?.interesado ?? 0,
+    en_seguimiento: r?.en_seguimiento ?? 0,
+    no_interesado: r?.no_interesado ?? 0,
+    no_contesta: r?.no_contesta ?? 0,
     with_phone: r?.with_phone ?? 0,
     with_email: r?.with_email ?? 0,
     conversations,
@@ -401,6 +469,89 @@ export async function updateLeadStatus(
     throw new Error("Contacto no encontrado");
   }
   return lead;
+}
+
+export async function updateLeadResultado(
+  id: number,
+  resultado: GestionResultado | null,
+  ownerId: number | null = null
+): Promise<Lead> {
+  if (resultado !== null && !isGestionResultado(resultado)) {
+    throw new Error(`Resultado de gestión no válido: ${String(resultado)}`);
+  }
+
+  const sql = getSql();
+  const leadId = Number(id);
+  if (!Number.isFinite(leadId) || leadId <= 0) {
+    throw new Error("ID de contacto no válido");
+  }
+
+  const rows = (await sql`
+    UPDATE leads
+    SET resultado_gestion = ${resultado},
+        lead_status = CASE
+          WHEN ${resultado}::text IS NOT NULL AND lead_status = 'Nuevo' THEN 'En revisión'
+          ELSE lead_status
+        END,
+        updated_at = NOW()
+    WHERE id = ${leadId}
+      AND (${ownerId}::int IS NULL OR owner_id = ${ownerId})
+    RETURNING *
+  `) as Lead[];
+
+  const lead = rows[0];
+  if (!lead) throw new Error("Contacto no encontrado");
+  return lead;
+}
+
+export async function getCompanyFicha(
+  leadId: number,
+  ownerId: number | null,
+  actorId: number
+): Promise<{ contacts: Lead[]; colleagues: string[] } | null> {
+  const sql = getSql();
+  const id = Number(leadId);
+  if (!Number.isFinite(id) || id <= 0) return null;
+
+  const opened = (await sql`
+    SELECT leads.*, users.email AS owner_email
+    FROM leads
+    LEFT JOIN users ON users.id = leads.owner_id
+    WHERE leads.id = ${id}
+      AND (${ownerId}::int IS NULL OR leads.owner_id = ${ownerId})
+    LIMIT 1
+  `) as Lead[];
+  const lead = opened[0];
+  if (!lead) return null;
+
+  const empresa = lead.empresa?.trim() ?? "";
+  if (!empresa) return { contacts: [lead], colleagues: [] };
+
+  const contacts = (await sql`
+    SELECT leads.*, users.email AS owner_email
+    FROM leads
+    LEFT JOIN users ON users.id = leads.owner_id
+    WHERE (${ownerId}::int IS NULL OR leads.owner_id = ${ownerId})
+      AND LOWER(REGEXP_REPLACE(BTRIM(COALESCE(leads.empresa, '')), '\\s+', ' ', 'g'))
+        = LOWER(REGEXP_REPLACE(BTRIM(${empresa}), '\\s+', ' ', 'g'))
+    ORDER BY leads.created_at ASC, leads.id ASC
+  `) as Lead[];
+
+  const colleagueRows = (await sql`
+    SELECT DISTINCT users.email AS email
+    FROM leads
+    JOIN users ON users.id = leads.owner_id
+    WHERE leads.owner_id IS DISTINCT FROM ${actorId}
+      AND users.email IS NOT NULL
+      AND LOWER(REGEXP_REPLACE(BTRIM(COALESCE(leads.empresa, '')), '\\s+', ' ', 'g'))
+        = LOWER(REGEXP_REPLACE(BTRIM(${empresa}), '\\s+', ' ', 'g'))
+    ORDER BY users.email ASC
+  `) as Array<{ email: string }>;
+
+  return {
+    contacts: contacts.length ? contacts : [lead],
+    colleagues: colleagueRows.map((row) => row.email).filter(Boolean),
+  };
 }
 
 export async function updateLeadNotes(

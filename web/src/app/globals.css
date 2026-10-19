@@ -2011,6 +2011,91 @@ button {
   min-width: 108px;
 }
 
+.portfolio-name-btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.portfolio-name-btn:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.client-ficha-overlay {
+  z-index: 90;
+}
+
+.client-ficha {
+  width: min(560px, 100%);
+}
+
+.client-ficha__why,
+.client-ficha__collision {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-ficha__collision {
+  margin: 6px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.client-ficha__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.client-ficha__person {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.client-ficha__person:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.client-ficha__name {
+  margin: 0;
+  font-weight: 600;
+}
+
+.client-ficha__notes {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.client-ficha__fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.client-ficha__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .portfolio-table__role {
   width: 20%;
   min-width: 168px;

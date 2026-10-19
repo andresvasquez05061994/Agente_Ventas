@@ -12,7 +12,7 @@ import {
   resolveApolloPersonId,
   type EnrichStats,
 } from "./apollo-enrich";
-import { getPortfolioApolloIds, recordProspeccionCredits } from "./db";
+import { getNoContestaContacts, getPortfolioApolloIds, isNoContestaContact, recordProspeccionCredits } from "./db";
 
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
@@ -156,6 +156,7 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest, ow
   const countryFilter = input.person_locations[0] ?? "";
   const companyFilter = input.organization_name?.trim() ?? "";
   const portfolioIds = await getPortfolioApolloIds(ownerId);
+  const blocked = await getNoContestaContacts(ownerId);
   const collected: ApolloPerson[] = [];
   const seen = new Set<string>();
   let totalEntries = 0;
@@ -228,6 +229,11 @@ export async function searchApolloWithContacts(input: ValidatedSearchRequest, ow
       enrichStats = mergeEnrichStats(enrichStats, enriched.stats);
 
       if (!enriched.person) continue;
+
+      if (isNoContestaContact(enriched.person, blocked)) {
+        portfolioSkipped++;
+        continue;
+      }
 
       if (
         countryFilter &&

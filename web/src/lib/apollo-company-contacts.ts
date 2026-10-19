@@ -7,7 +7,7 @@ import {
   resolveApolloPersonId,
   webhookBaseUrl,
 } from "./apollo-enrich";
-import { getPhoneWebhookHealth, getPortfolioApolloIds, recordProspeccionCredits } from "./db";
+import { getNoContestaContacts, getPhoneWebhookHealth, getPortfolioApolloIds, isNoContestaContact, recordProspeccionCredits } from "./db";
 
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
@@ -432,6 +432,9 @@ export async function searchCompanyContacts(
   if (!sources.length) return finish("not_found", []);
 
   const portfolioIds = input.dryRun ? new Set<string>() : await getPortfolioApolloIds(ownerId);
+  const blocked = input.dryRun
+    ? { phones: new Set<string>(), emails: new Set<string>() }
+    : await getNoContestaContacts(ownerId);
   const target = input.perCompany;
   const wanted = candidateBudget(target);
   let candidatesToEnrich: Array<{ raw: Record<string, unknown>; via: string; employer: string }> = [];
@@ -559,6 +562,10 @@ export async function searchCompanyContacts(
       const employer = person.empresa ?? employerById.get(person.apollo_id) ?? "";
       if (!enrichedEmployerMatches(employer, input.company, alias, organization, candidates)) {
         rejected++;
+        continue;
+      }
+      if (isNoContestaContact(person, blocked)) {
+        portfolioSkipped++;
         continue;
       }
       collected.push({ ...person, empresa: employer || organization?.name || input.company });

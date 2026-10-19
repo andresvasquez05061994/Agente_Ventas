@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { dataOwnerId, requireAdmin, requireUser } from "@/lib/current-user";
-import { deleteLead, ensureDb, updateLeadNotes, updateLeadStatus } from "@/lib/db";
-import { isLeadStatus } from "@/lib/types";
+import { deleteLead, ensureDb, updateLeadNotes, updateLeadResultado, updateLeadStatus } from "@/lib/db";
+import { isGestionResultado, isLeadStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -20,14 +20,25 @@ export async function PATCH(
     }
 
     const body = (await req.json()) as Record<string, unknown>;
+    let lead = null;
 
     if (body.lead_status !== undefined && body.lead_status !== null) {
       if (!isLeadStatus(body.lead_status)) {
         return NextResponse.json({ error: "Estado de lead no válido" }, { status: 400 });
       }
-      const lead = await updateLeadStatus(leadId, body.lead_status, dataOwnerId(actor));
-      return NextResponse.json({ ok: true, lead });
+      lead = await updateLeadStatus(leadId, body.lead_status, dataOwnerId(actor));
     }
+
+    if (body.resultado_gestion !== undefined) {
+      const raw = body.resultado_gestion;
+      const resultado = raw === null || raw === "" ? null : raw;
+      if (resultado !== null && !isGestionResultado(resultado)) {
+        return NextResponse.json({ error: "Resultado de gestión no válido" }, { status: 400 });
+      }
+      lead = await updateLeadResultado(leadId, resultado, dataOwnerId(actor));
+    }
+
+    if (lead) return NextResponse.json({ ok: true, lead });
 
     if (body.notas !== undefined) {
       const lead = await updateLeadNotes(leadId, String(body.notas ?? ""), dataOwnerId(actor));

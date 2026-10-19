@@ -17,8 +17,9 @@ type Stats = {
   total: number;
   nuevo: number;
   en_revision?: number;
-  aprobado?: number;
-  descartado?: number;
+  interesado?: number;
+  en_seguimiento?: number;
+  no_contesta?: number;
   with_phone: number;
   with_email: number;
   conversations?: {
@@ -60,7 +61,6 @@ export default function ResumenPage() {
   const phonePct = pct(stats?.with_phone ?? 0, stats?.total ?? 0);
   const emailPct = pct(stats?.with_email ?? 0, stats?.total ?? 0);
   const nuevoPct = pct(stats?.nuevo ?? 0, stats?.total ?? 0);
-  const aprobadoPct = pct(stats?.aprobado ?? 0, stats?.total ?? 0);
 
   return (
     <main className="app-content flex-1 py-6 lg:py-8">
@@ -145,7 +145,7 @@ export default function ResumenPage() {
           <SectionBlock
             label="Pipeline"
             title="Estados y WhatsApp"
-            description="Cómo avanza el portafolio: revisión, aprobación y conversaciones."
+            description="Estado del contacto y resultado de la gestión, junto a las conversaciones."
           >
             <KpiGrid className="kpi-grid--4">
               <KpiCard
@@ -159,13 +159,13 @@ export default function ResumenPage() {
                 }}
               />
               <KpiCard
-                label="Aprobados"
-                value={stats.aprobado ?? 0}
-                sub={`${aprobadoPct}% listos para contactar`}
+                label="Interesados"
+                value={stats.interesado ?? 0}
+                sub={`${stats.en_seguimiento ?? 0} en seguimiento`}
                 accent="teal"
                 tag={{
-                  positive: (stats.aprobado ?? 0) > 0,
-                  label: (stats.aprobado ?? 0) > 0 ? "para WhatsApp" : "sin aprobados",
+                  positive: (stats.interesado ?? 0) > 0,
+                  label: (stats.interesado ?? 0) > 0 ? "con resultado" : "sin interesados",
                 }}
               />
               <KpiCard
@@ -181,7 +181,7 @@ export default function ResumenPage() {
               <KpiCard
                 label="Errores WhatsApp"
                 value={conv?.errors ?? 0}
-                sub={`${conv?.scheduled ?? 0} agendados · ${stats.descartado ?? 0} descartados`}
+                sub={`${conv?.scheduled ?? 0} agendados · ${stats.no_contesta ?? 0} no contestan`}
                 accent="coral"
                 tag={{
                   positive: (conv?.errors ?? 0) === 0,

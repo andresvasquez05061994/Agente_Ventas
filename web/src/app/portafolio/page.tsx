@@ -2,9 +2,11 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { Lead, LeadStatus } from "@/lib/types";
+import type { GestionResultado, Lead, LeadStatus } from "@/lib/types";
+import { GESTION_RESULTADOS, isOpenGestion, LEAD_STATUSES } from "@/lib/types";
 import { PageHeading } from "@/components/HelpTip";
 import { EmptyState, FieldLabel, SectionLabel, ActionBanner, FeedbackAnchor } from "@/components/ui";
+import { ClientFicha } from "@/components/ClientFicha";
 import { MessageIAPanel } from "@/components/MessageIAPanel";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { useDebounce } from "@/hooks/use-debounce";
@@ -13,16 +15,10 @@ import { WIPE_CONFIRM_PHRASE } from "@/lib/auth-constants";
 import { redirectToLoginIfUnauthorized } from "@/lib/parse-api-response";
 import type { ColdCallResult, ColdEmailResult, OutreachChannel } from "@/lib/commercial-outreach";
 
-const STATUSES: LeadStatus[] = ["Nuevo", "En revisión", "Aprobado para contacto", "Descartado"];
+const STATUSES: LeadStatus[] = LEAD_STATUSES;
+const RESULTADOS = ["En curso", "Todos", ...GESTION_RESULTADOS] as const;
 const CONTACT_FILTERS = ["Todos", "Con teléfono", "Sin teléfono", "Con email", "Sin email"] as const;
 const PER_PAGE = 20;
-
-const STATUS_SHORT: Record<LeadStatus, string> = {
-  Nuevo: "Nuevo",
-  "En revisión": "En revisión",
-  "Aprobado para contacto": "Aprobado",
-  Descartado: "Descartado",
-};
 
 function getPageNumbers(current: number, total: number): (number | "…")[] {
   if (total <= 9) {
@@ -103,6 +99,8 @@ function PortfolioPagination({
 function PortfolioFilters({
   status,
   setStatus,
+  resultado,
+  setResultado,
   contact,
   setContact,
   search,
@@ -111,6 +109,8 @@ function PortfolioFilters({
 }: {
   status: string;
   setStatus: (v: string) => void;
+  resultado: string;
+  setResultado: (v: string) => void;
   contact: string;
   setContact: (v: string) => void;
   search: string;
@@ -132,6 +132,19 @@ function PortfolioFilters({
         <option>Todos</option>
         {STATUSES.map((s) => (
           <option key={s}>{s}</option>
+        ))}
+      </select>
+      <FieldLabel>Resultado</FieldLabel>
+      <select
+        className="input-field mb-3"
+        value={resultado}
+        onChange={(e) => {
+          onFilterChange();
+          setResultado(e.target.value);
+        }}
+      >
+        {RESULTADOS.map((item) => (
+          <option key={item}>{item}</option>
         ))}
       </select>
       <FieldLabel>Contacto</FieldLabel>
@@ -183,6 +196,7 @@ function PortafolioContent() {
   const [unfilteredTotal, setUnfilteredTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [status, setStatus] = useState("Todos");
+  const [resultado, setResultado] = useState("En curso");
   const [contact, setContact] = useState("Todos");
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
@@ -194,6 +208,13 @@ function PortafolioContent() {
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkStatus, setBulkStatus] = useState<LeadStatus>("En revisión");
+  const [bulkResultado, setBulkResultado] = useState<GestionResultado>("En seguimiento");
+  const [fichaOpen, setFichaOpen] = useState(false);
+  const [fichaLoading, setFichaLoading] = useState(false);
+  const [fichaError, setFichaError] = useState("");
+  const [fichaContacts, setFichaContacts] = useState<Lead[]>([]);
+  const [fichaColleagues, setFichaColleagues] = useState<string[]>([]);
+  const [fichaOpenedId, setFichaOpenedId] = useState<number | null>(null);
   const [editingNotes, setEditingNotes] = useState<number | null>(null);
   const [notesDraft, setNotesDraft] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
@@ -216,10 +237,12 @@ function PortafolioContent() {
 
   const pendingSearch = search !== debouncedSearch;
   const showLoading = loading || pendingSearch;
-  const filtersActive = status !== "Todos" || contact !== "Todos" || Boolean(search.trim());
+  const filtersActive =
+    status !== "Todos" || resultado !== "En curso" || contact !== "Todos" || Boolean(search.trim());
 
   function clearFilters() {
     setStatus("Todos");
+    setResultado("En curso");
     setContact("Todos");
     setSearch("");
     markReloading();
@@ -245,6 +268,7 @@ function PortafolioContent() {
       per_page: String(PER_PAGE),
     });
     if (status !== "Todos") q.set("status", status);
+    if (resultado !== "Todos") q.set("resultado", resultado);
     if (debouncedSearch) q.set("search", debouncedSearch);
     if (contact !== "Todos") q.set("contact", contact);
     return q;
@@ -294,41 +318,100 @@ function PortafolioContent() {
     return () => {
       cancelled = true;
     };
-  }, [status, debouncedSearch, contact, page, router]);
+  }, [status, resultado, debouncedSearch, contact, page, router]);
 
-  async function updateStatus(id: number, lead_status: LeadStatus) {
+  function leadStaysVisible(lead: Lead): boolean {
+    if (status !== "Todos" && lead.lead_status !== status) return false;
+    if (resultado === "Todos") return true;
+    if (resultado === "En curso") return isOpenGestion(lead.resultado_gestion);
+    return lead.resultado_gestion === resultado;
+  }
+
+  function rememberLead(saved: Lead) {
+    const merge = (current: Lead): Lead => ({
+      ...current,
+      ...saved,
+      owner_email: saved.owner_email ?? current.owner_email,
+    });
+    setFichaContacts((list) => list.map((lead) => (Number(lead.id) === Number(saved.id) ? merge(lead) : lead)));
+    const current = leads.find((lead) => Number(lead.id) === Number(saved.id));
+    if (!current) return;
+    const merged = merge(current);
+    if (!leadStaysVisible(merged)) {
+      setLeads((list) => list.filter((lead) => Number(lead.id) !== Number(merged.id)));
+      setTotal((totalCount) => Math.max(0, totalCount - 1));
+      return;
+    }
+    setLeads((list) => list.map((lead) => (Number(lead.id) === Number(merged.id) ? merged : lead)));
+  }
+
+  async function patchLead(
+    id: number,
+    body: { lead_status?: LeadStatus; resultado_gestion?: GestionResultado | "" },
+    success: string
+  ) {
     const prev = leads;
+    const prevFicha = fichaContacts;
     setStatusSavingId(id);
-    setLeads((list) =>
-      list.map((l) => (Number(l.id) === id ? { ...l, lead_status } : l))
-    );
     try {
       const res = await fetch(`/api/leads/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lead_status }),
+        body: JSON.stringify(body),
         cache: "no-store",
       });
       const data = await res.json();
       if (!res.ok || !data.lead) {
         setLeads(prev);
-        showError(data.error ?? "Error al actualizar estado", "Estado no actualizado");
+        setFichaContacts(prevFicha);
+        showError(data.error ?? "Error al actualizar", "Cambio no guardado");
         return;
       }
-
-      const saved = data.lead as Lead;
-      setLeads((list) => list.map((l) => (Number(l.id) === id ? saved : l)));
-      showSuccess(`Contacto marcado como «${saved.lead_status}».`, "Estado actualizado");
-
-      if (status !== "Todos" && saved.lead_status !== status) {
-        setLeads((list) => list.filter((l) => Number(l.id) !== id));
-        setTotal((t) => Math.max(0, t - 1));
-      }
+      rememberLead(data.lead as Lead);
+      showSuccess(success, "Contacto actualizado");
     } catch {
       setLeads(prev);
-      showError("Error de red al actualizar estado", "Estado no actualizado");
+      setFichaContacts(prevFicha);
+      showError("Error de red al actualizar", "Cambio no guardado");
     } finally {
       setStatusSavingId(null);
+    }
+  }
+
+  function updateStatus(id: number, lead_status: LeadStatus) {
+    void patchLead(id, { lead_status }, `Contacto marcado como «${lead_status}».`);
+  }
+
+  function updateResultado(id: number, resultadoGestion: GestionResultado | "") {
+    void patchLead(
+      id,
+      { resultado_gestion: resultadoGestion },
+      resultadoGestion
+        ? `Resultado marcado como «${resultadoGestion}».`
+        : "Resultado quitado."
+    );
+  }
+
+  async function openFicha(lead: Lead) {
+    setFichaOpen(true);
+    setFichaOpenedId(lead.id);
+    setFichaContacts([lead]);
+    setFichaColleagues([]);
+    setFichaError("");
+    setFichaLoading(true);
+    try {
+      const res = await fetch(`/api/leads/ficha?id=${lead.id}`, { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setFichaError(data.error ?? "No se pudo abrir la ficha");
+        return;
+      }
+      setFichaContacts(data.contacts ?? [lead]);
+      setFichaColleagues(data.colleagues ?? []);
+    } catch {
+      setFichaError("No se pudo abrir la ficha");
+    } finally {
+      setFichaLoading(false);
     }
   }
 
@@ -381,6 +464,59 @@ function PortafolioContent() {
     } catch {
       setLeads(prev);
       showError("Error de red al actualizar estados.", "Cambio masivo fallido");
+    } finally {
+      setBulkUpdating(false);
+    }
+  }
+
+  async function bulkUpdateResultado() {
+    const ids = Array.from(selected);
+    if (!ids.length) {
+      showWarning("Selecciona al menos un contacto para guardar el resultado.", "Sin selección");
+      return;
+    }
+
+    setBulkUpdating(true);
+    clear();
+    const prev = leads;
+    try {
+      const results = await Promise.all(
+        ids.map(async (id) => {
+          const res = await fetch(`/api/leads/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ resultado_gestion: bulkResultado }),
+            cache: "no-store",
+          });
+          const data = await res.json();
+          return { id, ok: res.ok && Boolean(data.lead), lead: data.lead as Lead | undefined };
+        })
+      );
+      if (results.some((result) => !result.ok || !result.lead)) {
+        setLeads(prev);
+        showError("Error al guardar el resultado de uno o más contactos.", "Cambio masivo fallido");
+      } else {
+        const saved = results.map((result) => result.lead!);
+        const hidden = saved.filter((lead) => !leadStaysVisible(lead)).length;
+        setLeads((list) => {
+          const byId = new Map(saved.map((lead) => [Number(lead.id), lead]));
+          return list.flatMap((lead) => {
+            const next = byId.get(Number(lead.id));
+            if (!next) return [lead];
+            const merged = { ...lead, ...next, owner_email: next.owner_email ?? lead.owner_email };
+            return leadStaysVisible(merged) ? [merged] : [];
+          });
+        });
+        if (hidden) setTotal((totalCount) => Math.max(0, totalCount - hidden));
+        showSuccess(
+          `${ids.length} contacto(s) con resultado «${bulkResultado}».`,
+          "Resultados actualizados"
+        );
+        setSelected(new Set());
+      }
+    } catch {
+      setLeads(prev);
+      showError("Error de red al guardar resultados.", "Cambio masivo fallido");
     } finally {
       setBulkUpdating(false);
     }
@@ -630,6 +766,8 @@ function PortafolioContent() {
         <PortfolioFilters
           status={status}
           setStatus={setStatus}
+          resultado={resultado}
+          setResultado={setResultado}
           contact={contact}
           setContact={setContact}
           search={search}
@@ -643,7 +781,7 @@ function PortafolioContent() {
           <div>
             <PageHeading
               title="Portafolio"
-              help="Contactos guardados con email y teléfono. El orden es del más antiguo al más reciente: los nuevos quedan al final. Selecciona filas para cambiar el estado. Solo el administrador puede borrar."
+              help="Contactos con móvil y correo. Clic en el nombre abre la ficha de la empresa. La lista muestra el trabajo en curso: No interesado y No contesta aparecen al elegir ese resultado. Solo el administrador puede borrar."
             />
             {total > 0 ? (
               <p className="text-micro mt-1">{total.toLocaleString("es-CO")} contactos</p>
@@ -690,6 +828,8 @@ function PortafolioContent() {
           <PortfolioFilters
             status={status}
             setStatus={setStatus}
+            resultado={resultado}
+            setResultado={setResultado}
             contact={contact}
             setContact={setContact}
             search={search}
@@ -717,6 +857,25 @@ function PortafolioContent() {
               className="btn-primary"
             >
               {bulkUpdating ? "Actualizando..." : "Cambiar estado"}
+            </button>
+            <select
+              className="input-field py-1"
+              value={bulkResultado}
+              onChange={(e) => setBulkResultado(e.target.value as GestionResultado)}
+            >
+              {GESTION_RESULTADOS.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={bulkUpdateResultado}
+              disabled={bulkUpdating || busy}
+              className="btn-secondary"
+            >
+              Guardar resultado
             </button>
           </div>
         )}
@@ -802,7 +961,9 @@ function PortafolioContent() {
                       />
                     </td>
                     <td className="portfolio-table__name cell-strong" title={l.nombre}>
-                      {l.nombre}
+                      <button type="button" className="portfolio-name-btn" onClick={() => void openFicha(l)}>
+                        {l.nombre}
+                      </button>
                     </td>
                     <td className="portfolio-table__role" title={l.cargo ?? undefined}>
                       {l.cargo ?? "—"}
@@ -839,7 +1000,7 @@ function PortafolioContent() {
                       >
                         {STATUSES.map((s) => (
                           <option key={s} value={s}>
-                            {STATUS_SHORT[s]}
+                            {s}
                           </option>
                         ))}
                       </select>
@@ -915,6 +1076,22 @@ function PortafolioContent() {
           </>
         )}
       </main>
+
+      {fichaOpen && (
+        <ClientFicha
+          loading={fichaLoading}
+          error={fichaError}
+          contacts={fichaContacts}
+          colleagues={fichaColleagues}
+          openedId={fichaOpenedId}
+          showOwner={isAdmin}
+          savingId={statusSavingId}
+          onClose={() => setFichaOpen(false)}
+          onStatus={updateStatus}
+          onResultado={updateResultado}
+          onOpenMessage={(lead) => void fetchOutreach(lead, "call")}
+        />
+      )}
 
       <MessageIAPanel
         lead={messageIALead}

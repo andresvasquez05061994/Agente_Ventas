@@ -227,11 +227,28 @@ async function migration004Users(sql: Sql) {
   }
 }
 
+async function migration005Gestion(sql: Sql) {
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS resultado_gestion TEXT`;
+  await sql`
+    UPDATE leads
+    SET lead_status = 'En revisión',
+        resultado_gestion = 'En seguimiento'
+    WHERE lead_status = 'Aprobado para contacto'
+  `;
+  await sql`
+    UPDATE leads
+    SET lead_status = 'En revisión',
+        resultado_gestion = 'No interesado'
+    WHERE lead_status = 'Descartado'
+  `;
+}
+
 const MIGRATIONS: Migration[] = [
   { id: "001_init", run: migration001Init },
   { id: "002_phone_search", run: migration002PhoneSearch },
   { id: "003_app_settings", run: migration003AppSettings },
   { id: "004_users", run: migration004Users },
+  { id: "005_gestion", run: migration005Gestion },
 ];
 
 export async function applyMigrations(sql: Sql) {
