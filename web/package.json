@@ -12,6 +12,7 @@
     "test:mistral": "node scripts/test-mistral-production.mjs",
     "test:platform": "node scripts/test-platform.mjs",
     "test:credits": "node scripts/test-credit-policy.mjs",
+    "test:document": "node --experimental-strip-types scripts/test-excel-document.mjs",
     "test:sprint4": "node scripts/test-sprint4.mjs"
   },
   "dependencies": {

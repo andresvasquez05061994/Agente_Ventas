@@ -80,6 +80,46 @@ export async function searchDistinctCompanies(
     .filter(Boolean);
 }
 
+export async function listPortfolioContacts(): Promise<
+  Array<{
+    nombre: string;
+    cargo: string | null;
+    empresa: string | null;
+    email: string | null;
+    telefono: string | null;
+    telefono_e164: string | null;
+    pais: string | null;
+    linkedin_url: string | null;
+    lead_status: string;
+    whatsapp_status: string | null;
+    notas: string | null;
+    fuente_busqueda: string | null;
+  }>
+> {
+  const sql = getSql();
+  return (await sql`
+    SELECT nombre, cargo, empresa, email, telefono, telefono_e164, pais, linkedin_url,
+           lead_status, whatsapp_status, notas, fuente_busqueda
+    FROM leads
+    WHERE empresa IS NOT NULL AND TRIM(empresa) <> ''
+    ORDER BY empresa ASC, nombre ASC
+    LIMIT 10000
+  `) as Array<{
+    nombre: string;
+    cargo: string | null;
+    empresa: string | null;
+    email: string | null;
+    telefono: string | null;
+    telefono_e164: string | null;
+    pais: string | null;
+    linkedin_url: string | null;
+    lead_status: string;
+    whatsapp_status: string | null;
+    notas: string | null;
+    fuente_busqueda: string | null;
+  }>;
+}
+
 export async function getLeads(
   filters?: {
     status?: string;
