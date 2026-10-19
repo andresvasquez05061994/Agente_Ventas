@@ -2106,6 +2106,20 @@ button {
   min-width: 88px;
 }
 
+.portfolio-table__owner {
+  width: 52px;
+  min-width: 52px;
+  max-width: 52px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.portfolio-table thead th.portfolio-table__owner {
+  overflow: hidden;
+}
+
 .portfolio-table__email {
   width: 18%;
   min-width: 128px;

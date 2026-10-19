@@ -20,6 +20,18 @@ const RESULTADOS = ["En curso", "Todos", ...GESTION_RESULTADOS] as const;
 const CONTACT_FILTERS = ["Todos", "Con teléfono", "Sin teléfono", "Con email", "Sin email"] as const;
 const PER_PAGE = 20;
 
+function ownerInitials(email: string): string {
+  const local = email.split("@")[0] ?? "";
+  const parts = local
+    .replace(/\d+/g, "")
+    .split(/[._+\-]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const chosen = parts.length >= 2 ? parts.slice(0, 2) : parts.slice(0, 1);
+  const initials = chosen.map((part) => part[0]?.toLocaleUpperCase("es") ?? "").join("");
+  return initials || "—";
+}
+
 function getPageNumbers(current: number, total: number): (number | "…")[] {
   if (total <= 9) {
     return Array.from({ length: total }, (_, i) => i + 1);
@@ -918,7 +930,7 @@ function PortafolioContent() {
                 <col style={{ width: "11%" }} />
                 <col style={{ width: 180 }} />
                 <col style={{ width: "10%" }} />
-                {isAdmin ? <col style={{ width: 140 }} /> : null}
+                {isAdmin ? <col className="portfolio-table__owner" /> : null}
                 <col style={{ width: "17%" }} />
                 <col style={{ width: 108 }} />
                 <col style={{ width: 96 }} />
@@ -938,7 +950,7 @@ function PortafolioContent() {
                   <th className="portfolio-table__name">Nombre</th>
                   <th className="portfolio-table__role">Cargo</th>
                   <th className="portfolio-table__company">Empresa</th>
-                  {isAdmin ? <th>Dueño</th> : null}
+                  {isAdmin ? <th className="portfolio-table__owner">Dueño</th> : null}
                   <th className="portfolio-table__email">Email</th>
                   <th className="portfolio-table__phone">Teléfono</th>
                   <th className="portfolio-table__status">Estado</th>
@@ -971,7 +983,11 @@ function PortafolioContent() {
                     <td className="portfolio-table__company" title={l.empresa ?? undefined}>
                       {l.empresa ?? "—"}
                     </td>
-                    {isAdmin ? <td title={l.owner_email ?? undefined}>{l.owner_email ?? "—"}</td> : null}
+                    {isAdmin ? (
+                      <td className="portfolio-table__owner" title={l.owner_email ?? undefined}>
+                        {l.owner_email ? ownerInitials(l.owner_email) : "—"}
+                      </td>
+                    ) : null}
                     <td className="portfolio-table__email">
                       {l.email ? (
                         <a href={`mailto:${l.email}`} title={l.email}>
