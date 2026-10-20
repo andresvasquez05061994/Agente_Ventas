@@ -1,9 +1,10 @@
-import { cleanCompanyName } from "./excel-companies";
+import { cleanCompanyName, sanitizeSpreadsheetText } from "./excel-companies";
 import { cleanPersonName } from "./excel-attendees";
 import type { ApolloPerson } from "./types";
 
 export const MAX_ENRICH_BATCH = 50;
 export const MAX_ENRICH_ROWS = 8000;
+export const ENRICH_PAGE_SIZE = 25;
 
 export type EnrichFieldId =
   | "nombre"
@@ -61,8 +62,7 @@ function fold(value: string): string {
 }
 
 export function cellText(value: unknown): string {
-  if (value == null) return "";
-  return String(value).replace(/\s+/g, " ").trim();
+  return sanitizeSpreadsheetText(value);
 }
 
 export function detectEnrichField(header: string): EnrichFieldId | null {

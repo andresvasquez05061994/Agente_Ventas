@@ -12,6 +12,13 @@ import {
   suggestedFill,
   suggestedSearchBy,
 } from "../src/lib/excel-enrich.ts";
+import { decodeSpreadsheetBytes, sanitizeSpreadsheetText } from "../src/lib/excel-companies.ts";
+import { cleanPersonName } from "../src/lib/excel-attendees.ts";
+
+function bytesOf(...values) {
+  const bytes = Uint8Array.from(values);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
 
 const cases = [];
 
@@ -86,6 +93,34 @@ const iago = {
 const iagoRow = applyPersonToRow(prepared.rows[1], prepared.columns, ["telefono", "email"], iago);
 check("la fila de Iago se rellena con Iago, no con alguien de APDTIC", iagoRow[emailCol] === "iago.soto@quobis.com");
 check("el nombre de Iago no cambia", searchName(iagoRow, prepared.columns) === "Iago Soto");
+
+const win1252Andre = decodeSpreadsheetBytes(
+  bytesOf(0x41, 0x4e, 0x44, 0x52, 0xc9, 0x20, 0x43, 0x41, 0x53, 0x54, 0x45, 0x4c, 0x4f)
+);
+check("CSV Windows-1252 recupera ANDRÉ", win1252Andre === "ANDRÉ CASTELO");
+
+const utf8Andre = decodeSpreadsheetBytes(
+  bytesOf(0x41, 0x4e, 0x44, 0x52, 0xc3, 0x89, 0x20, 0x43, 0x41, 0x53, 0x54, 0x45, 0x4c, 0x4f)
+);
+check("CSV UTF-8 conserva ANDRÉ", utf8Andre === "ANDRÉ CASTELO");
+
+check(
+  "mojibake ANDRÃ© vuelve a André",
+  sanitizeSpreadsheetText("ANDR\u00C3\u00A9 CASTELO") === "ANDRé CASTELO"
+);
+check(
+  "mojibake ANDRÃ‰ (Windows-1252) vuelve a ANDRÉ",
+  sanitizeSpreadsheetText("ANDR\u00C3\u2030 CASTELO") === "ANDRÉ CASTELO"
+);
+check("LÁZARO no pierde la tilde", sanitizeSpreadsheetText("CAMILA LÁZARO RUEDA") === "CAMILA LÁZARO RUEDA");
+check(
+  "el rombo al final se trata como recorte de feria",
+  cleanPersonName("ANTONIO CORREA ARGUE\uFFFD") === "ANTONIO CORREA"
+);
+check(
+  "el rombo del medio no se busca en Apollo",
+  !sanitizeSpreadsheetText("CAMILA L\uFFFDZARO RUEDA").includes("\uFFFD")
+);
 
 let failed = 0;
 for (const [name, ok] of cases) {

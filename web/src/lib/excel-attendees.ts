@@ -1,4 +1,4 @@
-import { cleanCompanyName, parseCompanyCell } from "./excel-companies";
+import { cleanCompanyName, parseCompanyCell, sanitizeSpreadsheetText } from "./excel-companies";
 
 /** Tanda por clic: cada persona puede gastar créditos de email + teléfono. */
 export const MAX_ATTENDEES_PER_BATCH = 50;
@@ -81,8 +81,7 @@ function fold(value: string): string {
 }
 
 function cellText(value: unknown): string {
-  if (value == null) return "";
-  return String(value).replace(/\s+/g, " ").trim();
+  return sanitizeSpreadsheetText(value);
 }
 
 function headerKind(label: string): "name" | "title" | "company" | null {
@@ -110,8 +109,8 @@ function headerKind(label: string): "name" | "title" | "company" | null {
 export function cleanPersonName(raw: string): string {
   let text = cellText(raw);
   if (!text) return "";
-  const truncated = /[.…]+$/.test(text) || text.includes("…");
-  text = text.replace(/[.…]+/g, " ").replace(/\s+/g, " ").trim();
+  const truncated = /[.…\uFFFD\u25C6\u2666]+$/.test(text) || text.includes("…");
+  text = text.replace(/[.…\uFFFD\u25C6\u2666]+/g, " ").replace(/\s+/g, " ").trim();
   const comma = text.split(",")[0]?.trim() ?? text;
   text = comma || text;
   const tokens = text.split(" ").filter(Boolean);

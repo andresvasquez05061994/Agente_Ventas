@@ -9,6 +9,7 @@ import { APOLLO_COUNTRIES } from "@/lib/apollo-filters";
 import type { AttendeeMatchResult } from "@/lib/apollo-attendee-match";
 import {
   applyPersonToRow,
+  ENRICH_PAGE_SIZE,
   ensureFillColumns,
   FILL_FIELDS,
   MAX_ENRICH_BATCH,
@@ -83,6 +84,7 @@ export default function EnriquecerPage() {
   const [progress, setProgress] = useState<string | null>(null);
   const [credits, setCredits] = useState(0);
   const [saved, setSaved] = useState(0);
+  const [page, setPage] = useState(1);
 
   const mappedFields = useMemo(
     () => new Set((sheet?.columns ?? []).map((column) => column.field).filter(Boolean) as EnrichFieldId[]),
@@ -90,6 +92,10 @@ export default function EnriquecerPage() {
   );
   const pending = statuses.filter((status) => status === "pending").length;
   const filled = statuses.filter((status) => status === "filled" || status === "already").length;
+  const totalPages = Math.max(1, Math.ceil((sheet?.rows.length ?? 0) / ENRICH_PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageStart = (safePage - 1) * ENRICH_PAGE_SIZE;
+  const pageRows = sheet?.rows.slice(pageStart, pageStart + ENRICH_PAGE_SIZE) ?? [];
 
   async function onFile(file: File | undefined) {
     clear();
@@ -97,6 +103,7 @@ export default function EnriquecerPage() {
     setStatuses([]);
     setCredits(0);
     setSaved(0);
+    setPage(1);
     if (!file) return;
     if (!/\.(xlsx|xls|csv)$/i.test(file.name)) {
       showError("Usa un Excel (.xlsx, .xls) o CSV.");
@@ -402,30 +409,44 @@ export default function EnriquecerPage() {
             </p>
           </section>
 
-          <section className="mt-4 portfolio-table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Estado</th>
-                  {sheet.headers.map((header) => (
-                    <th key={header}>{header}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sheet.rows.slice(0, 12).map((row, index) => (
-                  <tr key={`${row[0]}-${index}`}>
-                    <td>{statusLabel(statuses[index] ?? "pending")}</td>
-                    {row.map((cell, cellIndex) => (
-                      <td key={`${index}-${cellIndex}`}>{cell || "—"}</td>
+          <section className="mt-4">
+            <EnrichPagination
+              page={safePage}
+              totalPages={totalPages}
+              total={sheet.rows.length}
+              onPageChange={setPage}
+            />
+            <div className="portfolio-table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Estado</th>
+                    {sheet.headers.map((header) => (
+                      <th key={header}>{header}</th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            {sheet.rows.length > 12 ? (
-              <p className="text-micro mt-2">Vista de las primeras 12 filas de {sheet.rows.length}.</p>
-            ) : null}
+                </thead>
+                <tbody>
+                  {pageRows.map((row, index) => {
+                    const rowIndex = pageStart + index;
+                    return (
+                      <tr key={`${row[0]}-${rowIndex}`}>
+                        <td>{statusLabel(statuses[rowIndex] ?? "pending")}</td>
+                        {row.map((cell, cellIndex) => (
+                          <td key={`${rowIndex}-${cellIndex}`}>{cell || "—"}</td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <EnrichPagination
+              page={safePage}
+              totalPages={totalPages}
+              total={sheet.rows.length}
+              onPageChange={setPage}
+            />
           </section>
         </>
       )}
@@ -439,4 +460,69 @@ function statusLabel(status: EnrichRowStatus): string {
   if (status === "no_contacts") return "Sin móvil y correo";
   if (status === "not_found") return "No coincide";
   return "Pendiente";
+}
+
+function getPageNumbers(current: number, total: number): (number | "…")[] {
+  if (total <= 9) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = new Set<number>([1, total, current, current - 1, current + 1]);
+  const sorted = [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+  const result: (number | "…")[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.push("…");
+    result.push(sorted[i]);
+  }
+  return result;
+}
+
+function EnrichPagination({
+  page,
+  totalPages,
+  total,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+  const from = (page - 1) * ENRICH_PAGE_SIZE + 1;
+  const to = Math.min(page * ENRICH_PAGE_SIZE, total);
+  return (
+    <div className="portfolio-pagination">
+      <p className="text-caption">
+        Mostrando {from}–{to} de {total.toLocaleString("es-CO")} filas
+      </p>
+      <nav className="portfolio-pagination__nav" aria-label="Paginación del archivo">
+        <button type="button" className="portfolio-pagination__btn" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+          Anterior
+        </button>
+        {getPageNumbers(page, totalPages).map((item, index) =>
+          item === "…" ? (
+            <span key={`ellipsis-${index}`} className="portfolio-pagination__ellipsis">
+              …
+            </span>
+          ) : (
+            <button
+              key={item}
+              type="button"
+              className={`portfolio-pagination__btn ${item === page ? "portfolio-pagination__btn--active" : ""}`}
+              onClick={() => onPageChange(item)}
+              aria-current={item === page ? "page" : undefined}
+            >
+              {item}
+            </button>
+          )
+        )}
+        <button
+          type="button"
+          className="portfolio-pagination__btn"
+          disabled={page >= totalPages}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Siguiente
+        </button>
+      </nav>
+    </div>
+  );
 }
