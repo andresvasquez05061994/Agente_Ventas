@@ -26,9 +26,60 @@ export type KnowledgeDocument = {
   char_count: number;
   active: boolean;
   services_count: number;
+  /** Versión declarada por el usuario (ej. «v3», «2026-Q1»). Vacía si no se indicó. */
+  version: string;
+  /** Fecha ISO (YYYY-MM-DD) hasta la que el contenido se considera vigente. */
+  valid_until: string | null;
+  /** true si valid_until ya pasó: el Mensaje IA deja de usarlo aunque esté activo. */
+  expired: boolean;
   created_at: string;
   updated_at: string;
 };
+
+export type KnowledgeDocumentMeta = {
+  version?: string;
+  valid_until?: string | null;
+};
+
+const MAX_VERSION_CHARS = 40;
+
+function isoDateOnly(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  const text = String(value).trim();
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
+/** Normaliza los metadatos del documento. Lanza error si la fecha no es válida. */
+export function normalizeDocumentMeta(input: KnowledgeDocumentMeta): {
+  version: string;
+  valid_until: string | null;
+} {
+  const version = String(input.version ?? "").trim().slice(0, MAX_VERSION_CHARS);
+  const rawDate = input.valid_until == null ? "" : String(input.valid_until).trim();
+  if (!rawDate) return { version, valid_until: null };
+  const iso = isoDateOnly(rawDate);
+  if (!iso || Number.isNaN(new Date(`${iso}T00:00:00Z`).getTime())) {
+    throw new Error("La fecha de vigencia debe tener formato AAAA-MM-DD.");
+  }
+  return { version, valid_until: iso };
+}
+
+/** Un documento vence al final del día indicado (UTC). */
+export function isDocumentExpired(validUntil: string | null, now = new Date()): boolean {
+  if (!validUntil) return false;
+  const limit = new Date(`${validUntil}T23:59:59Z`).getTime();
+  return Number.isFinite(limit) && limit < now.getTime();
+}
+
+/** Etiqueta de fuente para prompts: nombre + versión + vigencia. */
+export function documentSourceLabel(doc: Pick<KnowledgeDocument, "filename" | "version" | "valid_until">): string {
+  const parts = [doc.filename];
+  if (doc.version) parts.push(doc.version);
+  if (doc.valid_until) parts.push(`vigente hasta ${doc.valid_until}`);
+  return parts.join(" · ");
+}
 
 export type KnowledgeDocumentRecord = KnowledgeDocument & {
   extracted_text: string;
@@ -76,6 +127,7 @@ function servicesCount(structured: unknown): number {
 
 function mapDocument(row: Record<string, unknown>, includeText = false): KnowledgeDocumentRecord {
   const structured = (row.structured as StructuredKnowledge | null) ?? null;
+  const valid_until = isoDateOnly(row.valid_until);
   return {
     id: Number(row.id),
     filename: String(row.filename),
@@ -85,6 +137,9 @@ function mapDocument(row: Record<string, unknown>, includeText = false): Knowled
     char_count: Number(row.char_count ?? 0),
     active: Boolean(row.active),
     services_count: servicesCount(structured),
+    version: String(row.version ?? ""),
+    valid_until,
+    expired: isDocumentExpired(valid_until),
     created_at: new Date(String(row.created_at)).toISOString(),
     updated_at: new Date(String(row.updated_at)).toISOString(),
     extracted_text: includeText ? String(row.extracted_text ?? "") : "",
@@ -146,7 +201,8 @@ export async function saveKnowledgeProfile(
 export async function listKnowledgeDocuments(ownerId: number): Promise<KnowledgeDocument[]> {
   const sql = getSql();
   const rows = (await sql`
-    SELECT id, filename, mime, kind, summary, structured, char_count, active, created_at, updated_at
+    SELECT id, filename, mime, kind, summary, structured, char_count, active, version, valid_until,
+           created_at, updated_at
     FROM knowledge_documents
     WHERE owner_id = ${ownerId}
     ORDER BY created_at DESC
@@ -171,12 +227,16 @@ export async function insertKnowledgeDocument(ownerId: number, input: {
   extracted_text: string;
   summary: string;
   structured: StructuredKnowledge | null;
+  version?: string;
+  valid_until?: string | null;
 }): Promise<KnowledgeDocument> {
   const sql = getSql();
   const structuredJson = input.structured ? JSON.stringify(input.structured) : null;
+  const meta = normalizeDocumentMeta({ version: input.version, valid_until: input.valid_until });
   const rows = (await sql`
     INSERT INTO knowledge_documents (
-      owner_id, filename, mime, kind, extracted_text, summary, structured, char_count, active, created_at, updated_at
+      owner_id, filename, mime, kind, extracted_text, summary, structured, char_count, active,
+      version, valid_until, created_at, updated_at
     ) VALUES (
       ${ownerId},
       ${input.filename.slice(0, 180)},
@@ -187,10 +247,13 @@ export async function insertKnowledgeDocument(ownerId: number, input: {
       ${structuredJson}::jsonb,
       ${input.extracted_text.length},
       TRUE,
+      ${meta.version},
+      ${meta.valid_until}::date,
       NOW(),
       NOW()
     )
-    RETURNING id, filename, mime, kind, summary, structured, char_count, active, created_at, updated_at
+    RETURNING id, filename, mime, kind, summary, structured, char_count, active, version, valid_until,
+              created_at, updated_at
   `) as Record<string, unknown>[];
   return mapDocument(rows[0], false);
 }
@@ -205,7 +268,27 @@ export async function setKnowledgeDocumentActive(
     UPDATE knowledge_documents
     SET active = ${active}, updated_at = NOW()
     WHERE id = ${id} AND owner_id = ${ownerId}
-    RETURNING id, filename, mime, kind, summary, structured, char_count, active, created_at, updated_at
+    RETURNING id, filename, mime, kind, summary, structured, char_count, active, version, valid_until,
+              created_at, updated_at
+  `) as Record<string, unknown>[];
+  return rows[0] ? mapDocument(rows[0], false) : null;
+}
+
+export async function updateKnowledgeDocumentMeta(
+  id: number,
+  meta: KnowledgeDocumentMeta,
+  ownerId: number
+): Promise<KnowledgeDocument | null> {
+  const sql = getSql();
+  const normalized = normalizeDocumentMeta(meta);
+  const rows = (await sql`
+    UPDATE knowledge_documents
+    SET version = ${normalized.version},
+        valid_until = ${normalized.valid_until}::date,
+        updated_at = NOW()
+    WHERE id = ${id} AND owner_id = ${ownerId}
+    RETURNING id, filename, mime, kind, summary, structured, char_count, active, version, valid_until,
+              created_at, updated_at
   `) as Record<string, unknown>[];
   return rows[0] ? mapDocument(rows[0], false) : null;
 }
@@ -218,6 +301,7 @@ export async function deleteKnowledgeDocument(id: number): Promise<boolean> {
   return Boolean(rows[0]);
 }
 
+/** Documentos activos y vigentes: los vencidos quedan fuera del Mensaje IA aunque sigan activos. */
 export async function listActiveKnowledgeDocuments(ownerId: number): Promise<KnowledgeDocumentRecord[]> {
   const sql = getSql();
   const rows = (await sql`
@@ -225,7 +309,7 @@ export async function listActiveKnowledgeDocuments(ownerId: number): Promise<Kno
     WHERE active = TRUE AND owner_id = ${ownerId}
     ORDER BY updated_at DESC
   `) as Record<string, unknown>[];
-  return rows.map((row) => mapDocument(row, true));
+  return rows.map((row) => mapDocument(row, true)).filter((doc) => !doc.expired);
 }
 
 export function profileToCompanyShape(profile: KnowledgeProfile) {
@@ -378,6 +462,7 @@ export async function deleteBuyerPersona(id: number): Promise<boolean> {
   return Boolean(rows[0]);
 }
 
+/** Servicios extraídos de documentos vigentes; cada uno lleva su fuente (archivo, versión, vigencia). */
 export function collectDocumentServices(docs: KnowledgeDocumentRecord[]): IACSolution[] {
   const seen = new Set<string>();
   const out: IACSolution[] = [];
@@ -386,7 +471,7 @@ export function collectDocumentServices(docs: KnowledgeDocumentRecord[]): IACSol
       const key = service.name.toLowerCase();
       if (!service.name || seen.has(key)) continue;
       seen.add(key);
-      out.push(service);
+      out.push({ ...service, evidence: "documento", source: documentSourceLabel(doc) });
     }
   }
   return out;

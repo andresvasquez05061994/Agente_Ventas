@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
     const baseName = file.name.replace(/\.(xlsx|xls|csv)$/i, "");
     return NextResponse.json({
       filename: `${baseName}_documentado.xlsx`,
+      mode: documented.mode,
       stats: documented.stats,
       headers: documented.headers,
       preview: documented.preview,
@@ -59,7 +60,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "No se pudo documentar el Excel";
-    const status = /columna de empresa|más de|no tiene hojas/i.test(msg) ? 400 : 500;
+    const status = /columna de empresa|más de|no tiene hojas|personas/i.test(msg) ? 400 : 500;
     return NextResponse.json({ error: msg }, { status });
   }
 }

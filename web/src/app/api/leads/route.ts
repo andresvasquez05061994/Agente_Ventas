@@ -18,6 +18,7 @@ export async function GET(req: NextRequest) {
       {
         status: searchParams.get("status") ?? undefined,
         resultado: searchParams.get("resultado") ?? undefined,
+        etapa: searchParams.get("etapa") ?? undefined,
         search: searchParams.get("search") ?? undefined,
         contact: searchParams.get("contact") ?? undefined,
       },

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import type { GestionResultado, Lead, LeadStatus } from "@/lib/types";
-import { GESTION_RESULTADOS, LEAD_STATUSES } from "@/lib/types";
+import type { EtapaComercial, GestionResultado, Lead, LeadStatus } from "@/lib/types";
+import { ETAPAS_COMERCIALES, GESTION_RESULTADOS, LEAD_STATUSES, etapaOf } from "@/lib/types";
 
 type ClientFichaProps = {
   loading: boolean;
@@ -12,9 +12,11 @@ type ClientFichaProps = {
   openedId: number | null;
   showOwner: boolean;
   savingId: number | null;
+  savingEtapa: boolean;
   onClose: () => void;
   onStatus: (id: number, status: LeadStatus) => void;
   onResultado: (id: number, resultado: GestionResultado | "") => void;
+  onEtapa: (leadId: number, etapa: EtapaComercial) => void;
   onOpenMessage: (lead: Lead) => void;
 };
 
@@ -38,9 +40,11 @@ export function ClientFicha({
   openedId,
   showOwner,
   savingId,
+  savingEtapa,
   onClose,
   onStatus,
   onResultado,
+  onEtapa,
   onOpenMessage,
 }: ClientFichaProps) {
   const onCloseRef = useRef(onClose);
@@ -62,6 +66,8 @@ export function ClientFicha({
   const empresa = opened?.empresa?.trim() || "Sin empresa";
   const why = opened ? whyLine(opened) : "";
   const colleagueLine = colleagues.length ? `Ya la trabaja ${colleagues.join(", ")}` : "";
+  const etapa = etapaOf(opened?.etapa_comercial);
+  const hasCompany = Boolean(opened?.empresa?.trim());
 
   return (
     <div className="cold-call-overlay client-ficha-overlay" onClick={onClose} role="presentation">
@@ -91,6 +97,30 @@ export function ClientFicha({
         </header>
 
         <div className="cold-call-modal__body">
+          {opened ? (
+            <label
+              className="client-ficha__etapa"
+              title={
+                hasCompany
+                  ? "Etapa de la empresa: aplica a todos sus contactos."
+                  : "Sin empresa registrada: la etapa aplica solo a este contacto."
+              }
+            >
+              <span className="text-micro">Etapa de la empresa</span>
+              <select
+                className="input-field"
+                value={etapa}
+                disabled={loading || savingEtapa}
+                onChange={(event) => onEtapa(opened.id, event.target.value as EtapaComercial)}
+              >
+                {ETAPAS_COMERCIALES.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {loading ? <p className="text-caption">Cargando ficha…</p> : null}
           {error ? <p className="text-caption">{error}</p> : null}
           {!loading && !error && (

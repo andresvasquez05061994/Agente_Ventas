@@ -1,7 +1,11 @@
+import { namesMatch } from "./excel-attendees";
+
 export const MISSING_COMPANY = "empresa no existente en el portafolio";
+export const MISSING_CONTACT = "contacto no encontrado en el portafolio";
 export const MISSING_FIELD = "sin dato";
 
 export const MAX_DOCUMENT_ROWS = 3000;
+export const MAX_ATTENDEE_DOCUMENT_ROWS = 8000;
 
 export type DocumentField =
   | "telefono"
@@ -42,11 +46,15 @@ export type DocumentStats = {
   withContacts: number;
   withoutCompleteContact: number;
   missing: number;
+  personMissing?: number;
   outputRows: number;
   contactsWritten: number;
 };
 
+export type DocumentMode = "company" | "attendee";
+
 export type DocumentedSheet = {
+  mode: DocumentMode;
   headers: string[];
   rows: string[][];
   stats: DocumentStats;
@@ -240,6 +248,105 @@ function fillRow(
   });
 }
 
+function ensureContactColumns(columns: DocumentColumn[]): DocumentColumn[] {
+  const next = [...columns];
+  if (!next.some((column) => column.field === "telefono")) {
+    next.push({ header: "Móvil", field: "telefono", company: false });
+  }
+  if (!next.some((column) => column.field === "email")) {
+    next.push({ header: "Correo", field: "email", company: false });
+  }
+  return next;
+}
+
+function contactForAttendee(
+  name: string,
+  companyName: string,
+  contacts: PortfolioContact[]
+): { companyMatched: boolean; contact: PortfolioContact | null } {
+  const atCompany = contacts.filter((contact) => companiesMatch(companyName, cellText(contact.empresa)));
+  if (!atCompany.length) return { companyMatched: false, contact: null };
+  const named = atCompany.filter((contact) => namesMatch(name, cellText(contact.nombre)));
+  const complete = named.find(isCompleteContact) ?? null;
+  return { companyMatched: true, contact: complete };
+}
+
+function fillAttendeeRow(
+  original: unknown[],
+  columns: DocumentColumn[],
+  source: "missing-company" | "missing-person" | "empty" | PortfolioContact
+): string[] {
+  return columns.map((column, index) => {
+    const originalValue = cellText(original[index]);
+    if (column.company || column.field === "nombre" || column.field === "cargo") {
+      return originalValue;
+    }
+    if (!column.field) return originalValue;
+    if (source === "missing-company") return MISSING_COMPANY;
+    if (source === "missing-person") return MISSING_CONTACT;
+    if (source === "empty") return originalValue || MISSING_FIELD;
+    return fieldValue(source, column.field) || originalValue || MISSING_FIELD;
+  });
+}
+
+function documentAttendeeMatrix(
+  columns: DocumentColumn[],
+  dataRows: unknown[][],
+  contacts: PortfolioContact[]
+): DocumentedSheet {
+  const cols = ensureContactColumns(columns);
+  const nameIndex = cols.findIndex((column) => column.field === "nombre");
+  const companyIndex = cols.findIndex((column) => column.company);
+  const stats: DocumentStats = {
+    inputCompanies: 0,
+    found: 0,
+    withContacts: 0,
+    withoutCompleteContact: 0,
+    missing: 0,
+    personMissing: 0,
+    outputRows: 0,
+    contactsWritten: 0,
+  };
+  const output: string[][] = [];
+
+  for (const row of dataRows) {
+    const companyName = cellText(row?.[companyIndex]);
+    const personName = cellText(row?.[nameIndex]);
+    if (!companyName && !personName) continue;
+    stats.inputCompanies += 1;
+    if (!companyName || !personName) {
+      stats.missing += 1;
+      output.push(fillAttendeeRow(row ?? [], cols, "missing-company"));
+      continue;
+    }
+    const { companyMatched, contact } = contactForAttendee(personName, companyName, contacts);
+    if (!companyMatched) {
+      stats.missing += 1;
+      output.push(fillAttendeeRow(row ?? [], cols, "missing-company"));
+      continue;
+    }
+    stats.found += 1;
+    if (!contact) {
+      stats.personMissing = (stats.personMissing ?? 0) + 1;
+      stats.withoutCompleteContact += 1;
+      output.push(fillAttendeeRow(row ?? [], cols, "missing-person"));
+      continue;
+    }
+    stats.withContacts += 1;
+    stats.contactsWritten += 1;
+    output.push(fillAttendeeRow(row ?? [], cols, contact));
+  }
+
+  stats.outputRows = output.length;
+  return {
+    mode: "attendee",
+    headers: cols.map((column) => column.header),
+    rows: output,
+    stats,
+    preview: output.slice(0, 12),
+  };
+}
+
 export function documentMatrix(matrix: unknown[][], contacts: PortfolioContact[]): DocumentedSheet {
   const headerIndex = findHeaderRow(matrix);
   if (headerIndex < 0) {
@@ -254,11 +361,21 @@ export function documentMatrix(matrix: unknown[][], contacts: PortfolioContact[]
   }
 
   const dataRows = matrix.slice(headerIndex + 1);
+  const isAttendee = columns.some((column) => column.field === "nombre");
+  const maxRows = isAttendee ? MAX_ATTENDEE_DOCUMENT_ROWS : MAX_DOCUMENT_ROWS;
   const companyRows = dataRows.filter((row) =>
     columns.some((column, index) => column.company && cellText(row?.[index]))
   );
-  if (companyRows.length > MAX_DOCUMENT_ROWS) {
-    throw new Error(`El archivo trae más de ${MAX_DOCUMENT_ROWS} empresas. Divídelo y vuelve a subirlo.`);
+  if (companyRows.length > maxRows) {
+    throw new Error(
+      isAttendee
+        ? `El archivo trae más de ${MAX_ATTENDEE_DOCUMENT_ROWS} personas. Divídelo y vuelve a subirlo.`
+        : `El archivo trae más de ${MAX_DOCUMENT_ROWS} empresas. Divídelo y vuelve a subirlo.`
+    );
+  }
+
+  if (isAttendee) {
+    return documentAttendeeMatrix(columns, dataRows, contacts);
   }
 
   const output: string[][] = [];
@@ -303,6 +420,7 @@ export function documentMatrix(matrix: unknown[][], contacts: PortfolioContact[]
 
   stats.outputRows = output.length;
   return {
+    mode: "company",
     headers: columns.map((column) => column.header),
     rows: output,
     stats,

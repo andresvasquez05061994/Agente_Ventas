@@ -9,7 +9,7 @@ export type ApolloBudgetSource = "guardado" | "predeterminado";
 /** No volver a pedir el mismo teléfono a Apollo durante este tiempo. */
 export const PHONE_REQUEST_TTL_MS = 12 * 60 * 60 * 1000;
 
-export const APOLLO_RATE_MAX = 30;
+export const APOLLO_RATE_MAX = 60;
 export const APOLLO_RATE_WINDOW_MS = 10 * 60 * 1000;
 
 export const MISTRAL_RATE_MAX = 40;

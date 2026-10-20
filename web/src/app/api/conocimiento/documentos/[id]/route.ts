@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, requireUser } from "@/lib/current-user";
 import { ensureDb } from "@/lib/db";
-import { deleteKnowledgeDocument, setKnowledgeDocumentActive } from "@/lib/knowledge-store";
+import {
+  deleteKnowledgeDocument,
+  setKnowledgeDocumentActive,
+  updateKnowledgeDocumentMeta,
+} from "@/lib/knowledge-store";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +21,23 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (!Number.isInteger(id) || id <= 0) {
       return NextResponse.json({ error: "Documento no válido." }, { status: 400 });
     }
-    const body = (await req.json()) as { active?: unknown };
+    const body = (await req.json()) as { active?: unknown; version?: unknown; valid_until?: unknown };
+    const hasMeta = body.version !== undefined || body.valid_until !== undefined;
+
+    if (hasMeta) {
+      const document = await updateKnowledgeDocumentMeta(
+        id,
+        {
+          version: body.version === undefined ? undefined : String(body.version ?? ""),
+          valid_until:
+            body.valid_until === undefined || body.valid_until === null ? null : String(body.valid_until),
+        },
+        actor.id
+      );
+      if (!document) return NextResponse.json({ error: "Documento no encontrado." }, { status: 404 });
+      return NextResponse.json({ document });
+    }
+
     if (typeof body.active !== "boolean") {
       return NextResponse.json({ error: "Indica si el documento queda activo." }, { status: 400 });
     }
@@ -26,7 +46,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     return NextResponse.json({ document });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "No se pudo actualizar el documento";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json({ error: msg }, { status: /vigencia/i.test(msg) ? 400 : 500 });
   }
 }
 

@@ -13,6 +13,7 @@ const CSV_COLUMNS: (keyof Lead)[] = [
   "linkedin_url",
   "lead_status",
   "resultado_gestion",
+  "etapa_comercial",
   "whatsapp_status",
   "notas",
   "fuente_busqueda",

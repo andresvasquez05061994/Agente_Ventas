@@ -13,12 +13,14 @@ type DocumentStats = {
   withContacts: number;
   withoutCompleteContact: number;
   missing: number;
+  personMissing?: number;
   outputRows: number;
   contactsWritten: number;
 };
 
 type DocumentResponse = {
   filename: string;
+  mode?: "company" | "attendee";
   stats: DocumentStats;
   headers: string[];
   preview: string[][];
@@ -50,7 +52,7 @@ export default function DocumentarPage() {
   async function generate(event: FormEvent) {
     event.preventDefault();
     if (!file) {
-      showError("Elige un Excel con la columna de empresa.");
+      showError("Elige un Excel o CSV con Empresa, o con Nombre y Empresa.");
       return;
     }
     setBusy(true);
@@ -67,8 +69,11 @@ export default function DocumentarPage() {
       }
       setResult(data);
       downloadBase64(data.filename, data.fileBase64);
+      const attendee = data.mode === "attendee";
       showSuccess(
-        `${data.stats.withContacts} empresas con contacto, ${data.stats.missing} no están en el portafolio.`,
+        attendee
+          ? `${data.stats.withContacts} persona(s) con móvil y correo, ${data.stats.missing} empresas no están en el portafolio.`
+          : `${data.stats.withContacts} empresas con contacto, ${data.stats.missing} no están en el portafolio.`,
         "Excel listo"
       );
     } catch {
@@ -79,13 +84,14 @@ export default function DocumentarPage() {
   }
 
   const stats = result?.stats;
+  const attendee = result?.mode === "attendee";
 
   return (
     <main className="app-content flex-1 py-6 lg:py-8">
       <header className="page-header">
         <PageHeading
           title="Documentar Excel"
-          help="Completa las columnas del archivo con contactos del portafolio. No gasta créditos de Apollo. Una empresa coincide si un nombre contiene al otro. Solo entran contactos con móvil y correo. Si hay varios, cada uno queda en su fila. Si la empresa no está, las columnas pedidas dicen «empresa no existente en el portafolio»."
+          help="Completa el archivo con contactos del portafolio. No gasta créditos de Apollo. Si el archivo trae Nombre y Empresa (asistentes de feria), rellena móvil y correo de esa persona. Si solo trae empresas, lista los contactos completos de cada una. Solo entran filas con móvil y correo."
         />
       </header>
 
@@ -102,7 +108,7 @@ export default function DocumentarPage() {
 
       <form className="settings-panel mt-6" onSubmit={(event) => void generate(event)}>
         <p className="section-label">Archivo</p>
-        <h2 className="section-block__title">Empresas a documentar</h2>
+        <h2 className="section-block__title">Empresas o asistentes a documentar</h2>
         <div className="document-upload">
           <input
             id="excel-file"
@@ -115,7 +121,7 @@ export default function DocumentarPage() {
             }}
           />
           <label htmlFor="excel-file" className="btn-secondary">
-            {file ? file.name : "Elegir Excel"}
+            {file ? file.name : "Elegir Excel o CSV"}
           </label>
           <button type="submit" className="btn-primary" disabled={busy || !file}>
             <FileSpreadsheet size={16} strokeWidth={1.5} aria-hidden />
@@ -128,22 +134,24 @@ export default function DocumentarPage() {
         <section className="mt-6 space-y-4">
           <div className="kpi-grid kpi-grid--4">
             <article className="kpi-card kpi-card--blue">
-              <p className="kpi-card__label">Empresas del archivo</p>
+              <p className="kpi-card__label">{attendee ? "Personas del archivo" : "Empresas del archivo"}</p>
               <p className="kpi-card__value">{stats.inputCompanies.toLocaleString("es-CO")}</p>
             </article>
             <article className="kpi-card kpi-card--teal">
-              <p className="kpi-card__label">Con contacto completo</p>
+              <p className="kpi-card__label">Con móvil y correo</p>
               <p className="kpi-card__value">{stats.withContacts.toLocaleString("es-CO")}</p>
               <p className="kpi-card__sub">{stats.contactsWritten.toLocaleString("es-CO")} filas</p>
             </article>
             <article className="kpi-card kpi-card--amber">
-              <p className="kpi-card__label" title="En el portafolio, sin móvil y correo">
-                Sin contacto completo
+              <p className="kpi-card__label" title={attendee ? "La empresa está, esa persona no" : "En el portafolio, sin móvil y correo"}>
+                {attendee ? "Persona no encontrada" : "Sin contacto completo"}
               </p>
-              <p className="kpi-card__value">{stats.withoutCompleteContact.toLocaleString("es-CO")}</p>
+              <p className="kpi-card__value">
+                {(attendee ? stats.personMissing ?? stats.withoutCompleteContact : stats.withoutCompleteContact).toLocaleString("es-CO")}
+              </p>
             </article>
             <article className="kpi-card kpi-card--coral">
-              <p className="kpi-card__label">No están en el portafolio</p>
+              <p className="kpi-card__label">{attendee ? "Empresa no está en el portafolio" : "No están en el portafolio"}</p>
               <p className="kpi-card__value">{stats.missing.toLocaleString("es-CO")}</p>
             </article>
           </div>

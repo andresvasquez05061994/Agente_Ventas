@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { dataOwnerId, requireAdmin, requireUser } from "@/lib/current-user";
-import { deleteLead, ensureDb, updateLeadNotes, updateLeadResultado, updateLeadStatus } from "@/lib/db";
-import { isGestionResultado, isLeadStatus } from "@/lib/types";
+import {
+  deleteLead,
+  ensureDb,
+  updateCompanyEtapa,
+  updateLeadNotes,
+  updateLeadResultado,
+  updateLeadStatus,
+} from "@/lib/db";
+import { isEtapaComercial, isGestionResultado, isLeadStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +28,19 @@ export async function PATCH(
 
     const body = (await req.json()) as Record<string, unknown>;
     let lead = null;
+
+    // La etapa es de la empresa: actualiza todos sus contactos y devuelve la lista.
+    if (body.etapa_comercial !== undefined) {
+      if (!isEtapaComercial(body.etapa_comercial)) {
+        return NextResponse.json({ error: "Etapa comercial no válida" }, { status: 400 });
+      }
+      const leads = await updateCompanyEtapa(leadId, body.etapa_comercial, dataOwnerId(actor));
+      const opened = leads.find((item) => Number(item.id) === leadId) ?? leads[0];
+      if (!opened) {
+        return NextResponse.json({ error: "Contacto no encontrado" }, { status: 404 });
+      }
+      return NextResponse.json({ ok: true, lead: opened, leads });
+    }
 
     if (body.lead_status !== undefined && body.lead_status !== null) {
       if (!isLeadStatus(body.lead_status)) {

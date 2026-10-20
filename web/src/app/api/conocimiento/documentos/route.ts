@@ -49,6 +49,8 @@ export async function POST(req: NextRequest) {
     const summary =
       structured?.services[0]?.summary ?? summarizeExtract(extracted.text);
 
+    const versionRaw = form.get("version");
+    const validUntilRaw = form.get("valid_until");
     const document = await insertKnowledgeDocument(actor.id, {
       filename: file.name,
       mime: file.type || null,
@@ -56,12 +58,14 @@ export async function POST(req: NextRequest) {
       extracted_text: extracted.text,
       summary,
       structured,
+      version: typeof versionRaw === "string" ? versionRaw : "",
+      valid_until: typeof validUntilRaw === "string" && validUntilRaw.trim() ? validUntilRaw : null,
     });
 
     return NextResponse.json({ document });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "No se pudo leer el documento";
-    const status = e instanceof UsageLimitError ? e.status : 500;
+    const status = e instanceof UsageLimitError ? e.status : /vigencia/i.test(msg) ? 400 : 500;
     return NextResponse.json({ error: msg }, { status });
   }
 }

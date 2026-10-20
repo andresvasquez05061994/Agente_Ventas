@@ -22,6 +22,7 @@ type Stats = {
   no_contesta?: number;
   with_phone: number;
   with_email: number;
+  etapas?: { calificado: number; oportunidad: number; cliente: number };
   conversations?: {
     total_threads: number;
     active: number;
@@ -144,8 +145,8 @@ export default function ResumenPage() {
 
           <SectionBlock
             label="Pipeline"
-            title="Estados y WhatsApp"
-            description="Estado del contacto y resultado de la gestión, junto a las conversaciones."
+            title="Estados, etapa y WhatsApp"
+            description="Estado y resultado por contacto; etapa por empresa (Prospecto → Calificado → Oportunidad → Cliente). Conversaciones de WhatsApp recibidas."
           >
             <KpiGrid className="kpi-grid--4">
               <KpiCard
@@ -161,7 +162,7 @@ export default function ResumenPage() {
               <KpiCard
                 label="Interesados"
                 value={stats.interesado ?? 0}
-                sub={`${stats.en_seguimiento ?? 0} en seguimiento`}
+                sub={`${stats.en_seguimiento ?? 0} en seguimiento · ${stats.no_contesta ?? 0} no contestan`}
                 accent="teal"
                 tag={{
                   positive: (stats.interesado ?? 0) > 0,
@@ -169,20 +170,20 @@ export default function ResumenPage() {
                 }}
               />
               <KpiCard
-                label="WhatsApp activo"
-                value={conv?.active ?? 0}
-                sub={`${conv?.pending ?? 0} pendientes · ${conv?.awaiting_reply ?? 0} por respuesta`}
-                accent="blue"
+                label="Oportunidades"
+                value={stats.etapas?.oportunidad ?? 0}
+                sub={`${stats.etapas?.calificado ?? 0} calificadas · ${stats.etapas?.cliente ?? 0} clientes`}
+                accent="amber"
                 tag={{
-                  positive: (conv?.active ?? 0) > 0,
-                  label: (conv?.active ?? 0) > 0 ? "en conversación" : "sin hilos",
+                  positive: (stats.etapas?.oportunidad ?? 0) > 0,
+                  label: (stats.etapas?.oportunidad ?? 0) > 0 ? "empresas abiertas" : "sin oportunidades",
                 }}
               />
               <KpiCard
-                label="Errores WhatsApp"
-                value={conv?.errors ?? 0}
-                sub={`${conv?.scheduled ?? 0} agendados · ${stats.no_contesta ?? 0} no contestan`}
-                accent="coral"
+                label="WhatsApp activo"
+                value={conv?.active ?? 0}
+                sub={`${conv?.pending ?? 0} pendientes · ${conv?.errors ?? 0} errores`}
+                accent="blue"
                 tag={{
                   positive: (conv?.errors ?? 0) === 0,
                   label: (conv?.errors ?? 0) > 0 ? "revisar envíos" : "sin errores",

@@ -2,21 +2,33 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { GestionResultado, Lead, LeadStatus } from "@/lib/types";
-import { GESTION_RESULTADOS, isOpenGestion, LEAD_STATUSES } from "@/lib/types";
+import type { EtapaComercial, GestionResultado, Lead, LeadStatus } from "@/lib/types";
+import {
+  ETAPAS_COMERCIALES,
+  GESTION_RESULTADOS,
+  etapaOf,
+  isOpenGestion,
+  LEAD_STATUSES,
+} from "@/lib/types";
 import { PageHeading } from "@/components/HelpTip";
 import { EmptyState, FieldLabel, SectionLabel, ActionBanner, FeedbackAnchor } from "@/components/ui";
 import { ClientFicha } from "@/components/ClientFicha";
-import { MessageIAPanel } from "@/components/MessageIAPanel";
+import { MessageIAPanel, type WithMessageId } from "@/components/MessageIAPanel";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { useDebounce } from "@/hooks/use-debounce";
 import { downloadLeadsCsv } from "@/lib/export-leads";
 import { WIPE_CONFIRM_PHRASE } from "@/lib/auth-constants";
 import { redirectToLoginIfUnauthorized } from "@/lib/parse-api-response";
-import type { ColdCallResult, ColdEmailResult, OutreachChannel } from "@/lib/commercial-outreach";
+import type {
+  ColdCallResult,
+  ColdEmailResult,
+  OutreachChannel,
+  WhatsAppDraftResult,
+} from "@/lib/commercial-outreach";
 
 const STATUSES: LeadStatus[] = LEAD_STATUSES;
 const RESULTADOS = ["En curso", "Todos", ...GESTION_RESULTADOS] as const;
+const ETAPAS = ["Todas", ...ETAPAS_COMERCIALES] as const;
 const CONTACT_FILTERS = ["Todos", "Con teléfono", "Sin teléfono", "Con email", "Sin email"] as const;
 const PER_PAGE = 20;
 
@@ -113,6 +125,8 @@ function PortfolioFilters({
   setStatus,
   resultado,
   setResultado,
+  etapa,
+  setEtapa,
   contact,
   setContact,
   search,
@@ -123,6 +137,8 @@ function PortfolioFilters({
   setStatus: (v: string) => void;
   resultado: string;
   setResultado: (v: string) => void;
+  etapa: string;
+  setEtapa: (v: string) => void;
   contact: string;
   setContact: (v: string) => void;
   search: string;
@@ -156,6 +172,19 @@ function PortfolioFilters({
         }}
       >
         {RESULTADOS.map((item) => (
+          <option key={item}>{item}</option>
+        ))}
+      </select>
+      <FieldLabel>Etapa de la empresa</FieldLabel>
+      <select
+        className="input-field mb-3"
+        value={etapa}
+        onChange={(e) => {
+          onFilterChange();
+          setEtapa(e.target.value);
+        }}
+      >
+        {ETAPAS.map((item) => (
           <option key={item}>{item}</option>
         ))}
       </select>
@@ -209,6 +238,7 @@ function PortafolioContent() {
   const [totalPages, setTotalPages] = useState(1);
   const [status, setStatus] = useState("Todos");
   const [resultado, setResultado] = useState("En curso");
+  const [etapa, setEtapa] = useState("Todas");
   const [contact, setContact] = useState("Todos");
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
@@ -227,13 +257,15 @@ function PortafolioContent() {
   const [fichaContacts, setFichaContacts] = useState<Lead[]>([]);
   const [fichaColleagues, setFichaColleagues] = useState<string[]>([]);
   const [fichaOpenedId, setFichaOpenedId] = useState<number | null>(null);
+  const [savingEtapa, setSavingEtapa] = useState(false);
   const [editingNotes, setEditingNotes] = useState<number | null>(null);
   const [notesDraft, setNotesDraft] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
   const [messageIALead, setMessageIALead] = useState<Lead | null>(null);
   const [messageIAChannel, setMessageIAChannel] = useState<OutreachChannel>("call");
-  const [callResult, setCallResult] = useState<ColdCallResult | null>(null);
-  const [emailResult, setEmailResult] = useState<ColdEmailResult | null>(null);
+  const [callResult, setCallResult] = useState<WithMessageId<ColdCallResult> | null>(null);
+  const [emailResult, setEmailResult] = useState<WithMessageId<ColdEmailResult> | null>(null);
+  const [whatsappResult, setWhatsappResult] = useState<WithMessageId<WhatsAppDraftResult> | null>(null);
   const [messageIALoading, setMessageIALoading] = useState(false);
   const [messageIAError, setMessageIAError] = useState("");
   const [messageIALeadId, setMessageIALeadId] = useState<number | null>(null);
@@ -250,11 +282,16 @@ function PortafolioContent() {
   const pendingSearch = search !== debouncedSearch;
   const showLoading = loading || pendingSearch;
   const filtersActive =
-    status !== "Todos" || resultado !== "En curso" || contact !== "Todos" || Boolean(search.trim());
+    status !== "Todos" ||
+    resultado !== "En curso" ||
+    etapa !== "Todas" ||
+    contact !== "Todos" ||
+    Boolean(search.trim());
 
   function clearFilters() {
     setStatus("Todos");
     setResultado("En curso");
+    setEtapa("Todas");
     setContact("Todos");
     setSearch("");
     markReloading();
@@ -281,6 +318,7 @@ function PortafolioContent() {
     });
     if (status !== "Todos") q.set("status", status);
     if (resultado !== "Todos") q.set("resultado", resultado);
+    if (etapa !== "Todas") q.set("etapa", etapa);
     if (debouncedSearch) q.set("search", debouncedSearch);
     if (contact !== "Todos") q.set("contact", contact);
     return q;
@@ -330,10 +368,11 @@ function PortafolioContent() {
     return () => {
       cancelled = true;
     };
-  }, [status, resultado, debouncedSearch, contact, page, router]);
+  }, [status, resultado, etapa, debouncedSearch, contact, page, router]);
 
   function leadStaysVisible(lead: Lead): boolean {
     if (status !== "Todos" && lead.lead_status !== status) return false;
+    if (etapa !== "Todas" && etapaOf(lead.etapa_comercial) !== etapa) return false;
     if (resultado === "Todos") return true;
     if (resultado === "En curso") return isOpenGestion(lead.resultado_gestion);
     return lead.resultado_gestion === resultado;
@@ -402,6 +441,52 @@ function PortafolioContent() {
         ? `Resultado marcado como «${resultadoGestion}».`
         : "Resultado quitado."
     );
+  }
+
+  /** La etapa es de la empresa: el servidor devuelve todos los contactos actualizados. */
+  async function updateEtapa(leadId: number, nextEtapa: EtapaComercial) {
+    setSavingEtapa(true);
+    try {
+      const res = await fetch(`/api/leads/${leadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ etapa_comercial: nextEtapa }),
+        cache: "no-store",
+      });
+      const data = await res.json();
+      if (!res.ok || !Array.isArray(data.leads)) {
+        showError(data.error ?? "Error al actualizar la etapa", "Etapa no guardada");
+        return;
+      }
+      const updated = data.leads as Lead[];
+      const byId = new Map(updated.map((item) => [Number(item.id), item]));
+      const merge = (current: Lead): Lead => {
+        const next = byId.get(Number(current.id));
+        return next ? { ...current, ...next, owner_email: next.owner_email ?? current.owner_email } : current;
+      };
+      setFichaContacts((list) => list.map(merge));
+      let hidden = 0;
+      setLeads((list) =>
+        list.flatMap((current) => {
+          if (!byId.has(Number(current.id))) return [current];
+          const merged = merge(current);
+          if (leadStaysVisible(merged)) return [merged];
+          hidden += 1;
+          return [];
+        })
+      );
+      if (hidden) setTotal((totalCount) => Math.max(0, totalCount - hidden));
+      showSuccess(
+        updated.length > 1
+          ? `Empresa en etapa «${nextEtapa}» (${updated.length} contactos).`
+          : `Etapa «${nextEtapa}» guardada.`,
+        "Etapa actualizada"
+      );
+    } catch {
+      showError("Error de red al actualizar la etapa", "Etapa no guardada");
+    } finally {
+      setSavingEtapa(false);
+    }
   }
 
   async function openFicha(lead: Lead) {
@@ -645,14 +730,17 @@ function PortafolioContent() {
     setMessageIALeadId(lead.id);
 
     if (channel === "call") setCallResult(null);
-    else setEmailResult(null);
+    else if (channel === "email") setEmailResult(null);
+    else setWhatsappResult(null);
 
     try {
+      // El servidor toma etapa, resultado e historial de la base a partir de lead_id.
       const res = await fetch("/api/portafolio/outreach", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           channel,
+          lead_id: lead.id,
           nombre: lead.nombre,
           cargo: lead.cargo,
           empresa: lead.empresa,
@@ -668,9 +756,11 @@ function PortafolioContent() {
         throw new Error(data.error ?? "Error al generar mensaje");
       }
       if (channel === "email") {
-        setEmailResult(data as ColdEmailResult);
+        setEmailResult(data as WithMessageId<ColdEmailResult>);
+      } else if (channel === "whatsapp") {
+        setWhatsappResult(data as WithMessageId<WhatsAppDraftResult>);
       } else {
-        setCallResult(data as ColdCallResult);
+        setCallResult(data as WithMessageId<ColdCallResult>);
       }
     } catch (e) {
       setMessageIAError(e instanceof Error ? e.message : "Error al generar mensaje comercial");
@@ -682,6 +772,7 @@ function PortafolioContent() {
   function openMessageIA(lead: Lead) {
     setCallResult(null);
     setEmailResult(null);
+    setWhatsappResult(null);
     void fetchOutreach(lead, "call");
   }
 
@@ -690,13 +781,21 @@ function PortafolioContent() {
     setMessageIAChannel(channel);
     if (channel === "call" && callResult) return;
     if (channel === "email" && emailResult) return;
+    if (channel === "whatsapp" && whatsappResult) return;
     void fetchOutreach(messageIALead, channel);
+  }
+
+  /** Trazabilidad: el vendedor copió el mensaje. No implica envío. */
+  function markMessageUsed(messageId: number | null | undefined) {
+    if (!messageId) return;
+    void fetch(`/api/portafolio/outreach/${messageId}`, { method: "PATCH", cache: "no-store" }).catch(() => {});
   }
 
   function closeMessageIA() {
     setMessageIALead(null);
     setCallResult(null);
     setEmailResult(null);
+    setWhatsappResult(null);
     setMessageIAError("");
     setMessageIALoading(false);
     setMessageIALeadId(null);
@@ -780,6 +879,8 @@ function PortafolioContent() {
           setStatus={setStatus}
           resultado={resultado}
           setResultado={setResultado}
+          etapa={etapa}
+          setEtapa={setEtapa}
           contact={contact}
           setContact={setContact}
           search={search}
@@ -842,6 +943,8 @@ function PortafolioContent() {
             setStatus={setStatus}
             resultado={resultado}
             setResultado={setResultado}
+            etapa={etapa}
+            setEtapa={setEtapa}
             contact={contact}
             setContact={setContact}
             search={search}
@@ -980,8 +1083,24 @@ function PortafolioContent() {
                     <td className="portfolio-table__role" title={l.cargo ?? undefined}>
                       {l.cargo ?? "—"}
                     </td>
-                    <td className="portfolio-table__company" title={l.empresa ?? undefined}>
-                      {l.empresa ?? "—"}
+                    <td
+                      className="portfolio-table__company"
+                      title={
+                        l.empresa
+                          ? `${l.empresa} · Etapa: ${etapaOf(l.etapa_comercial)}`
+                          : undefined
+                      }
+                    >
+                      <span className="portfolio-company">
+                        <span className="portfolio-company__name">{l.empresa ?? "—"}</span>
+                        {etapaOf(l.etapa_comercial) !== "Prospecto" ? (
+                          <span
+                            className={`etapa-badge etapa-badge--${etapaOf(l.etapa_comercial).toLowerCase()}`}
+                          >
+                            {etapaOf(l.etapa_comercial)}
+                          </span>
+                        ) : null}
+                      </span>
                     </td>
                     {isAdmin ? (
                       <td className="portfolio-table__owner" title={l.owner_email ?? undefined}>
@@ -1102,10 +1221,12 @@ function PortafolioContent() {
           openedId={fichaOpenedId}
           showOwner={isAdmin}
           savingId={statusSavingId}
+          savingEtapa={savingEtapa}
           onClose={() => setFichaOpen(false)}
           onStatus={updateStatus}
           onResultado={updateResultado}
-          onOpenMessage={(lead) => void fetchOutreach(lead, "call")}
+          onEtapa={(leadId, nextEtapa) => void updateEtapa(leadId, nextEtapa)}
+          onOpenMessage={(lead) => openMessageIA(lead)}
         />
       )}
 
@@ -1116,9 +1237,11 @@ function PortafolioContent() {
         error={messageIAError}
         callResult={callResult}
         emailResult={emailResult}
+        whatsappResult={whatsappResult}
         onClose={closeMessageIA}
         onChannelChange={changeMessageIAChannel}
         onRetry={() => messageIALead && void fetchOutreach(messageIALead, messageIAChannel)}
+        onCopied={markMessageUsed}
       />
     </div>
   );

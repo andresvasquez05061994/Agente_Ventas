@@ -2721,3 +2721,265 @@ button {
 .company-autocomplete__status--error {
   color: #b42318;
 }
+
+/* ---------- Búsqueda inteligente: criterios interpretados (antes de gastar créditos) ---------- */
+
+.smart-criteria {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #cfe3f5;
+  border-radius: 8px;
+  background: #f4f9fd;
+}
+
+.dark .smart-criteria {
+  border-color: #27405c;
+  background: #152333;
+}
+
+.smart-criteria__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.smart-criteria__title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--iac-text);
+}
+
+.smart-criteria__list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.smart-criteria__list--insight {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #cfe3f5;
+}
+
+.dark .smart-criteria__list--insight {
+  border-top-color: #27405c;
+}
+
+.smart-criteria__row {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.smart-criteria__label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--iac-text-faint);
+  padding-top: 2px;
+}
+
+.smart-criteria__value {
+  margin: 0;
+  font-size: 11px;
+  color: var(--iac-text);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.smart-criteria__why {
+  font-size: 9.5px;
+  color: var(--iac-text-faint);
+}
+
+.smart-criteria__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.smart-criteria__chip {
+  padding: 2px 7px;
+  font-size: 10px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid #cfe3f5;
+  color: var(--iac-text);
+}
+
+.dark .smart-criteria__chip {
+  background: #1a2a3c;
+  border-color: #2f4a68;
+}
+
+.smart-criteria__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+/* ---------- Etapa comercial (por empresa) ---------- */
+
+.client-ficha__etapa {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  margin-bottom: 12px;
+  max-width: 260px;
+}
+
+.portfolio-company {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.portfolio-company__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.etapa-badge {
+  align-self: flex-start;
+  padding: 1px 6px;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  line-height: 1.4;
+  color: #1d4f91;
+  background: #e8f1fb;
+}
+
+.etapa-badge--calificado {
+  color: #1d4f91;
+  background: #e8f1fb;
+}
+
+.etapa-badge--oportunidad {
+  color: #8a4b00;
+  background: #fff1dc;
+}
+
+.etapa-badge--cliente {
+  color: #0d6e6e;
+  background: #e6f7f7;
+}
+
+.dark .etapa-badge--calificado {
+  color: #84caff;
+  background: #102a56;
+}
+
+.dark .etapa-badge--oportunidad {
+  color: #f7b27a;
+  background: #3a2a10;
+}
+
+.dark .etapa-badge--cliente {
+  color: #5ec4c4;
+  background: #0d2f2f;
+}
+
+/* ---------- Mensaje IA: etapa y WhatsApp ---------- */
+
+.message-ia-stage {
+  margin-bottom: 6px;
+}
+
+.message-ia-whatsapp {
+  white-space: pre-wrap;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f1f6ef;
+  border: 1px solid #cfe5cc;
+}
+
+.dark .message-ia-whatsapp {
+  background: #15261c;
+  border-color: #2b4a35;
+}
+
+/* ---------- Conocimiento: versión y vigencia ---------- */
+
+.knowledge-upload-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.knowledge-upload-meta__field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.knowledge-doc__meta-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.knowledge-doc__meta-edit .input-field {
+  width: auto;
+  min-width: 120px;
+  flex: 1 1 120px;
+}
+
+@media (max-width: 640px) {
+  .knowledge-upload-meta {
+    grid-template-columns: 1fr;
+  }
+  .smart-criteria__row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
+.enrich-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.enrich-column {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.enrich-column__header {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enrich-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 16px;
+}
+
+.enrich-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}

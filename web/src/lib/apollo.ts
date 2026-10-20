@@ -116,6 +116,15 @@ async function postSearch(payload: Record<string, unknown>) {
   return res.json() as Promise<Record<string, unknown>>;
 }
 
+/** Primera página de mixed_people para coincidir a una persona concreta. */
+export async function searchPeopleCandidates(
+  payload: Record<string, unknown>
+): Promise<Record<string, unknown>[]> {
+  const data = await postSearch(payload);
+  const people = (data.people ?? data.contacts ?? []) as Record<string, unknown>[];
+  return Array.isArray(people) ? people : [];
+}
+
 async function fetchSearchPage(
   input: ValidatedSearchRequest,
   page: number

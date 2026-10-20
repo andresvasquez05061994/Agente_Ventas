@@ -7,11 +7,23 @@ import { ActionBanner } from "@/components/ui";
 import {
   createExcelQueue,
   excelQueueStats,
+  extractCompanyNames,
   nextPendingBatch,
-  readCompanyNamesFromBuffer,
+  readWorkbookMatrix,
   type ExcelCompanyEntry,
   type ExcelCompanyQueue,
 } from "@/lib/excel-companies";
+import {
+  attendeeQueueStats,
+  createAttendeeQueue,
+  extractAttendees,
+  isAttendeeMatrix,
+  MAX_ATTENDEE_ROWS,
+  MAX_ATTENDEES_PER_BATCH,
+  nextPendingAttendees,
+  type AttendeeEntry,
+  type AttendeeQueue,
+} from "@/lib/excel-attendees";
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
@@ -22,20 +34,33 @@ function statusLabel(entry: ExcelCompanyEntry): string {
   return "Por revisar";
 }
 
+function attendeeStatusLabel(entry: AttendeeEntry): string {
+  if (entry.status === "found") return "Con móvil y correo";
+  if (entry.status === "no_contacts") return "Sin móvil y correo";
+  if (entry.status === "not_found") return "No está en Apollo";
+  return "Por revisar";
+}
+
 export function ExcelCompanySearch({
   disabled,
   queue,
+  attendeeQueue,
   searchBlockedReason,
   onLoad,
+  onLoadAttendees,
   onClear,
   onSearch,
+  onSearchAttendees,
 }: {
   disabled: boolean;
   queue: ExcelCompanyQueue | null;
+  attendeeQueue: AttendeeQueue | null;
   searchBlockedReason: string | null;
   onLoad: (queue: ExcelCompanyQueue) => void;
+  onLoadAttendees: (queue: AttendeeQueue) => void;
   onClear: () => void;
   onSearch: () => void;
+  onSearchAttendees: () => void;
 }) {
   const inputId = useId();
   const [reading, setReading] = useState(false);
@@ -49,14 +74,28 @@ export function ExcelCompanySearch({
       return;
     }
     if (file.size > MAX_FILE_BYTES) {
-      setError("El archivo supera 2 MB. Deja solo la columna de empresas y vuelve a subirlo.");
+      setError("El archivo supera 2 MB. Deja solo las columnas de nombre y empresa y vuelve a subirlo.");
       return;
     }
     setReading(true);
     try {
-      const parsed = await readCompanyNamesFromBuffer(await file.arrayBuffer(), file.name);
+      const matrix = await readWorkbookMatrix(await file.arrayBuffer(), file.name);
+      if (isAttendeeMatrix(matrix)) {
+        const extracted = extractAttendees(matrix);
+        if (!extracted?.attendees.length) {
+          setError("No encontré filas con nombre y empresa. Revisa que el encabezado diga Nombre y Empresa.");
+          return;
+        }
+        if (extracted.attendees.length > MAX_ATTENDEE_ROWS) {
+          setError(`El archivo trae ${extracted.attendees.length} personas. Máximo ${MAX_ATTENDEE_ROWS}. Divídelo y vuelve a subirlo.`);
+          return;
+        }
+        onLoadAttendees(createAttendeeQueue(file.name, extracted));
+        return;
+      }
+      const parsed = extractCompanyNames(matrix);
       if (!parsed.totalFound) {
-        setError("No encontré nombres de empresa. Usa una columna con encabezado Empresa, Compañía o Company.");
+        setError("No encontré nombres de empresa. Usa Nombre+Empresa (asistentes) o una columna Empresa.");
         return;
       }
       onLoad(createExcelQueue(file.name, parsed.columnLabel, parsed.companies, parsed.loadStats));
@@ -82,13 +121,13 @@ export function ExcelCompanySearch({
     />
   );
 
-  if (!queue) {
+  if (!queue && !attendeeQueue) {
     return (
       <div className="excel-card">
         <div className="page-heading mb-2">
-          <p className="excel-card__title">Empresas desde Excel</p>
-          <HelpTip label="Empresas desde Excel">
-            Busca contactos solo en las empresas del archivo. La columna debe llamarse Empresa, Compañía o Company.
+          <p className="excel-card__title">Archivo de empresas o asistentes</p>
+          <HelpTip label="Excel o CSV">
+            Lista de asistentes (Nombre, Cargo, Empresa) o solo empresas. La búsqueda solo trae contactos con móvil y correo.
           </HelpTip>
         </div>
         <label
@@ -96,7 +135,7 @@ export function ExcelCompanySearch({
           className={`btn-secondary w-full cursor-pointer ${disabled || reading ? "pointer-events-none opacity-50" : ""}`}
         >
           <FileSpreadsheet size={14} strokeWidth={1.5} aria-hidden />
-          {reading ? "Leyendo archivo…" : "Cargar Excel"}
+          {reading ? "Leyendo archivo…" : "Cargar Excel o CSV"}
         </label>
         {fileInput}
         {error && (
@@ -107,6 +146,105 @@ export function ExcelCompanySearch({
       </div>
     );
   }
+
+  if (attendeeQueue) {
+    const stats = attendeeQueueStats(attendeeQueue);
+    const batch = nextPendingAttendees(attendeeQueue);
+    const progress = stats.total ? Math.round((stats.reviewed / stats.total) * 100) : 0;
+    const from = stats.reviewed + 1;
+    const to = stats.reviewed + batch.length;
+    const buttonLabel =
+      stats.reviewed === 0
+        ? `Buscar contactos · ${from}–${to} de ${stats.total}`
+        : `Siguientes ${batch.length} · ${from}–${to} de ${stats.total}`;
+
+    return (
+      <div className="excel-card">
+        <div className="excel-card__head">
+          <div className="min-w-0">
+            <div className="page-heading">
+              <p className="excel-card__title">Asistentes del archivo</p>
+              <HelpTip label="Asistentes">
+                Busca a cada persona por nombre, cargo y empresa. Solo se muestran si Apollo entrega móvil y correo. {MAX_ATTENDEES_PER_BATCH} por lote para no gastar el presupuesto de un clic.
+              </HelpTip>
+            </div>
+            <p className="excel-card__file" title={attendeeQueue.fileLabel}>
+              {attendeeQueue.fileLabel}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="excel-card__close"
+            onClick={onClear}
+            disabled={disabled}
+            aria-label="Quitar archivo"
+            title="Quitar archivo"
+          >
+            <X size={14} strokeWidth={1.75} aria-hidden />
+          </button>
+        </div>
+
+        <div className="excel-stats">
+          <div className="excel-stat">
+            <span className="excel-stat__value">{stats.total}</span>
+            <span className="excel-stat__label">Personas</span>
+          </div>
+          <div className="excel-stat">
+            <span className="excel-stat__value">{stats.found}</span>
+            <span className="excel-stat__label">Con móvil y correo</span>
+          </div>
+          <div className="excel-stat">
+            <span className="excel-stat__value">{stats.noContacts + stats.notFound}</span>
+            <span className="excel-stat__label">Sin contacto completo</span>
+          </div>
+          <div className="excel-stat">
+            <span className="excel-stat__value">{stats.pending}</span>
+            <span className="excel-stat__label">Por revisar</span>
+          </div>
+        </div>
+
+        <div className="excel-progress" aria-label={`${stats.reviewed} de ${stats.total} personas revisadas`}>
+          <div className="excel-progress__bar" style={{ width: `${progress}%` }} />
+        </div>
+        <p className="text-micro mt-1">
+          {stats.reviewed} de {stats.total} revisadas
+          {stats.pending > 0 ? ` · ${stats.pending} por revisar` : ""}
+        </p>
+
+        {batch.length > 0 ? (
+          <button
+            type="button"
+            className="btn-primary mt-3 w-full disabled:opacity-60"
+            disabled={disabled}
+            onClick={onSearchAttendees}
+          >
+            {buttonLabel}
+          </button>
+        ) : (
+          <p className="excel-card__done">Se revisaron todas las personas del archivo.</p>
+        )}
+
+        <details className="excel-companies">
+          <summary>Ver estado por persona</summary>
+          <ul>
+            {attendeeQueue.entries.slice(0, 80).map((entry) => (
+              <li key={entry.id}>
+                <span className="excel-companies__name" title={`${entry.rawName} · ${entry.rawCompany}`}>
+                  {entry.name} · {entry.company}
+                </span>
+                <span className={`excel-chip excel-chip--${entry.status}`}>{attendeeStatusLabel(entry)}</span>
+              </li>
+            ))}
+          </ul>
+          {attendeeQueue.entries.length > 80 ? (
+            <p className="text-micro">Mostrando las primeras 80 de {attendeeQueue.entries.length}.</p>
+          ) : null}
+        </details>
+      </div>
+    );
+  }
+
+  if (!queue) return null;
 
   const stats = excelQueueStats(queue);
   const load = queue.loadStats ?? {

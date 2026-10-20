@@ -97,6 +97,14 @@ export default function ConocimientoPage() {
   const [uploading, setUploading] = useState(false);
   const [personaBusy, setPersonaBusy] = useState<number | "new" | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [uploadVersion, setUploadVersion] = useState("");
+  const [uploadValidUntil, setUploadValidUntil] = useState("");
+  const [metaEditing, setMetaEditing] = useState<number | null>(null);
+  const [metaDraft, setMetaDraft] = useState<{ version: string; valid_until: string }>({
+    version: "",
+    valid_until: "",
+  });
+  const [metaSaving, setMetaSaving] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/session")
@@ -170,9 +178,13 @@ export default function ConocimientoPage() {
     try {
       const form = new FormData();
       form.set("file", file);
+      if (uploadVersion.trim()) form.set("version", uploadVersion.trim());
+      if (uploadValidUntil) form.set("valid_until", uploadValidUntil);
       const res = await fetch("/api/conocimiento/documentos", { method: "POST", body: form });
       const { data, error } = await parseApiResponse<{ document?: KnowledgeDocument; error?: string }>(res);
       if (error || data?.error) throw new Error(error ?? data?.error);
+      setUploadVersion("");
+      setUploadValidUntil("");
       await reload();
       const services = data?.document?.services_count ?? 0;
       showSuccess(
@@ -201,6 +213,40 @@ export default function ConocimientoPage() {
       showInfo(doc.active ? "Dejó de usarse en Mensaje IA." : "Volvió a estar disponible para Mensaje IA.", doc.filename);
     } catch (e) {
       showError(e instanceof Error ? e.message : "No se pudo actualizar", "Documento");
+    }
+  }
+
+  function openMeta(doc: KnowledgeDocument) {
+    setMetaEditing(doc.id);
+    setMetaDraft({ version: doc.version ?? "", valid_until: doc.valid_until ?? "" });
+  }
+
+  async function saveMeta(doc: KnowledgeDocument) {
+    setMetaSaving(true);
+    clear();
+    try {
+      const res = await fetch(`/api/conocimiento/documentos/${doc.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          version: metaDraft.version.trim(),
+          valid_until: metaDraft.valid_until || null,
+        }),
+      });
+      const { data, error } = await parseApiResponse<{ document?: KnowledgeDocument; error?: string }>(res);
+      if (error || data?.error || !data?.document) throw new Error(error ?? data?.error);
+      setDocuments((list) => list.map((item) => (item.id === doc.id ? data.document! : item)));
+      setMetaEditing(null);
+      showSuccess(
+        data.document.expired
+          ? "Quedó marcado como vencido: el Mensaje IA no lo usará hasta que actualices la vigencia."
+          : "El Mensaje IA citará este archivo con su versión y vigencia.",
+        "Versión guardada"
+      );
+    } catch (e) {
+      showError(e instanceof Error ? e.message : "No se pudo guardar", "Versión y vigencia");
+    } finally {
+      setMetaSaving(false);
     }
   }
 
@@ -304,7 +350,7 @@ export default function ConocimientoPage() {
     }
   }
 
-  const activeCount = documents.filter((doc) => doc.active).length;
+  const activeCount = documents.filter((doc) => doc.active && !doc.expired).length;
   const servicesCount = documents.reduce((sum, doc) => sum + (doc.services_count ?? 0), 0);
   const busy = loading || saving || uploading || personaBusy !== null;
   const profileMeta = [profile.name, profile.consultant].filter(Boolean).join(" · ") || "Sin completar";
@@ -364,6 +410,29 @@ export default function ConocimientoPage() {
               </ul>
             </div>
 
+            <div className="knowledge-upload-meta">
+              <label className="knowledge-upload-meta__field">
+                <span className="text-micro">Versión del archivo</span>
+                <input
+                  className="input-field"
+                  value={uploadVersion}
+                  onChange={(e) => setUploadVersion(e.target.value)}
+                  placeholder="Ej. v3 · 2026-Q1"
+                  maxLength={40}
+                  disabled={busy}
+                />
+              </label>
+              <label className="knowledge-upload-meta__field">
+                <span className="text-micro">Vigente hasta</span>
+                <input
+                  type="date"
+                  className="input-field"
+                  value={uploadValidUntil}
+                  onChange={(e) => setUploadValidUntil(e.target.value)}
+                  disabled={busy}
+                />
+              </label>
+            </div>
             <label
               htmlFor={inputId}
               className={`knowledge-drop knowledge-drop--hero ${busy ? "pointer-events-none opacity-50" : ""}`}
@@ -389,12 +458,16 @@ export default function ConocimientoPage() {
 
             {documents.length === 0 ? (
               <p className="text-micro mt-4">
-                Sin documentos. Hasta que cargues uno, el Mensaje IA usa el portafolio IAC por defecto.
+                Sin documentos. Hasta que cargues uno, el Mensaje IA usa el catálogo IAC de referencia interna y
+                presenta sus cifras como orientativas, no como hechos.
               </p>
             ) : (
               <ul className="knowledge-docs">
                 {documents.map((doc) => (
-                  <li key={doc.id} className={`knowledge-doc ${doc.active ? "" : "knowledge-doc--off"}`}>
+                  <li
+                    key={doc.id}
+                    className={`knowledge-doc ${doc.active && !doc.expired ? "" : "knowledge-doc--off"}`}
+                  >
                     <div className="knowledge-doc__icon" aria-hidden>
                       {doc.kind === "xlsx" ? <FileSpreadsheet size={18} /> : <FileText size={18} />}
                     </div>
@@ -404,13 +477,62 @@ export default function ConocimientoPage() {
                       </p>
                       <p className="text-micro">
                         {kindLabel(doc.kind)}
+                        {doc.version ? ` · ${doc.version}` : " · sin versión"}
+                        {doc.valid_until
+                          ? doc.expired
+                            ? ` · vencido el ${doc.valid_until}`
+                            : ` · vigente hasta ${doc.valid_until}`
+                          : " · sin vigencia"}
                         {doc.services_count ? ` · ${doc.services_count} servicio(s)` : ""}
-                        {` · ${Math.round(doc.char_count / 1000) || 1} mil caracteres`}
-                        {doc.active ? " · En uso" : " · Pausado"}
+                        {doc.expired ? " · Fuera del Mensaje IA" : doc.active ? " · En uso" : " · Pausado"}
                       </p>
-                      {doc.summary && <p className="knowledge-doc__summary">{doc.summary}</p>}
+                      {metaEditing === doc.id ? (
+                        <div className="knowledge-doc__meta-edit">
+                          <input
+                            className="input-field"
+                            value={metaDraft.version}
+                            onChange={(e) => setMetaDraft((d) => ({ ...d, version: e.target.value }))}
+                            placeholder="Versión"
+                            maxLength={40}
+                            disabled={metaSaving}
+                          />
+                          <input
+                            type="date"
+                            className="input-field"
+                            value={metaDraft.valid_until}
+                            onChange={(e) => setMetaDraft((d) => ({ ...d, valid_until: e.target.value }))}
+                            disabled={metaSaving}
+                          />
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            onClick={() => void saveMeta(doc)}
+                            disabled={metaSaving}
+                          >
+                            {metaSaving ? "Guardando…" : "Guardar"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-link"
+                            onClick={() => setMetaEditing(null)}
+                            disabled={metaSaving}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      ) : doc.summary ? (
+                        <p className="knowledge-doc__summary">{doc.summary}</p>
+                      ) : null}
                     </div>
                     <div className="knowledge-doc__actions">
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={() => (metaEditing === doc.id ? setMetaEditing(null) : openMeta(doc))}
+                        disabled={busy}
+                      >
+                        Versión
+                      </button>
                       <button type="button" className="btn-secondary" onClick={() => void toggleDoc(doc)} disabled={busy}>
                         {doc.active ? "Pausar" : "Activar"}
                       </button>

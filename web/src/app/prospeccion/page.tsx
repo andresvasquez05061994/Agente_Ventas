@@ -3,17 +3,15 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Building2, Copy, Mail, Phone, Search } from "lucide-react";
-import type { SmartSearchResult } from "@/lib/smart-search";
+import { formatInsightForSource, type SmartSearchResult } from "@/lib/smart-search";
 import type { ApolloPerson } from "@/lib/types";
 import { ApolloSearchFilters } from "@/components/ApolloSearchFilters";
-import { MAX_EXCEL_COMPANIES, type ExcelCompanyQueue } from "@/lib/excel-companies";
-import type { CompanyContactsResult } from "@/lib/apollo-company-contacts";
 import { SmartSearchPanel } from "@/components/SmartSearchPanel";
 import { PageHeading } from "@/components/HelpTip";
 import { ActionBanner, FeedbackAnchor } from "@/components/ui";
-import { useProspeccionSession } from "@/contexts/prospeccion-session";
+import { activeSearchIntent, useProspeccionSession } from "@/contexts/prospeccion-session";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
-import { explainEmptySearchMessage, getAllPresetTitleValues } from "@/lib/apollo-filters";
+import { explainEmptySearchMessage } from "@/lib/apollo-filters";
 import { parseApiResponse } from "@/lib/parse-api-response";
 
 type SearchParams = {
@@ -26,12 +24,6 @@ type SearchParams = {
   perPage: number;
   page?: number;
 };
-
-function isFatalCompanySearchError(message: string): boolean {
-  return /cr[eé]dito|presupuesto|insufficient credits|rate limit|l[ií]mite de solicitudes|failed to fetch|networkerror|load failed|tiempo de espera|tard[oó] demasiado/i.test(
-    message
-  );
-}
 
 export default function ProspeccionPage() {
   const router = useRouter();
@@ -64,17 +56,15 @@ export default function ProspeccionPage() {
     removeResultsByIds,
     clearSession,
     applyInterpretedFilters,
-    applyFilters,
-    excelQueue,
-    setExcelQueue,
     appendResults,
+    searchIntent,
+    setSearchIntent,
   } = session;
 
   const [saving, setSaving] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [batchProgress, setBatchProgress] = useState<string | null>(null);
   const batchRun = useRef(0);
-  const excelMode = Boolean(excelQueue);
   const { feedback, showSuccess, showError, showWarning, showInfo, clear } = useActionFeedback();
 
   function toggleTitle(value: string) {
@@ -227,157 +217,23 @@ export default function ProspeccionPage() {
     }
   }
 
-  function resetResults() {
-    setResults([]);
-    setSelectedIds([]);
-    setMeta(null);
-    setStatus("idle");
+  function rememberIntent(result: SmartSearchResult) {
+    const text = formatInsightForSource(result.insight);
+    setSearchIntent(text ? { text, titles: [...result.filters.titles] } : null);
   }
 
-  function loadExcel(queue: ExcelCompanyQueue) {
-    batchRun.current += 1;
-    resetResults();
-    setExcelQueue(queue);
-    clear();
-    const load = queue.loadStats;
-    const skipped = load ? load.skippedDuplicate + load.skippedEmpty + load.skippedInvalid : 0;
-    const skipNote =
-      load && skipped
-        ? ` El archivo tenía ${load.rowsInColumn} fila(s) en la columna de empresas; ${skipped} se omitieron (vacías, inválidas o repetidas al limpiar la razón social).`
-        : "";
-    showInfo(
-      `${queue.entries.length} empresa(s) únicas cargadas. La búsqueda se hará solo dentro de estas empresas.${skipNote}`,
-      "Archivo listo"
-    );
-  }
-
-  function clearExcel() {
-    batchRun.current += 1;
-    setBatchProgress(null);
-    setExcelQueue(null);
-    resetResults();
-    clear();
-  }
-
-  async function searchCompanies() {
-    const queue = excelQueue;
-    if (!queue) return;
-    if (!titles.length) {
-      showWarning("Selecciona al menos un cargo o pulsa Todos.", "Filtros incompletos");
-      return;
-    }
-
-    const batch = queue.entries.filter((entry) => entry.status === "pending").slice(0, MAX_EXCEL_COMPANIES);
-    if (!batch.length) return;
-
-    const allRoles = getAllPresetTitleValues().every((value) => titles.includes(value));
-    const totalCompanies = queue.entries.length;
-    const reviewedBefore = queue.entries.filter((entry) => entry.status !== "pending").length;
-    const runId = ++batchRun.current;
-    setStatus("loading");
-    clear();
-
-    let found = 0;
-    let withContacts = 0;
-    let missing = 0;
-    let credits = 0;
-    let failed = 0;
-    let fatal: string | null = null;
-
-    for (let index = 0; index < batch.length; index++) {
-      if (batchRun.current !== runId) return;
-      const entry = batch[index];
-      setBatchProgress(`Empresa ${reviewedBefore + index + 1} de ${totalCompanies}: ${entry.name}`);
-
-      try {
-        const res = await fetch("/api/apollo/company-contacts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            company: entry.name,
-            alias: entry.alias ?? undefined,
-            country,
-            titles: allRoles ? [] : titles,
-            all_roles: allRoles,
-            seniority,
-            per_company: perPage,
-            organization_ids: entry.apolloIds.length ? entry.apolloIds : undefined,
-            organization_name: entry.apolloName ?? undefined,
-          }),
-        });
-        const { data, error: parseError } = await parseApiResponse<
-          CompanyContactsResult & { error?: string }
-        >(res);
-        if (batchRun.current !== runId) return;
-
-        const message = parseError ?? data?.error ?? (!res.ok || !data ? `Error del servidor (${res.status})` : "");
-        if (message || !data) {
-          if (isFatalCompanySearchError(message)) {
-            fatal = message;
-            break;
-          }
-          failed += 1;
-          continue;
-        }
-
-        credits += data.credits_consumed ?? 0;
-        const people = data.results ?? [];
-        found += people.length;
-        if (people.length) withContacts += 1;
-        else missing += 1;
-        appendResults(people);
-        setExcelQueue((current) => {
-          if (!current || current.id !== queue.id) return current;
-          return {
-            ...current,
-            entries: current.entries.map((item) =>
-              item.name === entry.name
-                ? {
-                    ...item,
-                    status: data.status,
-                    contacts: item.contacts + people.length,
-                    apolloIds: data.organization?.ids?.length ? data.organization.ids : item.apolloIds,
-                    apolloName: data.organization?.name ?? item.apolloName,
-                  }
-                : item
-            ),
-          };
-        });
-      } catch (e) {
-        if (batchRun.current !== runId) return;
-        const raw = e instanceof Error ? e.message : "Error de búsqueda";
-        if (isFatalCompanySearchError(raw)) {
-          fatal = raw;
-          break;
-        }
-        failed += 1;
-      }
-    }
-
-    if (batchRun.current !== runId) return;
-    setBatchProgress(null);
-    const totalCredits = (meta?.credits_consumed ?? 0) + credits;
-    setMeta(totalCredits > 0 ? { total_entries: 0, credits_consumed: totalCredits } : null);
-    setStatus(results.length + found > 0 ? "success" : "empty");
-
-    const reviewed = withContacts + missing;
-    const pendingAfter = totalCompanies - reviewedBefore - reviewed;
-    const parts = [
-      `${reviewed} empresa(s) revisadas: ${found} contacto(s) nuevos en ${withContacts} empresa(s)`,
-      missing ? `${missing} sin contactos con email y teléfono` : "",
-      failed ? `${failed} no se pudieron consultar y quedan pendientes` : "",
-      pendingAfter > 0 ? `faltan ${pendingAfter} empresa(s) por revisar` : "se revisaron todas las empresas del archivo",
-    ].filter(Boolean);
-    const summary = `${parts.join(" · ")}.`;
-
-    if (fatal) showWarning(`${summary} La búsqueda se detuvo: ${fatal}`, "Búsqueda detenida");
-    else if (failed || !found) showWarning(summary, "Tanda terminada");
-    else showSuccess(summary, "Tanda terminada");
-  }
-
-  async function handleSmartApply(result: SmartSearchResult) {
+  /** «Ajustar filtros»: pasa los criterios al panel sin gastar créditos. */
+  function handleSmartApply(result: SmartSearchResult) {
     applyInterpretedFilters(result.filters);
-    showInfo(result.summary, "Filtros interpretados");
+    rememberIntent(result);
+    clear();
+  }
+
+  /** «Buscar en Apollo»: el vendedor ya confirmó los criterios interpretados. */
+  async function handleSmartSearch(result: SmartSearchResult) {
+    applyInterpretedFilters(result.filters);
+    rememberIntent(result);
+    showInfo(result.summary, "Criterios confirmados");
     await search({ ...result.filters });
   }
 
@@ -397,12 +253,8 @@ export default function ProspeccionPage() {
       return;
     }
 
-    const allRoles = getAllPresetTitleValues().every((value) => titles.includes(value));
-    const fuente = (
-      excelQueue
-        ? [country, `Excel: ${excelQueue.fileLabel}`, allRoles ? "Todos los cargos" : titles.join(", "), seniority || null]
-        : [country, company.trim() || null, titles.join(", "), keyword || null, seniority || null]
-    )
+    const intent = activeSearchIntent(searchIntent, titles);
+    const fuente = [country, company.trim() || null, titles.join(", "), keyword || null, seniority || null, intent]
       .filter(Boolean)
       .join(" | ");
 
@@ -426,11 +278,10 @@ export default function ProspeccionPage() {
         if (data.updated) parts.push(`${data.updated} actualizado(s)`);
         if (data.skipped) parts.push(`${data.skipped} omitido(s)`);
         showSuccess(
-          `${parts.join(", ")} con email y teléfono verificados. Se añadieron al final del portafolio.` +
-            (excelQueue ? " Puedes seguir con las siguientes empresas del archivo." : ""),
+          `${parts.join(", ")} con email y teléfono verificados. Se añadieron al final del portafolio.`,
           "Guardado en portafolio"
         );
-        if (data.inserted > 0 && !excelQueue) {
+        if (data.inserted > 0) {
           router.push("/portafolio?page=last");
         }
       }
@@ -465,10 +316,6 @@ export default function ProspeccionPage() {
     setPerPage,
     loading: status === "loading" || saving,
     onSearch: () => search(),
-    excelQueue,
-    onExcelLoaded: loadExcel,
-    onExcelCleared: clearExcel,
-    onSearchCompanies: () => void searchCompanies(),
   };
 
   const busy = status === "loading" || saving || loadingMore;
@@ -490,7 +337,7 @@ export default function ProspeccionPage() {
   return (
     <div className="flex w-full flex-1">
       <aside className="filter-sidebar hidden w-full max-w-[400px] shrink-0 border-r lg:block lg:w-[min(40%,400px)]">
-        {!excelMode && <SmartSearchPanel disabled={busy} onApply={handleSmartApply} />}
+        <SmartSearchPanel disabled={busy} onApply={handleSmartApply} onSearch={handleSmartSearch} />
         <ApolloSearchFilters {...filterProps} />
       </aside>
 
@@ -498,7 +345,7 @@ export default function ProspeccionPage() {
         <div className="page-header flex flex-wrap items-center justify-between gap-3">
           <PageHeading
             title="Prospección"
-            help="Busca en Apollo por país, empresa y cargo, dicta la búsqueda o carga un Excel de empresas. Solo se muestran contactos con email y teléfono. Guardar no vuelve a cobrar: Apollo cobra al revelar esos datos. Cada lote nuevo gasta créditos de tu cuenta."
+            help="Busca en Apollo por país, empresa y cargo, o dicta la búsqueda. Solo se muestran contactos con email y teléfono. Para completar un listado de personas usa Enriquecer. Guardar no vuelve a cobrar: Apollo cobra al revelar esos datos. Cada lote nuevo gasta créditos de tu cuenta."
           />
           {meta?.credits_consumed != null && status !== "loading" && (
             <span className="ui-badge ui-badge--accent">
@@ -513,7 +360,7 @@ export default function ProspeccionPage() {
         </div>
 
         <div className="mt-4 lg:hidden">
-          {!excelMode && <SmartSearchPanel disabled={busy} onApply={handleSmartApply} />}
+          <SmartSearchPanel disabled={busy} onApply={handleSmartApply} onSearch={handleSmartSearch} />
           <ApolloSearchFilters {...filterProps} />
         </div>
 
@@ -546,10 +393,7 @@ export default function ProspeccionPage() {
         {hasResults && status !== "loading" && (
           <>
             <div className="text-body mt-4 flex flex-wrap items-center gap-2">
-              {excelMode ? (
-                <span className="ui-badge ui-badge--accent">{results.length} contactos de empresas del archivo</span>
-              ) : (
-                <>
+              <>
                   <span className="ui-badge ui-badge--neutral">
                     {meta?.total_entries ?? results.length} coincidencias en Apollo
                   </span>
@@ -560,7 +404,6 @@ export default function ProspeccionPage() {
                     </span>
                   ) : null}
                 </>
-              )}
               <span className="ui-badge ui-badge--neutral">{selected.size} seleccionados</span>
               <button type="button" onClick={selectAllResults} className="btn-link" disabled={busy}>
                 Seleccionar todos
@@ -630,7 +473,7 @@ export default function ProspeccionPage() {
                 </li>
               ))}
             </ul>
-            {!excelMode && Boolean(meta?.has_more && meta.next_page) && (
+            {Boolean(meta?.has_more && meta.next_page) && (
               <div className="prospect-next-lote mt-5">
                 <button
                   type="button"

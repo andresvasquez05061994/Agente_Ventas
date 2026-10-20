@@ -1,5 +1,5 @@
-/** Máximo de empresas por tanda para no agotar créditos de Apollo de un solo clic. */
-export const MAX_EXCEL_COMPANIES = 20;
+/** Máximo de empresas por tanda. Cada empresa puede gastar créditos al revelar móvil y correo. */
+export const MAX_EXCEL_COMPANIES = 50;
 
 export type ExcelCompanyRow = {
   /** Razón social limpia que se envía a Apollo. */
@@ -369,7 +369,7 @@ export function excelQueueStats(queue: ExcelCompanyQueue): ExcelQueueStats {
   return stats;
 }
 
-/** Siguiente tanda: hasta 20 empresas que aún no se han revisado, en el orden del archivo. */
+/** Siguiente tanda: empresas pendientes, en el orden del archivo. */
 export function nextPendingBatch(queue: ExcelCompanyQueue): string[] {
   return queue.entries
     .filter((entry) => entry.status === "pending")
@@ -377,10 +377,10 @@ export function nextPendingBatch(queue: ExcelCompanyQueue): string[] {
     .map((entry) => entry.name);
 }
 
-export async function readCompanyNamesFromBuffer(
+export async function readWorkbookMatrix(
   buffer: ArrayBuffer,
   filename: string
-): Promise<ExcelCompanyExtract> {
+): Promise<unknown[][]> {
   const XLSX = await import("xlsx");
   const lower = filename.toLowerCase();
   const text = lower.endsWith(".csv") || lower.endsWith(".txt") ? decodeCsv(buffer) : "";
@@ -389,11 +389,19 @@ export async function readCompanyNamesFromBuffer(
     : XLSX.read(buffer, { type: "array" });
 
   const sheetName = workbook.SheetNames[0];
-  if (!sheetName) {
+  if (!sheetName) return [];
+  return sheetToMatrix(XLSX, workbook.Sheets[sheetName]);
+}
+
+export async function readCompanyNamesFromBuffer(
+  buffer: ArrayBuffer,
+  filename: string
+): Promise<ExcelCompanyExtract> {
+  const matrix = await readWorkbookMatrix(buffer, filename);
+  if (!matrix.length) {
     return { companies: [], totalFound: 0, columnLabel: null, loadStats: emptyLoadStats() };
   }
-
-  return extractCompanyNames(sheetToMatrix(XLSX, workbook.Sheets[sheetName]));
+  return extractCompanyNames(matrix);
 }
 
 /**

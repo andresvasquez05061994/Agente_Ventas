@@ -243,12 +243,51 @@ async function migration005Gestion(sql: Sql) {
   `;
 }
 
+/**
+ * 006: etapa comercial por empresa, mensajes IA guardados (trazabilidad, sin envío)
+ * y versión/vigencia de los documentos de conocimiento.
+ */
+async function migration006Ciclo(sql: Sql) {
+  await sql`
+    ALTER TABLE leads
+    ADD COLUMN IF NOT EXISTS etapa_comercial TEXT NOT NULL DEFAULT 'Prospecto'
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_leads_owner_etapa
+    ON leads (owner_id, etapa_comercial)
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS generated_messages (
+      id SERIAL PRIMARY KEY,
+      lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+      owner_id INTEGER REFERENCES users(id),
+      channel TEXT NOT NULL CHECK (channel IN ('call', 'email', 'whatsapp')),
+      headline TEXT NOT NULL DEFAULT '',
+      content JSONB NOT NULL,
+      lead_status TEXT,
+      resultado_gestion TEXT,
+      etapa_comercial TEXT,
+      source TEXT NOT NULL DEFAULT 'rules',
+      model TEXT,
+      used_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_generated_messages_lead_created
+    ON generated_messages (lead_id, created_at DESC)
+  `;
+  await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS version TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS valid_until DATE`;
+}
+
 const MIGRATIONS: Migration[] = [
   { id: "001_init", run: migration001Init },
   { id: "002_phone_search", run: migration002PhoneSearch },
   { id: "003_app_settings", run: migration003AppSettings },
   { id: "004_users", run: migration004Users },
   { id: "005_gestion", run: migration005Gestion },
+  { id: "006_ciclo", run: migration006Ciclo },
 ];
 
 export async function applyMigrations(sql: Sql) {

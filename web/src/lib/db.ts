@@ -5,12 +5,20 @@ import { phoneMatchCandidates, toE164 } from "./phone";
 import type {
   ConversationStats,
   ConversationThread,
+  EtapaComercial,
+  GeneratedMessageSummary,
   Lead,
   LeadStatus,
+  MessageChannel,
   MessageDirection,
   WhatsAppMessage,
 } from "./types";
-import { isGestionResultado, isLeadStatus, type GestionResultado } from "./types";
+import {
+  isEtapaComercial,
+  isGestionResultado,
+  isLeadStatus,
+  type GestionResultado,
+} from "./types";
 
 const LEADS_PAGE_SIZE = 20;
 const LEADS_EXPORT_MAX = 10_000;
@@ -162,6 +170,7 @@ export async function getLeads(
   filters?: {
     status?: string;
     resultado?: string;
+    etapa?: string;
     search?: string;
     contact?: string;
   },
@@ -171,6 +180,7 @@ export async function getLeads(
   const sql = getSql();
   const status =
     filters?.status && filters.status !== "Todos" ? filters.status : null;
+  const etapa = isEtapaComercial(filters?.etapa) ? filters.etapa : null;
   const resultadoRaw = filters?.resultado?.trim() || "";
   const gestionMode = !resultadoRaw || resultadoRaw === "Todos"
     ? "all"
@@ -193,6 +203,7 @@ export async function getLeads(
     SELECT COUNT(*)::int AS total FROM leads
     WHERE (${ownerId}::int IS NULL OR owner_id = ${ownerId})
       AND (${status}::text IS NULL OR lead_status = ${status})
+      AND (${etapa}::text IS NULL OR etapa_comercial = ${etapa})
       AND (
         ${gestionMode} = 'all'
         OR (
@@ -239,6 +250,7 @@ export async function getLeads(
     LEFT JOIN users ON users.id = leads.owner_id
     WHERE (${ownerId}::int IS NULL OR leads.owner_id = ${ownerId})
       AND (${status}::text IS NULL OR lead_status = ${status})
+      AND (${etapa}::text IS NULL OR leads.etapa_comercial = ${etapa})
       AND (
         ${gestionMode} = 'all'
         OR (
@@ -347,7 +359,16 @@ export async function getStats(ownerId: number | null = null) {
       COUNT(*) FILTER (WHERE resultado_gestion = 'No interesado')::int AS no_interesado,
       COUNT(*) FILTER (WHERE resultado_gestion = 'No contesta')::int AS no_contesta,
       COUNT(*) FILTER (WHERE telefono IS NOT NULL AND telefono != '')::int AS with_phone,
-      COUNT(*) FILTER (WHERE email IS NOT NULL AND email != '')::int AS with_email
+      COUNT(*) FILTER (WHERE email IS NOT NULL AND email != '')::int AS with_email,
+      COUNT(DISTINCT LOWER(BTRIM(empresa))) FILTER (
+        WHERE etapa_comercial = 'Calificado' AND empresa IS NOT NULL AND BTRIM(empresa) <> ''
+      )::int AS empresas_calificadas,
+      COUNT(DISTINCT LOWER(BTRIM(empresa))) FILTER (
+        WHERE etapa_comercial = 'Oportunidad' AND empresa IS NOT NULL AND BTRIM(empresa) <> ''
+      )::int AS empresas_oportunidad,
+      COUNT(DISTINCT LOWER(BTRIM(empresa))) FILTER (
+        WHERE etapa_comercial = 'Cliente' AND empresa IS NOT NULL AND BTRIM(empresa) <> ''
+      )::int AS empresas_cliente
     FROM leads
     WHERE (${ownerId}::int IS NULL OR owner_id = ${ownerId})
   `;
@@ -361,6 +382,9 @@ export async function getStats(ownerId: number | null = null) {
     no_contesta: number;
     with_phone: number;
     with_email: number;
+    empresas_calificadas: number;
+    empresas_oportunidad: number;
+    empresas_cliente: number;
   };
   const conversations = await getConversationStats(ownerId);
   return {
@@ -373,6 +397,12 @@ export async function getStats(ownerId: number | null = null) {
     no_contesta: r?.no_contesta ?? 0,
     with_phone: r?.with_phone ?? 0,
     with_email: r?.with_email ?? 0,
+    /** Empresas distintas por etapa (la etapa es de la empresa, no del contacto). */
+    etapas: {
+      calificado: r?.empresas_calificadas ?? 0,
+      oportunidad: r?.empresas_oportunidad ?? 0,
+      cliente: r?.empresas_cliente ?? 0,
+    },
     conversations,
   };
 }
@@ -552,6 +582,116 @@ export async function getCompanyFicha(
     contacts: contacts.length ? contacts : [lead],
     colleagues: colleagueRows.map((row) => row.email).filter(Boolean),
   };
+}
+
+/**
+ * Cambia la etapa comercial de la EMPRESA del contacto: aplica a todos los
+ * contactos con la misma razón social del mismo dueño. El admin actúa sobre
+ * los contactos del dueño del registro abierto, nunca sobre otros vendedores.
+ */
+export async function updateCompanyEtapa(
+  leadId: number,
+  etapa: EtapaComercial,
+  ownerId: number | null = null
+): Promise<Lead[]> {
+  if (!isEtapaComercial(etapa)) {
+    throw new Error(`Etapa comercial no válida: ${String(etapa)}`);
+  }
+  const sql = getSql();
+  const id = Number(leadId);
+  if (!Number.isFinite(id) || id <= 0) throw new Error("ID de contacto no válido");
+
+  const opened = (await sql`
+    SELECT id, owner_id, empresa FROM leads
+    WHERE id = ${id}
+      AND (${ownerId}::int IS NULL OR owner_id = ${ownerId})
+    LIMIT 1
+  `) as Array<{ id: number; owner_id: number | null; empresa: string | null }>;
+  const lead = opened[0];
+  if (!lead) throw new Error("Contacto no encontrado");
+
+  const empresa = lead.empresa?.trim() ?? "";
+  const scopeOwner = lead.owner_id;
+
+  const rows = (await sql`
+    UPDATE leads
+    SET etapa_comercial = ${etapa}, updated_at = NOW()
+    WHERE (
+        id = ${id}
+        OR (
+          ${empresa} <> ''
+          AND owner_id IS NOT DISTINCT FROM ${scopeOwner}
+          AND LOWER(REGEXP_REPLACE(BTRIM(COALESCE(empresa, '')), '\\s+', ' ', 'g'))
+            = LOWER(REGEXP_REPLACE(BTRIM(${empresa}), '\\s+', ' ', 'g'))
+        )
+      )
+    RETURNING *
+  `) as Lead[];
+  return rows;
+}
+
+/** Guarda un mensaje generado por la IA. Solo trazabilidad: nada se envía. */
+export async function insertGeneratedMessage(input: {
+  leadId: number;
+  ownerId: number;
+  channel: MessageChannel;
+  headline: string;
+  content: unknown;
+  leadStatus: string | null;
+  resultadoGestion: string | null;
+  etapaComercial: string | null;
+  source: string;
+  model: string | null;
+}): Promise<GeneratedMessageSummary> {
+  const sql = getSql();
+  const rows = (await sql`
+    INSERT INTO generated_messages (
+      lead_id, owner_id, channel, headline, content, lead_status, resultado_gestion,
+      etapa_comercial, source, model, created_at
+    ) VALUES (
+      ${input.leadId}, ${input.ownerId}, ${input.channel}, ${input.headline.slice(0, 200)},
+      ${JSON.stringify(input.content)}::jsonb, ${input.leadStatus}, ${input.resultadoGestion},
+      ${input.etapaComercial}, ${input.source}, ${input.model}, NOW()
+    )
+    RETURNING id, lead_id, channel, headline, lead_status, resultado_gestion, etapa_comercial,
+              source, used_at, created_at
+  `) as GeneratedMessageSummary[];
+  return rows[0];
+}
+
+/** Marca que el vendedor copió/usó el mensaje. No implica envío. */
+export async function markGeneratedMessageUsed(
+  id: number,
+  ownerId: number | null
+): Promise<GeneratedMessageSummary | null> {
+  const sql = getSql();
+  const rows = (await sql`
+    UPDATE generated_messages
+    SET used_at = COALESCE(used_at, NOW())
+    WHERE id = ${id}
+      AND (${ownerId}::int IS NULL OR owner_id = ${ownerId})
+    RETURNING id, lead_id, channel, headline, lead_status, resultado_gestion, etapa_comercial,
+              source, used_at, created_at
+  `) as GeneratedMessageSummary[];
+  return rows[0] ?? null;
+}
+
+/** Últimos mensajes generados para un contacto (los más recientes primero). */
+export async function listGeneratedMessages(
+  leadId: number,
+  ownerId: number | null,
+  limit = 5
+): Promise<GeneratedMessageSummary[]> {
+  const sql = getSql();
+  return (await sql`
+    SELECT id, lead_id, channel, headline, lead_status, resultado_gestion, etapa_comercial,
+           source, used_at, created_at
+    FROM generated_messages
+    WHERE lead_id = ${leadId}
+      AND (${ownerId}::int IS NULL OR owner_id = ${ownerId})
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `) as GeneratedMessageSummary[];
 }
 
 export async function updateLeadNotes(
@@ -795,6 +935,23 @@ export async function getConversationThreads(
   `) as ConversationThread[];
 
   return rows;
+}
+
+export async function getLeadByApolloId(
+  apolloId: string,
+  ownerId: number | null = null
+): Promise<Lead | null> {
+  const id = String(apolloId ?? "").trim();
+  if (!id) return null;
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT * FROM leads
+    WHERE apollo_id = ${id}
+      AND (${ownerId}::int IS NULL OR owner_id = ${ownerId})
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `) as Lead[];
+  return rows[0] ?? null;
 }
 
 export async function getLeadById(id: number, ownerId: number | null = null): Promise<Lead | null> {

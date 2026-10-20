@@ -1,7 +1,18 @@
 /**
- * Conocimiento comercial IAC SAS — derivado de IAC_Portafolio_IA_v3.pdf
- * Usado por Mensaje IA para conectar oferta con el perfil del prospecto.
+ * Conocimiento comercial IAC SAS — catálogo de referencia interna transcrito de
+ * IAC_Portafolio_IA_v3.pdf. Usado por Mensaje IA cuando la cuenta no tiene
+ * documentos cargados en Conocimiento.
+ *
+ * Las métricas de este archivo son REFERENCIA INTERNA (hipótesis comercial):
+ * no provienen de un documento con versión y vigencia cargado por el usuario.
+ * La IA las presenta como orientativas, nunca como hechos verificados.
  */
+
+/** De dónde sale una solución: documento cargado (hecho citable) o catálogo en código (referencia). */
+export type SolutionEvidence = "documento" | "referencia";
+
+export const CATALOG_SOURCE_LABEL =
+  "Catálogo IAC v3 en código (referencia interna, sin documento cargado)";
 
 export type IACSolution = {
   id: string;
@@ -11,7 +22,18 @@ export type IACSolution = {
   fit_roles: string[];
   industries: string[];
   talking_points: string[];
+  evidence?: SolutionEvidence;
+  /** Archivo · versión · vigencia, o el catálogo en código. */
+  source?: string;
 };
+
+export function solutionEvidence(solution: Pick<IACSolution, "evidence">): SolutionEvidence {
+  return solution.evidence ?? "referencia";
+}
+
+export function solutionSource(solution: Pick<IACSolution, "source">): string {
+  return solution.source ?? CATALOG_SOURCE_LABEL;
+}
 
 export type SolutionMatch = {
   solution: IACSolution;
@@ -331,31 +353,39 @@ Web: ${company.contact.web}`;
       index === 0
         ? "SOLUCIÓN PRINCIPAL — eje obligatorio del mensaje"
         : "SOLUCIÓN COMPLEMENTARIA — mencionar solo brevemente si aporta valor";
+    const fromDocument = solutionEvidence(s) === "documento";
     const metrics = s.metrics.length
-      ? `Métricas de referencia (orientación, no inventar casos nombrados): ${s.metrics.join("; ")}`
-      : "Sin métricas explícitas: no inventes cifras.";
+      ? fromDocument
+        ? `HECHOS citables (vienen del documento «${solutionSource(s)}»): ${s.metrics.join("; ")}`
+        : `REFERENCIA INTERNA (hipótesis comercial, no verificada; preséntala como orientativa: «en proyectos similares hemos visto hasta…»): ${s.metrics.join("; ")}`
+      : "Sin métricas: no inventes cifras ni porcentajes.";
     const angles = s.talking_points.length
       ? `Ángulos de conversación: ${s.talking_points.join("; ")}`
       : "";
     return `### ${s.name} (${role})
+Fuente: ${solutionSource(s)}
 ${s.summary}
 ${metrics}
 ${angles}`.trim();
   });
 
+  const evidenceRule = `- Separa hechos de hipótesis: solo las cifras marcadas como HECHOS pueden afirmarse; las de REFERENCIA INTERNA van en condicional u orientativo y nunca como garantía ni como dato del prospecto.`;
+
   const guardrails = options.fromDocuments
     ? `REGLAS DE ENFOQUE:
 - El mensaje debe girar en torno a «${primary?.name ?? "la oferta del proyecto"}».
 - Ofrece SOLO lo que aparece en este portafolio activo y en los extractos de documentos. No inventes otros servicios.
+${evidenceRule}
 ${secondary ? `- Máximo una mención breve de «${secondary.name}» si refuerza el argumento.` : "- No hace falta segunda solución."}`
     : `REGLAS DE ENFOQUE:
 - El mensaje debe girar en torno a «${primary?.name ?? "la solución principal"}».
 - NO mencionar Predicción de Demanda salvo que sea la solución principal o complementaria listada abajo.
 - No ofrecer soluciones del portafolio IAC que no aparezcan en esta lista.
+${evidenceRule}
 ${secondary ? `- Máximo una mención breve de «${secondary.name}» si refuerza el argumento.` : "- No hace falta segunda solución."}`;
 
   const docs = options.excerpt?.trim()
-    ? `\n\nEXTRACTOS DE DOCUMENTOS DEL PROYECTO (elige lo que encaje con el rol, sector e intereses del prospecto):\n${options.excerpt.trim()}`
+    ? `\n\nEXTRACTOS DE DOCUMENTOS DEL PROYECTO (cada bloque indica archivo, versión y vigencia; elige lo que encaje con el rol, sector e intereses del prospecto):\n${options.excerpt.trim()}`
     : "";
 
   return `${header}\n\n${guardrails}\n\n${blocks.join("\n\n")}${docs}`;

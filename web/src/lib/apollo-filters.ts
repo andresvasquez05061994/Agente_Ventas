@@ -142,7 +142,7 @@ export const APOLLO_SENIORITIES = [
   { label: "Manager", value: "manager" },
 ] as const;
 
-export const APOLLO_PER_PAGE_OPTIONS = [5, 10, 15, 20, 25] as const;
+export const APOLLO_PER_PAGE_OPTIONS = [5, 10, 15, 20, 25, 50] as const;
 
 /** Rangos de empleados Apollo (min,max sin espacios). */
 export const APOLLO_EMPLOYEE_RANGES = [

@@ -28,6 +28,51 @@ export function isOpenGestion(value: string | null | undefined): boolean {
   return !value || value === "Interesado" || value === "En seguimiento";
 }
 
+/**
+ * Etapa comercial de la EMPRESA (no del contacto). Se fija desde la ficha y
+ * aplica a todos los contactos de esa empresa del mismo vendedor.
+ */
+export type EtapaComercial = "Prospecto" | "Calificado" | "Oportunidad" | "Cliente";
+
+export const ETAPAS_COMERCIALES: EtapaComercial[] = [
+  "Prospecto",
+  "Calificado",
+  "Oportunidad",
+  "Cliente",
+];
+
+export const DEFAULT_ETAPA: EtapaComercial = "Prospecto";
+
+export function isEtapaComercial(value: unknown): value is EtapaComercial {
+  return typeof value === "string" && (ETAPAS_COMERCIALES as string[]).includes(value);
+}
+
+export function etapaOf(value: string | null | undefined): EtapaComercial {
+  return isEtapaComercial(value) ? value : DEFAULT_ETAPA;
+}
+
+export type MessageChannel = "call" | "email" | "whatsapp";
+
+export const MESSAGE_CHANNEL_LABELS: Record<MessageChannel, string> = {
+  call: "Llamada",
+  email: "Correo",
+  whatsapp: "WhatsApp",
+};
+
+/** Mensaje generado por la IA y guardado para trazabilidad. Nunca se envía desde aquí. */
+export interface GeneratedMessageSummary {
+  id: number;
+  lead_id: number;
+  channel: MessageChannel;
+  headline: string;
+  lead_status: string | null;
+  resultado_gestion: string | null;
+  etapa_comercial: string | null;
+  source: string;
+  used_at: string | null;
+  created_at: string;
+}
+
 export type WhatsAppStatus =
   | "No iniciado"
   | "Pendiente"
@@ -53,6 +98,7 @@ export interface Lead {
   linkedin_url: string | null;
   lead_status: LeadStatus;
   resultado_gestion?: GestionResultado | null;
+  etapa_comercial?: EtapaComercial | string | null;
   whatsapp_status: WhatsAppStatus | string;
   mistral_conversation_id?: string | null;
   notas: string | null;

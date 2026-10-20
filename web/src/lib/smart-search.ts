@@ -10,6 +10,7 @@ import {
   normalizeEmployeeRanges,
   normalizeJobTitles,
 } from "./apollo-filters";
+import { rankSolutionsForProspect } from "./iac-portfolio-knowledge";
 
 export type SmartSearchFilters = {
   country: string;
@@ -23,12 +24,116 @@ export type SmartSearchFilters = {
 
 const MAX_SMART_TITLES = 6;
 
+/** Rol en la decisión de compra que se infiere de la consulta (modelo clásico de centro de compras). */
+export type BuyingRole = "Decisor" | "Influenciador" | "Usuario" | "Comprador técnico";
+
+export const BUYING_ROLES: BuyingRole[] = ["Decisor", "Influenciador", "Usuario", "Comprador técnico"];
+
+export function isBuyingRole(value: unknown): value is BuyingRole {
+  return typeof value === "string" && (BUYING_ROLES as string[]).includes(value);
+}
+
+/**
+ * Lectura comercial de la consulta. Se muestra ANTES de gastar créditos para que
+ * el vendedor confirme que la IA entendió a quién busca y para qué.
+ */
+export type SmartSearchInsight = {
+  buying_role: BuyingRole | null;
+  buying_role_reason: string;
+  /** Señales de necesidad detectadas en la consulta (texto del catálogo, no inventado). */
+  need_signals: string[];
+  /** Solución IAC que mejor encaja con las señales, o null si no hay señal. */
+  suggested_solution: string | null;
+  suggested_solution_reason: string;
+};
+
 export type SmartSearchResult = {
   filters: SmartSearchFilters;
   summary: string;
   source: "mistral" | "rules";
   model?: string;
+  insight: SmartSearchInsight;
 };
+
+const DECISION_WORDS = /decisor|decide|decisi[oó]n|toma(n)? (la )?decisi|aprueba|presupuesto|sponsor/;
+const TECH_BUYER_TITLES = /\bcto\b|\bcio\b|it director|director of technology|chief data|chief digital|architect|head of (it|technology|data)/;
+const DECISOR_TITLES =
+  /\bceo\b|general manager|gerente general|chief operating|chief financial|\bcfo\b|\bcoo\b|president|founder|owner|fundador|propietario|vp |vice president|vicepresidente/;
+const INFLUENCER_TITLES = /director|head of|chief (?!executive|operating|financial)/;
+const USER_TITLES =
+  /manager|gerente|coordinator|coordinador|analyst|analista|specialist|especialista|jefe|supervisor|ingeniero|lead\b|líder|project|program/;
+
+/** Infiere el rol de compra desde los cargos y el nivel elegidos; explica por qué. */
+export function inferBuyingRole(
+  titles: string[],
+  seniority: string,
+  userQuery: string
+): { role: BuyingRole | null; reason: string } {
+  const q = userQuery.toLowerCase();
+  const joined = titles.join(" | ").toLowerCase();
+
+  if (DECISION_WORDS.test(q)) {
+    return { role: "Decisor", reason: "La consulta pide a quien decide o aprueba." };
+  }
+  if (seniority === "c_suite" || seniority === "vp") {
+    return { role: "Decisor", reason: `Nivel ${seniority === "vp" ? "VP" : "C-Suite"} en los filtros.` };
+  }
+  if (TECH_BUYER_TITLES.test(joined) && /implement|integraci|tecnolog|sistema|erp|software|\bia\b|inteligencia artificial|datos|data/.test(q)) {
+    return {
+      role: "Comprador técnico",
+      reason: "Cargos de tecnología para evaluar una implementación.",
+    };
+  }
+  if (DECISOR_TITLES.test(joined)) {
+    return { role: "Decisor", reason: "Cargos de dirección general o financiera." };
+  }
+  if (INFLUENCER_TITLES.test(joined) || seniority === "director" || seniority === "head") {
+    return { role: "Influenciador", reason: "Direcciones de área: recomiendan y patrocinan internamente." };
+  }
+  if (USER_TITLES.test(joined) || seniority === "manager") {
+    return { role: "Usuario", reason: "Gerencias y líderes operativos que usarían la solución." };
+  }
+  return { role: null, reason: "Sin señal clara de rol de compra en la consulta." };
+}
+
+/** Construye la lectura comercial con el catálogo IAC (determinista, sin IA). */
+export function buildSmartInsight(
+  filters: SmartSearchFilters,
+  userQuery: string,
+  aiBuyingRole?: unknown
+): SmartSearchInsight {
+  const inferred = inferBuyingRole(filters.titles, filters.seniority, userQuery);
+  const buying_role = isBuyingRole(aiBuyingRole) ? aiBuyingRole : inferred.role;
+  const buying_role_reason = isBuyingRole(aiBuyingRole) && aiBuyingRole !== inferred.role
+    ? "Interpretado por la IA a partir de la consulta."
+    : inferred.reason;
+
+  const ranked = rankSolutionsForProspect(filters.titles.join(" "), userQuery);
+  const top = ranked[0];
+  const hasSignal = Boolean(top && top.score > 1);
+  const need_signals = hasSignal
+    ? top!.reasons.filter((reason) => !reason.startsWith("coincidencia por cargo"))
+    : [];
+
+  return {
+    buying_role,
+    buying_role_reason,
+    need_signals,
+    suggested_solution: hasSignal ? top!.solution.name : null,
+    suggested_solution_reason: hasSignal
+      ? `Coincide con: ${need_signals.join(", ") || "perfil del cargo"}.`
+      : "La consulta no menciona una necesidad concreta; la solución se decide al conocer al cliente.",
+  };
+}
+
+/** Línea compacta para guardar junto al contacto (fuente de búsqueda) y alimentar el Mensaje IA. */
+export function formatInsightForSource(insight: SmartSearchInsight): string {
+  const parts: string[] = [];
+  if (insight.buying_role) parts.push(`Rol de compra: ${insight.buying_role}`);
+  if (insight.need_signals.length) parts.push(`Señal: ${insight.need_signals.join(", ")}`);
+  if (insight.suggested_solution) parts.push(`Solución sugerida: ${insight.suggested_solution}`);
+  return parts.join(" | ");
+}
 
 export type MistralHealth = {
   configured: boolean;
@@ -547,7 +652,13 @@ function buildFiltersFromParsed(
     ? `Mistral IA: ${aiSummary}${sizeLabel ? ` · Tamaño: ${sizeLabel}` : ""} · ${filters.perPage} resultados`
     : `Mistral IA · ${filters.country} · ${filters.titles.join(", ")}${filters.company ? ` · ${filters.company}` : ""}${sizeLabel ? ` · ${sizeLabel}` : ""} · ${filters.perPage} resultados`;
 
-  return { filters, summary, source: "mistral", model };
+  const insight = buildSmartInsight(filters, userQuery, parsed.buying_role);
+  const aiNeed = String(parsed.need_signal ?? "").trim();
+  if (aiNeed && !insight.need_signals.length) {
+    insight.need_signals = [aiNeed.slice(0, 80)];
+  }
+
+  return { filters, summary, source: "mistral", model, insight };
 }
 
 export function buildSmartSearchPrompt(userQuery: string): string {
@@ -561,10 +672,13 @@ Analiza la intención y devuelve SOLO un JSON válido (sin markdown) con esta fo
   "company": "nombre de empresa si la menciona, o cadena vacía",
   "employee_ranges": ["uno o más rangos value de employeeRanges, o array vacío"],
   "per_page": número entre 5 y 25 (usa 5 salvo que el usuario pida otra cantidad explícita),
-  "summary": "frase breve en español explicando qué buscará Apollo"
+  "summary": "frase breve en español explicando qué buscará Apollo",
+  "buying_role": "Decisor | Influenciador | Usuario | Comprador técnico | cadena vacía si no se deduce",
+  "need_signal": "necesidad o dolor que el usuario menciona, en máx 8 palabras, o cadena vacía"
 }
 
 Reglas estrictas:
+- buying_role y need_signal describen la consulta del usuario, no inventes necesidades que no mencione.
 - country, keyword, seniority y employee_ranges[].value deben ser valores "value" EXACTOS de las listas (copia literal).
 - Si el usuario pide un país específico (ej. Colombia), country DEBE ser ese país. Nunca otro.
 - employee_ranges: SOLO si el usuario menciona explícitamente tamaño (pequeña, mediana, grande, pyme, empleados, "más de N"). Si no lo menciona → [].
@@ -591,7 +705,7 @@ Consulta del usuario:
 ${userQuery}`;
 }
 
-async function callMistralChat(userContent: string, maxTokens = 600): Promise<string> {
+async function callMistralChat(userContent: string, maxTokens = 700): Promise<string> {
   const apiKey = process.env.MISTRAL_API_KEY?.trim();
   if (!apiKey) {
     throw new SmartSearchError("MISTRAL_API_KEY no configurada en el servidor.");
@@ -791,6 +905,7 @@ function ruleBasedInterpret(userQuery: string): SmartSearchResult {
     filters,
     summary: `Modo básico (sin IA): ${parts.join(" · ")}.`,
     source: "rules",
+    insight: buildSmartInsight(filters, userQuery),
   };
 }
 

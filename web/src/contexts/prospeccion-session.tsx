@@ -11,7 +11,6 @@ import {
 } from "react";
 import type { ApolloPerson } from "@/lib/types";
 import { DEFAULT_SEARCH } from "@/lib/apollo-filters";
-import type { ExcelCompanyQueue } from "@/lib/excel-companies";
 
 export type ProspeccionSearchStatus = "idle" | "loading" | "success" | "empty" | "error";
 
@@ -58,14 +57,27 @@ type ProspeccionSessionState = {
   selectedIds: string[];
   status: ProspeccionSearchStatus;
   meta: ProspeccionSearchMeta | null;
-  excelQueue: ExcelCompanyQueue | null;
+  /** Lectura comercial de la última búsqueda inteligente; viaja a la fuente del contacto al guardar. */
+  searchIntent: SearchIntent | null;
 };
+
+export type SearchIntent = {
+  text: string;
+  titles: string[];
+};
+
+/**
+ * La intención solo sigue vigente si la búsqueda actual comparte algún cargo con
+ * la interpretada; si el vendedor cambió por completo la búsqueda, no se arrastra.
+ */
+export function activeSearchIntent(intent: SearchIntent | null, titles: string[]): string | null {
+  if (!intent?.text.trim()) return null;
+  return intent.titles.some((title) => titles.includes(title)) ? intent.text : null;
+}
 
 type ProspeccionSessionContextValue = ProspeccionSessionState & {
   selected: Set<string>;
-  setExcelQueue: (
-    next: ExcelCompanyQueue | null | ((current: ExcelCompanyQueue | null) => ExcelCompanyQueue | null)
-  ) => void;
+  setSearchIntent: (intent: SearchIntent | null) => void;
   appendResults: (people: ApolloPerson[]) => void;
   setCountry: (v: string) => void;
   setCompany: (v: string) => void;
@@ -116,7 +128,7 @@ function createInitialState(): ProspeccionSessionState {
     selectedIds: [],
     status: "idle",
     meta: null,
-    excelQueue: null,
+    searchIntent: null,
   };
 }
 
@@ -158,7 +170,16 @@ function readStoredSession(userId: number): ProspeccionSessionState | null {
         : [],
       status,
       meta: parsed.meta && typeof parsed.meta === "object" ? parsed.meta : null,
-      excelQueue: parsed.excelQueue && typeof parsed.excelQueue === "object" ? parsed.excelQueue : null,
+      searchIntent:
+        parsed.searchIntent &&
+        typeof parsed.searchIntent === "object" &&
+        typeof parsed.searchIntent.text === "string" &&
+        Array.isArray(parsed.searchIntent.titles)
+          ? {
+              text: parsed.searchIntent.text,
+              titles: parsed.searchIntent.titles.filter((t) => typeof t === "string"),
+            }
+          : null,
     };
   } catch {
     return null;
@@ -248,6 +269,10 @@ export function ProspeccionSessionProvider({
     setState((s) => ({ ...s, meta }));
   }, []);
 
+  const setSearchIntent = useCallback((searchIntent: SearchIntent | null) => {
+    setState((s) => ({ ...s, searchIntent }));
+  }, []);
+
   const toggleSelected = useCallback((id: string) => {
     setState((s) => {
       const next = new Set(s.selectedIds);
@@ -283,21 +308,6 @@ export function ProspeccionSessionProvider({
     });
   }, []);
 
-  const setExcelQueue = useCallback(
-    (
-      next:
-        | ExcelCompanyQueue
-        | null
-        | ((current: ExcelCompanyQueue | null) => ExcelCompanyQueue | null)
-    ) => {
-      setState((s) => ({
-        ...s,
-        excelQueue: typeof next === "function" ? next(s.excelQueue) : next,
-      }));
-    },
-    []
-  );
-
   const appendResults = useCallback((people: ApolloPerson[]) => {
     setState((s) => {
       const known = new Set(s.results.map((r) => r.apollo_id));
@@ -310,9 +320,8 @@ export function ProspeccionSessionProvider({
   }, []);
 
   const clearSession = useCallback(() => {
-    setState((s) => ({ ...createInitialState(), excelQueue: s.excelQueue }));
+    setState(() => createInitialState());
   }, []);
-
   const applyInterpretedFilters = useCallback(
     (filters: {
       country: string;
@@ -347,7 +356,7 @@ export function ProspeccionSessionProvider({
     () => ({
       ...state,
       selected,
-      setExcelQueue,
+      setSearchIntent,
       appendResults,
       setCountry,
       setCompany,
@@ -371,7 +380,7 @@ export function ProspeccionSessionProvider({
     [
       state,
       selected,
-      setExcelQueue,
+      setSearchIntent,
       appendResults,
       setCountry,
       setCompany,

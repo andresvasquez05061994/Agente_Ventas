@@ -7,6 +7,7 @@ import {
 import { ensureDb } from "./db";
 import {
   collectDocumentServices,
+  documentSourceLabel,
   getKnowledgeProfile,
   listActiveBuyerPersonas,
   listActiveKnowledgeDocuments,
@@ -68,13 +69,14 @@ export function pickRelevantExcerpts(
   budget = EXCERPT_BUDGET
 ): { excerpt: string; sources: string[] } {
   const tokens = queryTokens(query);
-  const ranked: Array<{ filename: string; text: string; score: number }> = [];
+  const ranked: Array<{ label: string; text: string; score: number }> = [];
 
   for (const doc of docs) {
+    const label = documentSourceLabel(doc);
     for (const chunk of chunkText(doc.extracted_text)) {
       const score = scoreChunk(chunk, tokens);
       if (score <= 0 && tokens.length) continue;
-      ranked.push({ filename: doc.filename, text: chunk, score: score || 0.2 });
+      ranked.push({ label, text: chunk, score: score || 0.2 });
     }
   }
 
@@ -82,16 +84,17 @@ export function pickRelevantExcerpts(
   const sources = new Set<string>();
   let excerpt = "";
   for (const item of ranked) {
-    const piece = `[${item.filename}]\n${item.text.trim()}`;
+    const piece = `[${item.label}]\n${item.text.trim()}`;
     if (excerpt.length + piece.length + 8 > budget) continue;
     excerpt = excerpt ? `${excerpt}\n\n${piece}` : piece;
-    sources.add(item.filename);
+    sources.add(item.label);
     if (excerpt.length >= budget - 200) break;
   }
 
   if (!excerpt && docs[0]) {
-    excerpt = `[${docs[0].filename}]\n${docs[0].extracted_text.slice(0, budget)}`;
-    sources.add(docs[0].filename);
+    const label = documentSourceLabel(docs[0]);
+    excerpt = `[${label}]\n${docs[0].extracted_text.slice(0, budget)}`;
+    sources.add(label);
   }
 
   return { excerpt, sources: [...sources] };
@@ -207,7 +210,8 @@ export async function loadLiveKnowledge(ownerId: number): Promise<LiveKnowledge>
 export function solutionsForKnowledge(live: LiveKnowledge): IACSolution[] {
   if (!live.fromDocuments) return IAC_SOLUTIONS;
   if (live.services.length) return live.services;
-  const excerpt = live.documents[0]?.extracted_text.slice(0, 500) ?? live.profile.notes;
+  const first = live.documents[0];
+  const excerpt = first?.extracted_text.slice(0, 500) ?? live.profile.notes;
   return [
     {
       id: "project-knowledge",
@@ -217,6 +221,8 @@ export function solutionsForKnowledge(live: LiveKnowledge): IACSolution[] {
       fit_roles: [],
       industries: live.company.sectors.map((s) => s.toLowerCase()),
       talking_points: live.profile.notes ? [live.profile.notes.slice(0, 180)] : [],
+      evidence: "documento",
+      source: first ? documentSourceLabel(first) : "documentos del proyecto",
     },
   ];
 }
