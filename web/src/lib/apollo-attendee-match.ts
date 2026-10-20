@@ -4,8 +4,14 @@ import {
   isContactableInSearch,
   resolveApolloPersonId,
 } from "./apollo-enrich";
-import { organizationMatches, personMatchesCountry } from "./apollo-filters";
+import {
+  APOLLO_COUNTRIES,
+  organizationMatches,
+  organizationMatchesLoose,
+  personMatchesCountry,
+} from "./apollo-filters";
 import { MIN_NAME_SCORE, nameScore, nameTokens } from "./excel-attendees";
+import { companySearchHint } from "./excel-companies";
 import {
   getLeadByApolloId,
   getNoContestaContacts,
@@ -16,6 +22,7 @@ import {
 import type { ApolloPerson } from "./types";
 
 const TIME_BUDGET_MS = 48000;
+const COUNTRY_VALUES = new Set<string>(APOLLO_COUNTRIES.map((item) => item.value));
 
 export type AttendeeMatchStatus = "found" | "no_contacts" | "not_found";
 
@@ -23,7 +30,10 @@ export type AttendeeMatchInput = {
   name: string;
   title?: string;
   company?: string;
-  country: string;
+  /** País único (compatibilidad). Si viene `countries`, se ignora. */
+  country?: string;
+  /** Vacío = todos los países, sin filtro de ubicación. */
+  countries?: string[];
 };
 
 export type AttendeeMatchResult = {
@@ -38,48 +48,123 @@ function lastNameOf(name: string): string {
   return tokens.slice(1).join(" ") || tokens[0] || name;
 }
 
-function buildPayloads(input: AttendeeMatchInput): Record<string, unknown>[] {
-  const title = input.title?.trim();
-  const last = lastNameOf(input.name);
-  const company = input.company?.trim();
-  const base: Record<string, unknown> = {
-    page: 1,
-    per_page: 10,
-    contact_email_status: ["verified", "likely to engage"],
-    person_locations: [input.country],
-    q_keywords: input.name,
-  };
-  if (company) base.q_organization_name = company;
-  const payloads: Record<string, unknown>[] = [];
-  if (title) {
-    payloads.push({ ...base, person_titles: [title], q_keywords: input.name });
-  }
-  payloads.push({ ...base });
-  if (last && last.toLowerCase() !== input.name.toLowerCase()) {
-    payloads.push({ ...base, q_keywords: last });
-  }
-  return payloads;
+export function foldPersonQuery(name: string): string {
+  return nameTokens(name).join(" ") || name;
 }
 
-function pickCandidate(
+function personDisplayName(raw: Record<string, unknown>): string {
+  if (typeof raw.name === "string" && raw.name.trim()) return raw.name;
+  return `${raw.first_name ?? ""} ${raw.last_name ?? raw.last_name_obfuscated ?? ""}`.trim();
+}
+
+function personOrgName(raw: Record<string, unknown>): string {
+  return (
+    (raw.organization as { name?: string } | undefined)?.name ??
+    (typeof raw.organization_name === "string" ? raw.organization_name : "") ??
+    ""
+  );
+}
+
+function companyFits(org: string, company: string): boolean {
+  if (!company.trim()) return true;
+  const hint = companySearchHint(company);
+  return (
+    organizationMatches(org, company) ||
+    (Boolean(hint) && organizationMatches(org, hint)) ||
+    organizationMatchesLoose(org, company)
+  );
+}
+
+export function locationsOf(input: AttendeeMatchInput): string[] {
+  if (Array.isArray(input.countries)) return input.countries.filter(Boolean);
+  if (input.country?.trim()) return [input.country.trim()];
+  return [];
+}
+
+/** Vacío = todos los países. `all_countries: true` gana sobre la lista. */
+export function parseMatchCountries(
+  body: Record<string, unknown>
+): { countries: string[] } | { error: string } {
+  if (body.all_countries === true) return { countries: [] };
+
+  const fromList = Array.isArray(body.countries)
+    ? body.countries.map((item) => String(item ?? "").trim())
+    : null;
+  const fromSingle = body.country != null ? [String(body.country).trim()] : null;
+  const unique = [...new Set((fromList ?? fromSingle ?? []).filter(Boolean))];
+  if (!unique.length) return { countries: [] };
+  if (unique.some((country) => !COUNTRY_VALUES.has(country))) {
+    return { error: "País no válido." };
+  }
+  return { countries: unique };
+}
+
+function matchesSelectedCountry(raw: Record<string, unknown>, locations: string[]): boolean {
+  if (!locations.length) return true;
+  return locations.some((country) => personMatchesCountry(raw, country));
+}
+
+export function buildAttendeeSearchPayloads(input: AttendeeMatchInput): Record<string, unknown>[] {
+  const query = foldPersonQuery(input.name);
+  const last = lastNameOf(input.name);
+  const brand = input.company ? companySearchHint(input.company) : "";
+  const locations = locationsOf(input);
+  const locationFilter = locations.length ? { person_locations: locations } : {};
+  const payloads: Record<string, unknown>[] = [];
+
+  const push = (extra: Record<string, unknown>) => {
+    payloads.push({
+      page: 1,
+      per_page: 25,
+      q_keywords: query,
+      ...locationFilter,
+      ...extra,
+    });
+  };
+
+  if (brand) push({ q_organization_name: brand });
+  push({});
+  if (last && last !== query) {
+    push({
+      q_keywords: last,
+      ...(brand ? { q_organization_name: brand } : {}),
+    });
+  }
+
+  const seen = new Set<string>();
+  return payloads.filter((payload) => {
+    const key = JSON.stringify(payload);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function pickAttendeeCandidate(
   people: Record<string, unknown>[],
   input: AttendeeMatchInput
 ): Record<string, unknown> | null {
   const company = input.company?.trim() ?? "";
   const minScore = company ? MIN_NAME_SCORE : 92;
-  let best: { person: Record<string, unknown>; score: number } | null = null;
+  let best: { person: Record<string, unknown>; rank: number } | null = null;
+
   for (const raw of people) {
     const id = resolveApolloPersonId(raw);
     if (!id) continue;
-    const org = (raw.organization as { name?: string } | undefined)?.name ?? (raw.organization_name as string) ?? "";
-    if (company && !organizationMatches(org, company)) continue;
-    if (!personMatchesCountry(raw, input.country)) continue;
-    const display =
-      (typeof raw.name === "string" && raw.name) ||
-      `${raw.first_name ?? ""} ${raw.last_name ?? raw.last_name_obfuscated ?? ""}`.trim();
+    const display = personDisplayName(raw);
     const score = nameScore(input.name, display);
     if (score < minScore) continue;
-    if (!best || score > best.score) best = { person: raw, score };
+
+    const org = personOrgName(raw);
+    const orgOk = companyFits(org, company);
+    if (company && !orgOk && score < 96) continue;
+
+    const locations = locationsOf(input);
+    const sameCountry = matchesSelectedCountry(raw, locations);
+    if (locations.length && !sameCountry) continue;
+
+    const rank = score + (orgOk ? 6 : 0) + (sameCountry ? 3 : 0);
+    if (!best || rank > best.rank) best = { person: raw, rank };
   }
   return best?.person ?? null;
 }
@@ -93,11 +178,11 @@ export async function matchAttendeeContact(
   const blocked = await getNoContestaContacts(ownerId);
 
   let seen: Record<string, unknown>[] = [];
-  for (const payload of buildPayloads(input)) {
+  for (const payload of buildAttendeeSearchPayloads(input)) {
     if (Date.now() >= deadlineMs) break;
     const page = await searchPeopleCandidates(payload);
     seen = seen.concat(page);
-    if (pickCandidate(page, input)) break;
+    if (pickAttendeeCandidate(page, input)) break;
   }
 
   const unique = new Map<string, Record<string, unknown>>();
@@ -106,7 +191,7 @@ export async function matchAttendeeContact(
     if (id && !unique.has(id)) unique.set(id, raw);
   }
 
-  const candidate = pickCandidate([...unique.values()], input);
+  const candidate = pickAttendeeCandidate([...unique.values()], input);
   if (!candidate) {
     return { status: "not_found", person: null, credits_consumed: 0 };
   }

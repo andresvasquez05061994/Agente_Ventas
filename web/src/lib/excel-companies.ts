@@ -215,6 +215,18 @@ export function cleanCompanyName(raw: string): string {
   return sanitizeCompanyText(extractLegalName(raw));
 }
 
+/**
+ * Marca corta para buscar en Apollo: «APDTIC - Profesionales del derecho TIC» → «APDTIC».
+ * El texto después del guion suele ser el eslogan y hace fallar q_organization_name.
+ */
+export function companySearchHint(raw: string): string {
+  const cleaned = cleanCompanyName(raw);
+  if (!cleaned) return "";
+  const head = cleaned.split(/\s*[-–—|]\s+/)[0]?.trim() ?? cleaned;
+  if (head.length >= 2 && head.length <= 40) return head;
+  return cleaned.slice(0, 40).trim();
+}
+
 function sanitizeCompanyText(value: string): string {
   const cleaned = Array.from(value)
     .filter((char) => ALLOWED_COMPANY_CHAR.test(char))

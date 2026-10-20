@@ -20,7 +20,6 @@ import {
   searchTitle,
   suggestedFill,
   suggestedSearchBy,
-  valueOf,
   type EnrichFieldId,
   type EnrichRowStatus,
   type EnrichSheet,
@@ -47,14 +46,13 @@ async function workbookBase64(headers: string[], rows: string[][]): Promise<{ fi
   return { filename: "enriquecido.xlsx", fileBase64: buffer };
 }
 
-function countryFromRow(value: string, fallback: string): string {
-  const folded = value.trim().toLowerCase();
-  if (!folded) return fallback;
-  return (
-    APOLLO_COUNTRIES.find(
-      (item) => item.value.toLowerCase() === folded || item.label.toLowerCase() === folded
-    )?.value ?? fallback
-  );
+function countryLabelOf(value: string): string {
+  return APOLLO_COUNTRIES.find((item) => item.value === value)?.label ?? value;
+}
+
+function countriesCaption(allCountries: boolean, countries: string[]): string {
+  if (allCountries || !countries.length) return "todos los países";
+  return countries.map(countryLabelOf).join(", ");
 }
 
 function downloadBase64(filename: string, fileBase64: string) {
@@ -79,7 +77,8 @@ export default function EnriquecerPage() {
   const [statuses, setStatuses] = useState<EnrichRowStatus[]>([]);
   const [searchBy, setSearchBy] = useState<EnrichFieldId[]>([]);
   const [fill, setFill] = useState<EnrichFieldId[]>(suggestedFill());
-  const [country, setCountry] = useState("Colombia");
+  const [allCountries, setAllCountries] = useState(true);
+  const [countries, setCountries] = useState<string[]>(["Colombia"]);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [credits, setCredits] = useState(0);
@@ -90,7 +89,7 @@ export default function EnriquecerPage() {
     () => new Set((sheet?.columns ?? []).map((column) => column.field).filter(Boolean) as EnrichFieldId[]),
     [sheet]
   );
-  const pending = statuses.filter((status) => status === "pending").length;
+  const pending = statuses.filter((status) => status === "pending" || status === "not_found").length;
   const filled = statuses.filter((status) => status === "filled" || status === "already").length;
   const totalPages = Math.max(1, Math.ceil((sheet?.rows.length ?? 0) / ENRICH_PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -162,6 +161,38 @@ export default function EnriquecerPage() {
     setFill((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   }
 
+  function toggleAllCountries() {
+    if (allCountries) {
+      setAllCountries(false);
+      setCountries((current) => (current.length ? current : ["Colombia"]));
+      return;
+    }
+    setAllCountries(true);
+  }
+
+  function toggleCountry(value: string) {
+    if (allCountries) {
+      setAllCountries(false);
+      setCountries([value]);
+      return;
+    }
+    if (countries.includes(value)) {
+      const next = countries.filter((item) => item !== value);
+      if (!next.length) {
+        setAllCountries(true);
+        return;
+      }
+      setCountries(next);
+      return;
+    }
+    setCountries([...countries, value]);
+  }
+
+  function countriesForRow(): { all_countries: boolean; countries: string[] } {
+    if (allCountries) return { all_countries: true, countries: [] };
+    return { all_countries: false, countries };
+  }
+
   async function enrichBatch() {
     if (!sheet) return;
     if (!searchBy.includes("nombre")) {
@@ -172,7 +203,7 @@ export default function EnriquecerPage() {
     const prepared = ensureFillColumns(sheet, fillFields);
     const pendingIndexes = prepared.rows
       .map((_, index) => index)
-      .filter((index) => statuses[index] === "pending")
+      .filter((index) => statuses[index] === "pending" || statuses[index] === "not_found")
       .slice(0, MAX_ENRICH_BATCH);
     if (!pendingIndexes.length) {
       showInfo("No quedan filas por enriquecer.", "Listo");
@@ -209,9 +240,7 @@ export default function EnriquecerPage() {
             name,
             title: searchBy.includes("cargo") ? searchTitle(nextRows[rowIndex], prepared.columns) : undefined,
             company: searchBy.includes("empresa") ? searchCompany(nextRows[rowIndex], prepared.columns) : undefined,
-            country: searchBy.includes("pais")
-              ? countryFromRow(valueOf(nextRows[rowIndex], prepared.columns, "pais"), country)
-              : country,
+            ...countriesForRow(),
           }),
         });
         const { data, error } = await parseApiResponse<AttendeeMatchResult & { error?: string }>(res);
@@ -258,7 +287,7 @@ export default function EnriquecerPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               leads: toSave,
-              fuente: `Enriquecer: ${prepared.fileLabel} | ${country}`,
+              fuente: `Enriquecer: ${prepared.fileLabel} | ${countriesCaption(allCountries, countries)}`,
             }),
           });
           const data = await res.json();
@@ -352,13 +381,28 @@ export default function EnriquecerPage() {
 
           <section className="settings-panel mt-4">
             <FieldLabel>País de búsqueda</FieldLabel>
-            <select className="input-field mb-4" value={country} onChange={(event) => setCountry(event.target.value)} disabled={busy}>
+            <p className="text-micro mb-2">
+              {allCountries
+                ? "Todos los países: busca en cualquier ubicación."
+                : `Filtro activo: solo ${countriesCaption(false, countries)}.`}
+            </p>
+            <div className="enrich-checks mb-4 flex flex-wrap gap-x-4 gap-y-2">
+              <label className="enrich-check inline-flex items-center gap-1.5 text-sm">
+                <input type="checkbox" checked={allCountries} disabled={busy} onChange={toggleAllCountries} />
+                Todos los países
+              </label>
               {APOLLO_COUNTRIES.map((item) => (
-                <option key={item.value} value={item.value}>
+                <label key={item.value} className="enrich-check inline-flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={!allCountries && countries.includes(item.value)}
+                    disabled={busy}
+                    onChange={() => toggleCountry(item.value)}
+                  />
                   {item.label}
-                </option>
+                </label>
               ))}
-            </select>
+            </div>
 
             <SectionLabel>Buscar por</SectionLabel>
             <p className="text-micro mb-2">Nombre es obligatorio. Empresa evita homónimos. No se buscan extraños de la misma compañía.</p>

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { matchAttendeeContact, ApolloApiError } from "@/lib/apollo-attendee-match";
-import { APOLLO_COUNTRIES } from "@/lib/apollo-filters";
+import { matchAttendeeContact, parseMatchCountries, ApolloApiError } from "@/lib/apollo-attendee-match";
 import { cleanPersonName } from "@/lib/excel-attendees";
 import { cleanCompanyName } from "@/lib/excel-companies";
 import { requireUser } from "@/lib/current-user";
@@ -9,8 +8,6 @@ import { assertApolloBudget, assertApolloRateLimit, UsageLimitError } from "@/li
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
-
-const COUNTRIES = new Set<string>(APOLLO_COUNTRIES.map((c) => c.value));
 
 export async function POST(req: NextRequest) {
   try {
@@ -30,14 +27,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const country = String(body.country ?? "");
-    if (!COUNTRIES.has(country)) {
-      return NextResponse.json({ error: "País no válido." }, { status: 400 });
+    const parsed = parseMatchCountries(body);
+    if ("error" in parsed) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
 
     const title = String(body.title ?? "").trim().slice(0, 80);
     const result = await matchAttendeeContact(
-      { name, title: title || undefined, company: company || undefined, country },
+      {
+        name,
+        title: title || undefined,
+        company: company || undefined,
+        countries: parsed.countries,
+      },
       actor.id
     );
     return NextResponse.json(result);

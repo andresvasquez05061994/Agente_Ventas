@@ -124,16 +124,28 @@ export function cleanPersonName(raw: string): string {
   return kept.join(" ").slice(0, 80).trim();
 }
 
+const NAME_STOP = new Set(["de", "del", "la", "las", "los", "y", "da", "do", "dos", "van", "von", "of"]);
+
 export function nameTokens(value: string): string[] {
   return fold(cleanPersonName(value))
     .split(" ")
     .map((token) => token.replace(/[^a-z0-9]/g, ""))
-    .filter((token) => token.length >= 2);
+    .filter((token) => token.length >= 2 && !NAME_STOP.has(token));
 }
 
 function lastNames(tokens: string[]): string[] {
   if (tokens.length < 2) return tokens.slice(-1);
   return [tokens[tokens.length - 1], tokens.slice(-2).join(" ")];
+}
+
+function tokenLikelySame(left: string, right: string): boolean {
+  if (left === right) return true;
+  if (left.length >= 4 && right.length >= 4 && (right.startsWith(left) || left.startsWith(right))) return true;
+  return false;
+}
+
+function allQueryTokensInCandidate(query: string[], candidate: string[]): boolean {
+  return query.every((token) => candidate.some((other) => tokenLikelySame(token, other)));
 }
 
 /** Puntaje 0–100. 70 o más es la misma persona (sirve con nombres recortados). */
@@ -145,15 +157,15 @@ export function nameScore(query: string, candidate: string): number {
   const joinB = b.join(" ");
   if (joinA === joinB) return 100;
   if (joinB.startsWith(joinA) || joinA.startsWith(joinB)) return 92;
+  if (allQueryTokensInCandidate(a, b) && a.length >= 2) return 90;
+  if (allQueryTokensInCandidate(b, a) && b.length >= 2) return 90;
 
   const lastA = lastNames(a);
   const lastB = lastNames(b);
-  const lastMatch = lastA.some((left) =>
-    lastB.some((right) => left === right || (left.length >= 4 && right.startsWith(left)) || (right.length >= 4 && left.startsWith(right)))
-  );
+  const lastMatch = lastA.some((left) => lastB.some((right) => tokenLikelySame(left, right)));
   const firstA = a[0];
   const firstB = b[0];
-  const firstMatch = firstA === firstB || firstB.startsWith(firstA) || firstA.startsWith(firstB);
+  const firstMatch = tokenLikelySame(firstA, firstB);
   const firstInitial = firstA[0] === firstB[0];
 
   if (lastMatch && firstMatch) return 88;

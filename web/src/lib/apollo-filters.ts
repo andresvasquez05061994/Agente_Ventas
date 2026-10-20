@@ -114,6 +114,47 @@ export function organizationMatches(
   return tokens.every((t) => c.includes(t));
 }
 
+const ORG_STOP = new Set([
+  "del",
+  "de",
+  "la",
+  "las",
+  "los",
+  "the",
+  "and",
+  "sas",
+  "ltda",
+  "llc",
+  "inc",
+  "corp",
+  "profesionales",
+  "profesional",
+  "servicios",
+  "grupo",
+  "holding",
+  "solutions",
+  "soluciones",
+  "international",
+  "internacional",
+  "seguridad",
+  "consultores",
+]);
+
+/** Marca o token distintivo: sirve cuando el archivo trae eslogan y Apollo solo el nombre corto. */
+export function organizationMatchesLoose(company: string | null | undefined, filter: string): boolean {
+  if (organizationMatches(company, filter)) return true;
+  const distinctive = (value: string) =>
+    normalizeOrgName(value)
+      .split(" ")
+      .filter((token) => token.length >= 4 && !ORG_STOP.has(token));
+  const wanted = distinctive(filter);
+  const got = distinctive(company ?? "");
+  if (!wanted.length || !got.length) return false;
+  return wanted.some((left) =>
+    got.some((right) => left === right || (left.length >= 5 && (right.startsWith(left) || left.startsWith(right))))
+  );
+}
+
 export const APOLLO_KEYWORDS = [
   { label: "Todas las industrias", value: "", searchTerms: [] as string[] },
   { label: "Construcción", value: "construction", searchTerms: ["construction", "building materials"] },

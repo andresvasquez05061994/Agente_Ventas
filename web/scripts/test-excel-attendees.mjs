@@ -41,6 +41,7 @@ check(
 );
 check("quita credencial tras coma", cleanPersonName("INGRID GARZON, Ing.") === "INGRID GARZON");
 check("mismo nombre pese a tildes", namesMatch("Martha Lucia Cepeda", "MARTHA LUCÍA CEPEDA M"));
+check("ANDRÉ es Andre Castelo Pichel", nameScore("ANDRÉ CASTELO PICHEL", "Andre Castelo Pichel") === 100);
 check("no confunde nombres distintos", namesMatch("Antonio Correa", "Camila Lazaro") === false);
 check("puntaje alto con apellido recortado", nameScore("ANTONIO CORREA", "Antonio Correa Arguello") >= 70);
 
