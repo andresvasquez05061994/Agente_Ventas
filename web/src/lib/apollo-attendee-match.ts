@@ -1,6 +1,7 @@
 import { ApolloApiError, searchPeopleCandidates } from "./apollo";
 import {
   enrichSinglePersonWithContacts,
+  identifyPersonByAttributes,
   isContactableInSearch,
   resolveApolloPersonId,
 } from "./apollo-enrich";
@@ -44,12 +45,24 @@ export type AttendeeMatchResult = {
 };
 
 function lastNameOf(name: string): string {
-  const tokens = nameTokens(name);
-  return tokens.slice(1).join(" ") || tokens[0] || name;
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return parts.slice(1).join(" ") || parts[0] || name;
 }
 
 export function foldPersonQuery(name: string): string {
   return nameTokens(name).join(" ") || name;
+}
+
+export function buildIdentifyDetail(input: AttendeeMatchInput): Record<string, unknown> {
+  const name = input.name.trim();
+  const parts = name.split(/\s+/).filter(Boolean);
+  const brand = input.company ? companySearchHint(input.company) : "";
+  const detail: Record<string, unknown> = { name };
+  if (parts[0]) detail.first_name = parts[0];
+  if (parts.length > 1) detail.last_name = parts.slice(1).join(" ");
+  if (brand) detail.organization_name = brand;
+  else if (input.company?.trim()) detail.organization_name = input.company.trim();
+  return detail;
 }
 
 function personDisplayName(raw: Record<string, unknown>): string {
@@ -105,7 +118,8 @@ function matchesSelectedCountry(raw: Record<string, unknown>, locations: string[
 }
 
 export function buildAttendeeSearchPayloads(input: AttendeeMatchInput): Record<string, unknown>[] {
-  const query = foldPersonQuery(input.name);
+  const original = input.name.trim();
+  const folded = foldPersonQuery(input.name);
   const last = lastNameOf(input.name);
   const brand = input.company ? companySearchHint(input.company) : "";
   const locations = locationsOf(input);
@@ -116,7 +130,7 @@ export function buildAttendeeSearchPayloads(input: AttendeeMatchInput): Record<s
     payloads.push({
       page: 1,
       per_page: 25,
-      q_keywords: query,
+      q_keywords: original,
       ...locationFilter,
       ...extra,
     });
@@ -124,7 +138,10 @@ export function buildAttendeeSearchPayloads(input: AttendeeMatchInput): Record<s
 
   if (brand) push({ q_organization_name: brand });
   push({});
-  if (last && last !== query) {
+  if (folded && folded !== original && folded !== original.toLowerCase()) {
+    push({ q_keywords: folded });
+  }
+  if (last && last !== original && last !== folded) {
     push({
       q_keywords: last,
       ...(brand ? { q_organization_name: brand } : {}),
@@ -169,6 +186,13 @@ export function pickAttendeeCandidate(
   return best?.person ?? null;
 }
 
+function fatalIdentifyError(message: string | undefined): boolean {
+  return Boolean(
+    message &&
+      /cr[eé]dito|presupuesto|insufficient credits|rate limit|l[ií]mite de solicitudes|master/i.test(message)
+  );
+}
+
 export async function matchAttendeeContact(
   input: AttendeeMatchInput,
   ownerId: number
@@ -177,12 +201,53 @@ export async function matchAttendeeContact(
   const portfolioIds = await getPortfolioApolloIds(ownerId);
   const blocked = await getNoContestaContacts(ownerId);
 
+  let identifyCredits = 0;
   let seen: Record<string, unknown>[] = [];
-  for (const payload of buildAttendeeSearchPayloads(input)) {
-    if (Date.now() >= deadlineMs) break;
-    const page = await searchPeopleCandidates(payload);
-    seen = seen.concat(page);
-    if (pickAttendeeCandidate(page, input)) break;
+
+  const detail = buildIdentifyDetail(input);
+  const identified = await identifyPersonByAttributes(detail);
+  identifyCredits += identified.credits;
+  if (fatalIdentifyError(identified.error)) {
+    throw new Error(identified.error);
+  }
+  if (identified.person) seen.push(identified.person);
+
+  if (!identified.person && detail.organization_name && Date.now() < deadlineMs) {
+    const withoutOrg = { ...detail };
+    delete withoutOrg.organization_name;
+    const again = await identifyPersonByAttributes(withoutOrg);
+    identifyCredits += again.credits;
+    if (fatalIdentifyError(again.error)) {
+      throw new Error(again.error);
+    }
+    if (again.person) seen.push(again.person);
+  }
+
+  const identifiedPick = pickAttendeeCandidate(seen, input);
+  const locations = locationsOf(input);
+  if (
+    !identifiedPick &&
+    seen.length &&
+    locations.length &&
+    seen.some(
+      (person) =>
+        nameScore(input.name, personDisplayName(person)) >= MIN_NAME_SCORE &&
+        !matchesSelectedCountry(person, locations)
+    )
+  ) {
+    if (identifyCredits > 0) {
+      await recordProspeccionCredits(identifyCredits, 0, "search", ownerId);
+    }
+    return { status: "not_found", person: null, credits_consumed: identifyCredits };
+  }
+
+  if (!identifiedPick) {
+    for (const payload of buildAttendeeSearchPayloads(input)) {
+      if (Date.now() >= deadlineMs) break;
+      const page = await searchPeopleCandidates(payload);
+      seen = seen.concat(page);
+      if (pickAttendeeCandidate(page, input)) break;
+    }
   }
 
   const unique = new Map<string, Record<string, unknown>>();
@@ -193,11 +258,17 @@ export async function matchAttendeeContact(
 
   const candidate = pickAttendeeCandidate([...unique.values()], input);
   if (!candidate) {
-    return { status: "not_found", person: null, credits_consumed: 0 };
+    if (identifyCredits > 0) {
+      await recordProspeccionCredits(identifyCredits, 0, "search", ownerId);
+    }
+    return { status: "not_found", person: null, credits_consumed: identifyCredits };
   }
 
   const id = resolveApolloPersonId(candidate);
   if (portfolioIds.has(id)) {
+    if (identifyCredits > 0) {
+      await recordProspeccionCredits(identifyCredits, 0, "search", ownerId);
+    }
     const saved = await getLeadByApolloId(id, ownerId);
     const person: ApolloPerson | null = saved
       ? {
@@ -211,37 +282,36 @@ export async function matchAttendeeContact(
           linkedin_url: saved.linkedin_url,
         }
       : null;
-    return { status: "found", person, credits_consumed: 0, already_saved: true };
+    return { status: "found", person, credits_consumed: identifyCredits, already_saved: true };
   }
 
   if (!isContactableInSearch(candidate)) {
-    return { status: "no_contacts", person: null, credits_consumed: 0 };
+    if (identifyCredits > 0) {
+      await recordProspeccionCredits(identifyCredits, 0, "search", ownerId);
+    }
+    return { status: "no_contacts", person: null, credits_consumed: identifyCredits };
   }
 
   const enriched = await enrichSinglePersonWithContacts(candidate, { deadlineMs });
-  if (enriched.stats.credits_consumed > 0) {
-    await recordProspeccionCredits(
-      enriched.stats.credits_consumed,
-      enriched.person ? 1 : 0,
-      "search",
-      ownerId
-    );
+  const creditsConsumed = identifyCredits + enriched.stats.credits_consumed;
+  if (creditsConsumed > 0) {
+    await recordProspeccionCredits(creditsConsumed, enriched.person ? 1 : 0, "search", ownerId);
   }
 
   if (!enriched.person) {
-    return { status: "no_contacts", person: null, credits_consumed: enriched.stats.credits_consumed };
+    return { status: "no_contacts", person: null, credits_consumed: creditsConsumed };
   }
   if (isNoContestaContact(enriched.person, blocked)) {
-    return { status: "no_contacts", person: null, credits_consumed: enriched.stats.credits_consumed };
+    return { status: "no_contacts", person: null, credits_consumed: creditsConsumed };
   }
   if (!enriched.person.email?.trim() || !enriched.person.telefono?.trim()) {
-    return { status: "no_contacts", person: null, credits_consumed: enriched.stats.credits_consumed };
+    return { status: "no_contacts", person: null, credits_consumed: creditsConsumed };
   }
 
   return {
     status: "found",
     person: enriched.person,
-    credits_consumed: enriched.stats.credits_consumed,
+    credits_consumed: creditsConsumed,
   };
 }
 

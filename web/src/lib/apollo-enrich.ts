@@ -7,6 +7,7 @@ import { toE164 } from "./phone";
 const BASE_URL =
   process.env.APOLLO_BASE_URL ?? "https://api.apollo.io/api/v1";
 const BULK_MATCH_URL = `${BASE_URL}/people/bulk_match`;
+const PERSON_MATCH_URL = `${BASE_URL}/people/match`;
 const PHONE_POLL_MS = 1200;
 /** Apollo suele entregar el teléfono por webhook entre 10 y 20 s después de pedirlo. */
 const PHONE_POLL_MAX_MS = 20000;
@@ -169,6 +170,83 @@ export interface EnrichStats {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isUnmatchedPerson(raw: Record<string, unknown> | null | undefined): boolean {
+  if (!raw || typeof raw !== "object") return true;
+  if (raw.match_confidence === "none") return true;
+  return !resolveApolloPersonId(raw);
+}
+
+/**
+ * Cruce 1:1 por nombre/empresa, sin revelar correo ni móvil.
+ * mixed_people/api_search no está pensado para encontrar a una persona concreta.
+ */
+export async function identifyPersonByAttributes(
+  detail: Record<string, unknown>,
+  retry = 0
+): Promise<{ person: Record<string, unknown> | null; credits: number; error?: string }> {
+  const url = new URL(PERSON_MATCH_URL);
+  url.searchParams.set("reveal_personal_emails", "false");
+  url.searchParams.set("reveal_phone_number", "false");
+
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), {
+      method: "POST",
+      headers: apiHeaders(),
+      body: JSON.stringify(detail),
+    });
+  } catch (e) {
+    return {
+      person: null,
+      credits: 0,
+      error: `Error de red al cruzar el contacto: ${e instanceof Error ? e.message : "desconocido"}`,
+    };
+  }
+
+  if (res.status === 429 && retry < 2) {
+    await sleep(1500 * (retry + 1));
+    return identifyPersonByAttributes(detail, retry + 1);
+  }
+
+  const text = await res.text();
+  if (res.status === 429) {
+    return {
+      person: null,
+      credits: 0,
+      error: "Límite de solicitudes Apollo alcanzado. Espera un momento e intenta de nuevo.",
+    };
+  }
+  if (!res.ok) {
+    if (res.status === 403 && text.toLowerCase().includes("master")) {
+      return {
+        person: null,
+        credits: 0,
+        error: "API key debe ser Master en Apollo → Settings → API",
+      };
+    }
+    return { person: null, credits: 0, error: `Apollo people/match ${res.status}: ${text.slice(0, 280)}` };
+  }
+
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return { person: null, credits: 0, error: "Respuesta inválida de Apollo people/match" };
+  }
+
+  const credits = Number(data.credits_consumed ?? 0);
+  const raw =
+    data.person && typeof data.person === "object"
+      ? (data.person as Record<string, unknown>)
+      : resolveApolloPersonId(data)
+        ? data
+        : null;
+  return {
+    person: isUnmatchedPerson(raw) ? null : raw,
+    credits: Number.isFinite(credits) ? credits : 0,
+  };
 }
 
 async function bulkMatchPeople(

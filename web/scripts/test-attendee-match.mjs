@@ -4,6 +4,7 @@
  */
 import {
   buildAttendeeSearchPayloads,
+  buildIdentifyDetail,
   foldPersonQuery,
   locationsOf,
   parseMatchCountries,
@@ -66,8 +67,14 @@ const payloads = buildAttendeeSearchPayloads(input);
 check("con país, todas las búsquedas filtran ubicación", payloads.every((p) => Array.isArray(p.person_locations) && p.person_locations.includes("Colombia")));
 check("busca primero por marca y país", payloads[0].q_organization_name === "APDTIC" && payloads[0].person_locations?.[0] === "Colombia");
 check("no manda el cargo en español a Apollo", payloads.every((p) => !p.person_titles));
-check("keywords van sin tilde", payloads[0].q_keywords === "andre castelo pichel");
+check("keywords conservan el nombre", payloads[0].q_keywords === "ANDRÉ CASTELO PICHEL");
+check("también prueba el nombre sin tilde", payloads.some((p) => p.q_keywords === "andre castelo pichel"));
 check("no exige email verificado para aparecer", payloads.every((p) => !p.contact_email_status));
+
+const identify = buildIdentifyDetail(input);
+check("match manda nombre completo", identify.name === "ANDRÉ CASTELO PICHEL");
+check("match manda primer nombre y apellidos", identify.first_name === "ANDRÉ" && identify.last_name === "CASTELO PICHEL");
+check("match manda la marca corta", identify.organization_name === "APDTIC");
 check(
   "APDTIC corto calza con el nombre largo",
   organizationMatchesLoose("APDTIC", "APDTIC - Profesionales del derecho TIC")
