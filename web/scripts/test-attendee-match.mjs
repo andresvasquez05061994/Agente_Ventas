@@ -7,6 +7,7 @@ import {
   buildIdentifyDetail,
   foldPersonQuery,
   locationsOf,
+  obfuscatedTokenFits,
   parseMatchCountries,
   pickAttendeeCandidate,
 } from "../src/lib/apollo-attendee-match.ts";
@@ -67,14 +68,17 @@ const payloads = buildAttendeeSearchPayloads(input);
 check("con país, todas las búsquedas filtran ubicación", payloads.every((p) => Array.isArray(p.person_locations) && p.person_locations.includes("Colombia")));
 check("busca primero por marca y país", payloads[0].q_organization_name === "APDTIC" && payloads[0].person_locations?.[0] === "Colombia");
 check("no manda el cargo en español a Apollo", payloads.every((p) => !p.person_titles));
-check("keywords conservan el nombre", payloads[0].q_keywords === "ANDRÉ CASTELO PICHEL");
-check("también prueba el nombre sin tilde", payloads.some((p) => p.q_keywords === "andre castelo pichel"));
+check("keywords van sin tilde para que Apollo los encuentre", payloads[0].q_keywords === "ANDRE CASTELO PICHEL");
+check("también prueba el nombre con tilde", payloads.some((p) => p.q_keywords === "ANDRÉ CASTELO PICHEL"));
 check("no exige email verificado para aparecer", payloads.every((p) => !p.contact_email_status));
 
 const identify = buildIdentifyDetail(input);
-check("match manda nombre completo", identify.name === "ANDRÉ CASTELO PICHEL");
-check("match manda primer nombre y apellidos", identify.first_name === "ANDRÉ" && identify.last_name === "CASTELO PICHEL");
+check("match manda el nombre sin tilde", identify.name === "ANDRE CASTELO PICHEL");
+check("match manda primer nombre y apellidos", identify.first_name === "ANDRE" && identify.last_name === "CASTELO PICHEL");
 check("match manda la marca corta", identify.organization_name === "APDTIC");
+check("la máscara Ca***o calza con Castelo", obfuscatedTokenFits("castelo", "Ca***o"));
+check("la máscara Ca***l no calza con Castelo", obfuscatedTokenFits("castelo", "Ca***l") === false);
+check("la máscara Pi***l calza con Pichel", obfuscatedTokenFits("pichel", "Pi***l"));
 check(
   "APDTIC corto calza con el nombre largo",
   organizationMatchesLoose("APDTIC", "APDTIC - Profesionales del derecho TIC")

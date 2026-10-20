@@ -1,4 +1,5 @@
 import { ApolloApiError, searchPeopleCandidates } from "./apollo";
+import { searchApolloOrganizations } from "./apollo-organizations";
 import {
   enrichSinglePersonWithContacts,
   identifyPersonByAttributes,
@@ -53,16 +54,45 @@ export function foldPersonQuery(name: string): string {
   return nameTokens(name).join(" ") || name;
 }
 
+export function apolloPlainName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function buildIdentifyDetail(input: AttendeeMatchInput): Record<string, unknown> {
-  const name = input.name.trim();
+  const name = apolloPlainName(input.name);
   const parts = name.split(/\s+/).filter(Boolean);
   const brand = input.company ? companySearchHint(input.company) : "";
-  const detail: Record<string, unknown> = { name };
+  const detail: Record<string, unknown> = {};
+  if (name) detail.name = name;
   if (parts[0]) detail.first_name = parts[0];
   if (parts.length > 1) detail.last_name = parts.slice(1).join(" ");
   if (brand) detail.organization_name = brand;
-  else if (input.company?.trim()) detail.organization_name = input.company.trim();
+  else if (input.company?.trim()) detail.organization_name = apolloPlainName(input.company);
   return detail;
+}
+
+export function obfuscatedTokenFits(token: string, masked: string): boolean {
+  const value = token.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const mask = masked.toLowerCase().replace(/[^a-z0-9*]/g, "");
+  const star = mask.indexOf("*");
+  if (!value || !mask || star < 0) return false;
+  const prefix = mask.slice(0, star);
+  const suffix = mask.slice(mask.lastIndexOf("*") + 1);
+  if (prefix.length < 1) return false;
+  return value.startsWith(prefix) && (suffix.length === 0 || value.endsWith(suffix));
+}
+
+function employerDomain(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .split("/")[0]
+    .trim();
 }
 
 function personDisplayName(raw: Record<string, unknown>): string {
@@ -118,7 +148,8 @@ function matchesSelectedCountry(raw: Record<string, unknown>, locations: string[
 }
 
 export function buildAttendeeSearchPayloads(input: AttendeeMatchInput): Record<string, unknown>[] {
-  const original = input.name.trim();
+  const original = apolloPlainName(input.name) || input.name.trim();
+  const accented = input.name.trim();
   const folded = foldPersonQuery(input.name);
   const last = lastNameOf(input.name);
   const brand = input.company ? companySearchHint(input.company) : "";
@@ -138,7 +169,8 @@ export function buildAttendeeSearchPayloads(input: AttendeeMatchInput): Record<s
 
   if (brand) push({ q_organization_name: brand });
   push({});
-  if (folded && folded !== original && folded !== original.toLowerCase()) {
+  if (accented && accented !== original) push({ q_keywords: accented });
+  if (folded && folded !== original && folded !== original.toLowerCase() && folded !== accented.toLowerCase()) {
     push({ q_keywords: folded });
   }
   if (last && last !== original && last !== folded) {
@@ -174,7 +206,8 @@ export function pickAttendeeCandidate(
 
     const org = personOrgName(raw);
     const orgOk = companyFits(org, company);
-    if (company && !orgOk && score < 96) continue;
+    if (company && org && !orgOk) continue;
+    if (company && !org && score < 96) continue;
 
     const locations = locationsOf(input);
     const sameCountry = matchesSelectedCountry(raw, locations);
@@ -184,6 +217,29 @@ export function pickAttendeeCandidate(
     if (!best || rank > best.rank) best = { person: raw, rank };
   }
   return best?.person ?? null;
+}
+
+function searchRowWorthConfirming(raw: Record<string, unknown>, input: AttendeeMatchInput): boolean {
+  if (!resolveApolloPersonId(raw)) return false;
+  const wanted = nameTokens(input.name)[0];
+  const shown = nameTokens(String(raw.first_name ?? personDisplayName(raw)))[0];
+  const sameFirst =
+    Boolean(wanted && shown) &&
+    (wanted === shown || (wanted.length >= 4 && (shown.startsWith(wanted) || wanted.startsWith(shown))));
+  if (!sameFirst) return false;
+
+  const company = input.company?.trim() ?? "";
+  const org = personOrgName(raw);
+  if (company && org && !companyFits(org, company)) return false;
+
+  const masked = String(raw.last_name_obfuscated ?? "");
+  if (masked.includes("*")) {
+    return nameTokens(input.name)
+      .slice(1)
+      .some((token) => obfuscatedTokenFits(token, masked));
+  }
+  if (raw.name || raw.last_name) return nameScore(input.name, personDisplayName(raw)) >= MIN_NAME_SCORE;
+  return Boolean(company && org);
 }
 
 function fatalIdentifyError(message: string | undefined): boolean {
@@ -204,23 +260,39 @@ export async function matchAttendeeContact(
   let identifyCredits = 0;
   let seen: Record<string, unknown>[] = [];
 
-  const detail = buildIdentifyDetail(input);
-  const identified = await identifyPersonByAttributes(detail);
-  identifyCredits += identified.credits;
-  if (fatalIdentifyError(identified.error)) {
-    throw new Error(identified.error);
-  }
-  if (identified.person) seen.push(identified.person);
+  const remember = async (detail: Record<string, unknown>) => {
+    if (Date.now() >= deadlineMs) return;
+    const identified = await identifyPersonByAttributes(detail);
+    identifyCredits += identified.credits;
+    if (fatalIdentifyError(identified.error)) throw new Error(identified.error);
+    if (identified.person) seen.push(identified.person);
+  };
 
-  if (!identified.person && detail.organization_name && Date.now() < deadlineMs) {
+  const detail = buildIdentifyDetail(input);
+  await remember(detail);
+
+  if (!pickAttendeeCandidate(seen, input) && input.company?.trim() && Date.now() < deadlineMs) {
+    try {
+      const brand = companySearchHint(input.company) || input.company;
+      const orgs = await searchApolloOrganizations(brand);
+      const domain = orgs
+        .filter((org) => companyFits(org.name, input.company ?? "") || companyFits(org.name, brand))
+        .map((org) => employerDomain(org.domain ?? ""))
+        .find(Boolean);
+      if (domain) {
+        const withDomain = { ...detail, domain };
+        delete withDomain.organization_name;
+        await remember(withDomain);
+      }
+    } catch (e) {
+      if (e instanceof ApolloApiError && fatalIdentifyError(e.message)) throw e;
+    }
+  }
+
+  if (!pickAttendeeCandidate(seen, input) && detail.organization_name && Date.now() < deadlineMs) {
     const withoutOrg = { ...detail };
     delete withoutOrg.organization_name;
-    const again = await identifyPersonByAttributes(withoutOrg);
-    identifyCredits += again.credits;
-    if (fatalIdentifyError(again.error)) {
-      throw new Error(again.error);
-    }
-    if (again.person) seen.push(again.person);
+    await remember(withoutOrg);
   }
 
   const identifiedPick = pickAttendeeCandidate(seen, input);
@@ -242,11 +314,18 @@ export async function matchAttendeeContact(
   }
 
   if (!identifiedPick) {
+    let confirmed = 0;
     for (const payload of buildAttendeeSearchPayloads(input)) {
-      if (Date.now() >= deadlineMs) break;
+      if (Date.now() >= deadlineMs || confirmed >= 3) break;
       const page = await searchPeopleCandidates(payload);
-      seen = seen.concat(page);
-      if (pickAttendeeCandidate(page, input)) break;
+      for (const raw of page) {
+        if (Date.now() >= deadlineMs || confirmed >= 3) break;
+        if (!searchRowWorthConfirming(raw, input)) continue;
+        confirmed += 1;
+        await remember({ id: resolveApolloPersonId(raw) });
+        if (pickAttendeeCandidate(seen, input)) break;
+      }
+      if (pickAttendeeCandidate(seen, input)) break;
     }
   }
 

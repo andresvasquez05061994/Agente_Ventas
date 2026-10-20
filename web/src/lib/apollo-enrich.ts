@@ -180,7 +180,7 @@ function isUnmatchedPerson(raw: Record<string, unknown> | null | undefined): boo
 
 /**
  * Cruce 1:1 por nombre/empresa, sin revelar correo ni móvil.
- * mixed_people/api_search no está pensado para encontrar a una persona concreta.
+ * people/match solo lee los datos en la query string, no en el cuerpo.
  */
 export async function identifyPersonByAttributes(
   detail: Record<string, unknown>,
@@ -189,13 +189,16 @@ export async function identifyPersonByAttributes(
   const url = new URL(PERSON_MATCH_URL);
   url.searchParams.set("reveal_personal_emails", "false");
   url.searchParams.set("reveal_phone_number", "false");
+  for (const [key, value] of Object.entries(detail)) {
+    if (value == null || value === "") continue;
+    url.searchParams.set(key, String(value));
+  }
 
   let res: Response;
   try {
     res = await fetch(url.toString(), {
       method: "POST",
       headers: apiHeaders(),
-      body: JSON.stringify(detail),
     });
   } catch (e) {
     return {
