@@ -17,9 +17,12 @@ import {
   SEARCH_FIELDS,
   searchCompany,
   searchCountry,
+  searchEmployeeRanges,
+  searchIndustry,
   searchName,
   searchTitle,
   resolveEnrichCountry,
+  resolveEnrichIndustry,
   suggestedFill,
   suggestedSearchBy,
   type EnrichFieldId,
@@ -31,6 +34,12 @@ import { parseApiResponse } from "@/lib/parse-api-response";
 import type { ApolloPerson } from "@/lib/types";
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
+
+type CompanyRoleSearchResponse = {
+  results?: ApolloPerson[];
+  meta?: { credits_consumed?: number };
+  error?: string;
+};
 
 function isFatal(message: string): boolean {
   return /cr[eé]dito|presupuesto|insufficient credits|rate limit|l[ií]mite de solicitudes|failed to fetch|networkerror|load failed/i.test(
@@ -121,12 +130,13 @@ export default function EnriquecerPage() {
       setSheet(next);
       setStatuses(next.rows.map(() => "pending"));
       const search = suggestedSearchBy(next.columns);
-      setSearchBy(search.includes("nombre") ? search : ["nombre", ...search]);
+      setSearchBy(search);
       setFill(suggestedFill());
-      if (!search.includes("nombre")) {
+      const canSearchByCompanyRole = search.includes("empresa") && search.includes("cargo") && search.includes("pais");
+      if (!search.includes("nombre") && !canSearchByCompanyRole) {
         showWarning(
-          "Asigna la columna Nombre. Sin ella el sistema buscaría gente de la empresa que no está en tu lista.",
-          "Falta el nombre"
+          "Asigna Nombre, o Empresa + Cargo + País. Las filas sin una de esas combinaciones se marcarán sin consultar Apollo.",
+          "Faltan datos de búsqueda"
         );
       } else {
         showInfo(
@@ -208,11 +218,7 @@ export default function EnriquecerPage() {
 
   async function enrichBatch() {
     if (!sheet) return;
-    if (!searchBy.includes("nombre")) {
-      showWarning("Marca Nombre en «Buscar por». Así solo se enriquece a las personas del archivo.", "Falta el nombre");
-      return;
-    }
-    const fillFields = [...new Set([...suggestedFill(), ...fill])];
+    const fillFields = [...new Set([...suggestedFill(), ...fill, "nombre" as EnrichFieldId])];
     const prepared = ensureFillColumns(sheet, fillFields);
     const pendingIndexes = prepared.rows
       .map((_, index) => index)
@@ -238,34 +244,57 @@ export default function EnriquecerPage() {
     for (let i = 0; i < pendingIndexes.length; i++) {
       if (runId.current !== thisRun) return;
       const rowIndex = pendingIndexes[i];
-      const name = searchName(nextRows[rowIndex], prepared.columns);
-      if (!name) {
-        nextStatuses[rowIndex] = "not_found";
-        missing += 1;
-        continue;
-      }
+      const name = searchBy.includes("nombre") ? searchName(nextRows[rowIndex], prepared.columns) : "";
+      const company = searchBy.includes("empresa") ? searchCompany(nextRows[rowIndex], prepared.columns) : "";
+      const title = searchBy.includes("cargo") ? searchTitle(nextRows[rowIndex], prepared.columns) : "";
       const rowCountries = countriesForRow(nextRows[rowIndex], prepared.columns);
       if (rowCountries.invalidCountry) {
         nextStatuses[rowIndex] = "invalid_country";
         failed += 1;
         continue;
       }
-      setProgress(`Fila ${rowIndex + 1} de ${prepared.rows.length}: ${name}`);
+      const companyRoleSearch = !name && Boolean(company && title && rowCountries.countries.length === 1);
+      if (!name && !companyRoleSearch) {
+        nextStatuses[rowIndex] = "insufficient_data";
+        failed += 1;
+        continue;
+      }
+      setProgress(`Fila ${rowIndex + 1} de ${prepared.rows.length}: ${name || `${company} · ${title}`}`);
       try {
-        const res = await fetch("/api/apollo/attendee-match", {
+        const request = companyRoleSearch
+          ? {
+              url: "/api/apollo/search",
+              body: {
+                country: rowCountries.countries[0],
+                titles: [title],
+                company,
+                keyword: searchBy.includes("industria")
+                  ? resolveEnrichIndustry(searchIndustry(nextRows[rowIndex], prepared.columns))
+                  : "",
+                employeeRanges: searchBy.includes("tamano_empresa")
+                  ? searchEmployeeRanges(nextRows[rowIndex], prepared.columns)
+                  : [],
+                per_page: 1,
+              },
+            }
+          : {
+              url: "/api/apollo/attendee-match",
+              body: {
+                name,
+                title: title || undefined,
+                company: company || undefined,
+                all_countries: rowCountries.all_countries,
+                countries: rowCountries.countries,
+              },
+            };
+        const res = await fetch(request.url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name,
-            title: searchBy.includes("cargo") ? searchTitle(nextRows[rowIndex], prepared.columns) : undefined,
-            company: searchBy.includes("empresa") ? searchCompany(nextRows[rowIndex], prepared.columns) : undefined,
-            all_countries: rowCountries.all_countries,
-            countries: rowCountries.countries,
-          }),
+          body: JSON.stringify(request.body),
         });
-        const { data, error } = await parseApiResponse<AttendeeMatchResult & { error?: string }>(res);
+        const { data, error } = await parseApiResponse<(AttendeeMatchResult & { error?: string }) | CompanyRoleSearchResponse>(res);
         if (runId.current !== thisRun) return;
-        const message = error ?? data?.error ?? (!res.ok || !data ? `Error del servidor (${res.status})` : "");
+        const message = error ?? (data && "error" in data ? data.error : undefined) ?? (!res.ok || !data ? `Error del servidor (${res.status})` : "");
         if (message || !data) {
           if (isFatal(message)) {
             fatal = message;
@@ -274,13 +303,17 @@ export default function EnriquecerPage() {
           failed += 1;
           continue;
         }
-        batchCredits += data.credits_consumed ?? 0;
-        if (data.person?.email && data.person.telefono) {
-          nextRows[rowIndex] = applyPersonToRow(nextRows[rowIndex], prepared.columns, fillFields, data.person);
-          nextStatuses[rowIndex] = data.already_saved ? "already" : "filled";
-          foundPeople.push(data.person);
+        const companyResult = data as CompanyRoleSearchResponse;
+        const attendeeResult = data as AttendeeMatchResult & { error?: string };
+        const person = companyRoleSearch ? companyResult.results?.[0] ?? null : attendeeResult.person;
+        const consumed = companyRoleSearch ? companyResult.meta?.credits_consumed ?? 0 : attendeeResult.credits_consumed ?? 0;
+        batchCredits += consumed;
+        if (person?.email && person.telefono) {
+          nextRows[rowIndex] = applyPersonToRow(nextRows[rowIndex], prepared.columns, fillFields, person);
+          nextStatuses[rowIndex] = companyRoleSearch ? "filled" : attendeeResult.already_saved ? "already" : "filled";
+          foundPeople.push(person);
         } else {
-          nextStatuses[rowIndex] = data.status === "not_found" ? "not_found" : "no_contacts";
+          nextStatuses[rowIndex] = companyRoleSearch ? "no_contacts" : attendeeResult.status === "not_found" ? "not_found" : "no_contacts";
           missing += 1;
         }
         setStatuses([...nextStatuses]);
@@ -431,7 +464,7 @@ export default function EnriquecerPage() {
             </div>
 
             <SectionLabel>Buscar por</SectionLabel>
-            <p className="text-micro mb-2">Nombre es obligatorio. Empresa evita homónimos. Si el archivo trae País, se aplica en cada fila y prevalece sobre el selector global.</p>
+            <p className="text-micro mb-2">Se busca por Nombre, o por Empresa + Cargo + País. Si faltan datos, la fila se marca sin gastar créditos. País por fila prevalece sobre el selector global.</p>
             <div className="enrich-checks mb-4 flex flex-wrap gap-x-4 gap-y-2">
               {SEARCH_FIELDS.map((field) => (
                 <label key={field.id} className="enrich-check inline-flex items-center gap-1.5 text-sm">
@@ -530,6 +563,7 @@ function statusLabel(status: EnrichRowStatus): string {
   if (status === "no_contacts") return "Sin móvil y correo";
   if (status === "not_found") return "No coincide";
   if (status === "invalid_country") return "País no admitido";
+  if (status === "insufficient_data") return "Faltan datos: usa Nombre, o Empresa + Cargo + País";
   return "Pendiente";
 }
 

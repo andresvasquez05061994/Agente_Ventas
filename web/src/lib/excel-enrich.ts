@@ -1,6 +1,6 @@
 import { cleanCompanyName, sanitizeSpreadsheetText } from "./excel-companies";
 import { cleanPersonName } from "./excel-attendees";
-import { APOLLO_COUNTRIES } from "./apollo-filters";
+import { APOLLO_COUNTRIES, APOLLO_KEYWORDS, inferEmployeeRangesFromText } from "./apollo-filters";
 import type { ApolloPerson } from "./types";
 
 export const MAX_ENRICH_BATCH = 50;
@@ -14,13 +14,17 @@ export type EnrichFieldId =
   | "telefono"
   | "email"
   | "linkedin"
-  | "pais";
+  | "pais"
+  | "industria"
+  | "tamano_empresa";
 
 export const SEARCH_FIELDS: { id: EnrichFieldId; label: string }[] = [
   { id: "nombre", label: "Nombre" },
   { id: "empresa", label: "Empresa" },
   { id: "cargo", label: "Cargo" },
   { id: "pais", label: "País" },
+  { id: "industria", label: "Industria" },
+  { id: "tamano_empresa", label: "Tamaño de empresa" },
 ];
 
 export const FILL_FIELDS: { id: EnrichFieldId; label: string; required?: boolean }[] = [
@@ -41,6 +45,8 @@ export const FILL_COLUMN_LABEL: Record<EnrichFieldId, string> = {
   email: "Correo",
   linkedin: "LinkedIn",
   pais: "País",
+  industria: "Industria",
+  tamano_empresa: "Tamaño de empresa",
 };
 
 const FIELD_TESTS: { id: EnrichFieldId; test: RegExp }[] = [
@@ -49,6 +55,8 @@ const FIELD_TESTS: { id: EnrichFieldId; test: RegExp }[] = [
   { id: "email", test: /^(correo|email|e mail|mail)$/ },
   { id: "cargo", test: /^(cargo|puesto|titulo|rol|role|posicion|job title|title)$/ },
   { id: "pais", test: /^(pais|country)$/ },
+  { id: "industria", test: /^(industria|sector|industry|vertical)$/ },
+  { id: "tamano_empresa", test: /^(tamano|tamaño|tamano empresa|tamaño empresa|tamano de empresa|tamaño de empresa|empleados|numero empleados|numero de empleados|company size|employee count)$/ },
   { id: "empresa", test: /^(empresa|company|compania|organizacion|organization|razon social|nombre de la empresa|nombre empresa|nombre de empresa)$/ },
   { id: "nombre", test: /^(nombre|nombre completo|nombre del contacto|nombre contacto|contacto|persona|asistente|participante|attendee|full name|name)$/ },
 ];
@@ -213,6 +221,23 @@ export function searchCountry(row: string[], columns: EnrichColumn[]): string {
   return cellText(valueOf(row, columns, "pais"));
 }
 
+export function searchIndustry(row: string[], columns: EnrichColumn[]): string {
+  return cellText(valueOf(row, columns, "industria"));
+}
+
+export function searchEmployeeRanges(row: string[], columns: EnrichColumn[]): string[] {
+  return inferEmployeeRangesFromText(cellText(valueOf(row, columns, "tamano_empresa")));
+}
+
+/** Solo enviamos industrias que coinciden con una categoría de Apollo. Una industria libre se conserva, pero no se inventa un filtro. */
+export function resolveEnrichIndustry(value: string): string {
+  const normalized = fold(value);
+  if (!normalized) return "";
+  return APOLLO_KEYWORDS.find(
+    (industry) => fold(industry.value) === normalized || fold(industry.label) === normalized
+  )?.value ?? "";
+}
+
 export function personFieldValue(person: ApolloPerson, field: EnrichFieldId): string {
   switch (field) {
     case "nombre":
@@ -252,4 +277,4 @@ export function applyPersonToRow(
   return next;
 }
 
-export type EnrichRowStatus = "pending" | "filled" | "already" | "not_found" | "no_contacts" | "invalid_country";
+export type EnrichRowStatus = "pending" | "filled" | "already" | "not_found" | "no_contacts" | "invalid_country" | "insufficient_data";

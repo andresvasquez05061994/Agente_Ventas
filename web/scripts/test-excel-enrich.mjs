@@ -9,8 +9,11 @@ import {
   parseEnrichMatrix,
   searchCompany,
   searchCountry,
+  searchEmployeeRanges,
+  searchIndustry,
   searchName,
   resolveEnrichCountry,
+  resolveEnrichIndustry,
   suggestedFill,
   suggestedSearchBy,
 } from "../src/lib/excel-enrich.ts";
@@ -63,6 +66,16 @@ const withCountry = parseEnrichMatrix([
   ["Ana Pérez", "Perú"],
 ]);
 check("lee el país de la fila", searchCountry(withCountry.rows[0], withCountry.columns) === "Perú");
+
+const companyRole = parseEnrichMatrix([
+  ["Empresa", "Cargo", "País", "Industria", "Tamaño de empresa"],
+  ["IAC SAS", "Director de TI", "Colombia", "Software / Tecnología", "Más de 200 empleados"],
+]);
+check("detecta industria", companyRole.columns.find((c) => c.field === "industria")?.index === 3);
+check("detecta tamaño", companyRole.columns.find((c) => c.field === "tamano_empresa")?.index === 4);
+check("lee industria", searchIndustry(companyRole.rows[0], companyRole.columns) === "Software / Tecnología");
+check("mapea industria Apollo", resolveEnrichIndustry(searchIndustry(companyRole.rows[0], companyRole.columns)) === "software");
+check("mapea tamaño a rango Apollo", JSON.stringify(searchEmployeeRanges(companyRole.rows[0], companyRole.columns)) === JSON.stringify(["201,10000"]));
 
 const prepared = ensureFillColumns(
   { ...parsed, fileLabel: "andicom.csv" },
