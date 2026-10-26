@@ -3,7 +3,7 @@ import { cleanPersonName } from "./excel-attendees";
 import { APOLLO_COUNTRIES, APOLLO_KEYWORDS, inferEmployeeRangesFromText } from "./apollo-filters";
 import type { ApolloPerson } from "./types";
 
-export const MAX_ENRICH_BATCH = 50;
+export const MAX_ENRICH_BATCH = 100;
 export const MAX_ENRICH_ROWS = 8000;
 export const ENRICH_PAGE_SIZE = 25;
 

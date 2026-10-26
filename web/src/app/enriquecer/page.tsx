@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { Download, Sparkles } from "lucide-react";
-import { PageHeading } from "@/components/HelpTip";
+import { HelpTip, PageHeading } from "@/components/HelpTip";
 import { ActionBanner, FeedbackAnchor, FieldLabel, SectionLabel } from "@/components/ui";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { APOLLO_COUNTRIES, APOLLO_EMPLOYEE_RANGES, APOLLO_KEYWORDS } from "@/lib/apollo-filters";
@@ -23,7 +23,6 @@ import {
   searchTitle,
   resolveEnrichCountry,
   resolveEnrichIndustry,
-  suggestedFill,
   suggestedSearchBy,
   type EnrichFieldId,
   type EnrichRowStatus,
@@ -87,7 +86,6 @@ export default function EnriquecerPage() {
   const [sheet, setSheet] = useState<EnrichSheet | null>(null);
   const [statuses, setStatuses] = useState<EnrichRowStatus[]>([]);
   const [searchBy, setSearchBy] = useState<EnrichFieldId[]>([]);
-  const [fill, setFill] = useState<EnrichFieldId[]>(suggestedFill());
   const [allCountries, setAllCountries] = useState(true);
   const [countries, setCountries] = useState<string[]>(["Colombia"]);
   const [busy, setBusy] = useState(false);
@@ -99,6 +97,10 @@ export default function EnriquecerPage() {
   const [fallbackIndustry, setFallbackIndustry] = useState("");
   const [fallbackEmployeeRange, setFallbackEmployeeRange] = useState("");
   const [contactsPerRow, setContactsPerRow] = useState(3);
+  const analyzedIndexes = useRef(new Set<number>());
+  const [analyzedRows, setAnalyzedRows] = useState(0);
+  const [sourceRows, setSourceRows] = useState(0);
+  const [nextBatchApproval, setNextBatchApproval] = useState(false);
 
   const mappedFields = useMemo(
     () => new Set((sheet?.columns ?? []).map((column) => column.field).filter(Boolean) as EnrichFieldId[]),
@@ -110,6 +112,10 @@ export default function EnriquecerPage() {
   const safePage = Math.min(page, totalPages);
   const pageStart = (safePage - 1) * ENRICH_PAGE_SIZE;
   const pageRows = sheet?.rows.slice(pageStart, pageStart + ENRICH_PAGE_SIZE) ?? [];
+  const displayedProgress = Math.min(sourceRows, analyzedRows);
+  const progressPercent = sourceRows
+    ? Math.round((displayedProgress / sourceRows) * 100)
+    : 0;
 
   async function onFile(file: File | undefined) {
     clear();
@@ -117,6 +123,9 @@ export default function EnriquecerPage() {
     setStatuses([]);
     setCredits(0);
     setSaved(0);
+    analyzedIndexes.current.clear();
+    setAnalyzedRows(0);
+    setSourceRows(0);
     setPage(1);
     if (!file) return;
     if (!/\.(xlsx|xls|csv)$/i.test(file.name)) {
@@ -132,10 +141,10 @@ export default function EnriquecerPage() {
       const parsed = parseEnrichMatrix(matrix);
       const next: EnrichSheet = { ...parsed, fileLabel: file.name };
       setSheet(next);
+      setSourceRows(next.rows.length);
       setStatuses(next.rows.map(() => "pending"));
       const search = suggestedSearchBy(next.columns);
       setSearchBy(search);
-      setFill(suggestedFill());
       const canSearchByCompanyRole = search.includes("empresa") && search.includes("cargo") && search.includes("pais");
       if (!search.includes("nombre") && !canSearchByCompanyRole) {
         showWarning(
@@ -169,12 +178,6 @@ export default function EnriquecerPage() {
   function toggleSearch(id: EnrichFieldId) {
     if (id === "nombre") return;
     setSearchBy((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
-  }
-
-  function toggleFill(id: EnrichFieldId) {
-    const meta = FILL_FIELDS.find((field) => field.id === id);
-    if (meta?.required) return;
-    setFill((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   }
 
   function toggleAllCountries() {
@@ -232,8 +235,6 @@ export default function EnriquecerPage() {
     if (!sheet) return;
     const fillFields = [
       ...new Set([
-        ...suggestedFill(),
-        ...fill,
         "nombre" as EnrichFieldId,
         "empresa" as EnrichFieldId,
         "cargo" as EnrichFieldId,
@@ -252,6 +253,7 @@ export default function EnriquecerPage() {
 
     const thisRun = ++runId.current;
     setBusy(true);
+    setNextBatchApproval(false);
     clear();
     setSheet(prepared);
     const nextRows = prepared.rows.map((row) => [...row]);
@@ -265,6 +267,10 @@ export default function EnriquecerPage() {
     for (let i = 0; i < pendingIndexes.length; i++) {
       if (runId.current !== thisRun) return;
       const rowIndex = pendingIndexes[i];
+      if (!analyzedIndexes.current.has(rowIndex)) {
+        analyzedIndexes.current.add(rowIndex);
+        setAnalyzedRows(analyzedIndexes.current.size);
+      }
       const name = searchBy.includes("nombre") ? searchName(nextRows[rowIndex], prepared.columns) : "";
       const company = searchBy.includes("empresa") ? searchCompany(nextRows[rowIndex], prepared.columns) : "";
       const title = searchBy.includes("cargo") ? searchTitle(nextRows[rowIndex], prepared.columns) : "";
@@ -397,6 +403,7 @@ export default function EnriquecerPage() {
     if (fatal) showWarning(`${summary} Se detuvo: ${fatal}`, "Tanda detenida");
     else if (saveError || !foundPeople.length) showWarning(summary, "Tanda terminada");
     else showSuccess(summary, "Tanda terminada");
+    if (!fatal && left > 0) setNextBatchApproval(true);
   }
 
   async function download() {
@@ -411,7 +418,7 @@ export default function EnriquecerPage() {
       <header className="page-header">
         <PageHeading
           title="Enriquecer archivo"
-          help="Carga un Excel o CSV. El sistema detecta las columnas y busca por persona o mediante filtros amplios cuando solo hay empresas o cargos. El archivo conserva sus filas y añade los contactos de Apollo con móvil y correo. Cada tanda revisa hasta 50 filas y gasta créditos de Apollo."
+          help="Carga un Excel o CSV. El sistema detecta las columnas y busca por persona o mediante filtros amplios cuando solo hay empresas o cargos. El archivo conserva sus filas y añade los contactos de Apollo con móvil y correo. Cada tanda revisa hasta 100 filas y solicita tu aprobación antes de continuar."
         />
       </header>
 
@@ -421,8 +428,8 @@ export default function EnriquecerPage() {
         </FeedbackAnchor>
       )}
 
-      <section className="settings-panel mt-6">
-        <p className="section-label">Archivo</p>
+      <section className="settings-panel enrich-section mt-6">
+        <div className="enrich-section__heading"><div><p className="section-label">1. Archivo</p><h2>Datos actuales</h2></div><HelpTip label="Ayuda sobre el archivo">Carga la primera hoja de un archivo Excel o CSV. El módulo mantiene sus columnas y filas; solo añade columnas de contacto cuando hacen falta.</HelpTip></div>
         <div className="document-upload">
           <input
             id="enrich-file"
@@ -439,9 +446,8 @@ export default function EnriquecerPage() {
 
       {sheet && (
         <>
-          <section className="settings-panel mt-4">
-            <SectionLabel>Columnas detectadas</SectionLabel>
-            <p className="text-micro mb-3">Corrige si alguna columna no quedó bien asignada.</p>
+          <section className="settings-panel enrich-section mt-4">
+            <div className="enrich-section__heading"><div><p className="section-label">Datos detectados</p><h2>Confirma las columnas</h2></div><HelpTip label="Ayuda sobre las columnas">El sistema asigna automáticamente las columnas conocidas. Ajusta únicamente las que estén mal clasificadas o marca Ignorar para que nunca se usen en la búsqueda.</HelpTip></div>
             <div className="enrich-columns grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2.5">
               {sheet.columns.map((column) => (
                 <label key={column.index} className="enrich-column flex min-w-0 flex-col gap-1">
@@ -468,13 +474,9 @@ export default function EnriquecerPage() {
             </div>
           </section>
 
-          <section className="settings-panel mt-4">
+          <section className="settings-panel enrich-section mt-4">
+            <div className="enrich-section__heading"><div><p className="section-label">2. Búsqueda</p><h2>Define cómo encontrar contactos</h2></div><HelpTip label="Ayuda sobre la búsqueda">Si una fila tiene Nombre, se busca a esa persona. Sin nombre, el módulo utiliza Empresa, Cargo, País, Industria y Tamaño. Para búsqueda amplia sin nombre se requiere un único país y al menos un cargo.</HelpTip></div>
             <FieldLabel>País de búsqueda</FieldLabel>
-            <p className="text-micro mb-2">
-              {allCountries
-                ? "Todos los países: busca en cualquier ubicación."
-                : `Filtro activo: solo ${countriesCaption(false, countries)}.`}
-            </p>
             <div className="enrich-checks mb-4 flex flex-wrap gap-x-4 gap-y-2">
               <label className="enrich-check inline-flex items-center gap-1.5 text-sm">
                 <input type="checkbox" checked={allCountries} disabled={busy} onChange={toggleAllCountries} />
@@ -493,8 +495,7 @@ export default function EnriquecerPage() {
               ))}
             </div>
 
-            <SectionLabel>Buscar por</SectionLabel>
-            <p className="text-micro mb-2">Se busca por Nombre o, sin Nombre, con los filtros de búsqueda amplia. Si faltan datos, la fila se marca sin gastar créditos. País por fila prevalece sobre el selector global.</p>
+            <SectionLabel>Campos del archivo que se usarán</SectionLabel>
             <div className="enrich-checks mb-4 flex flex-wrap gap-x-4 gap-y-2">
               {SEARCH_FIELDS.map((field) => (
                 <label key={field.id} className="enrich-check inline-flex items-center gap-1.5 text-sm">
@@ -509,8 +510,7 @@ export default function EnriquecerPage() {
               ))}
             </div>
 
-            <SectionLabel>Búsqueda amplia sin nombre</SectionLabel>
-            <p className="text-micro mb-2">Para archivos con solo empresas o cargos, selecciona un país único y escribe uno o varios cargos separados por coma. El resultado añadirá una fila por contacto encontrado.</p>
+            <SectionLabel>Filtros de respaldo</SectionLabel>
             <div className="grid gap-3 md:grid-cols-2">
               <label className="field-group">
                 <span className="field-label">Cargos si el archivo no los trae</span>
@@ -536,37 +536,27 @@ export default function EnriquecerPage() {
               </label>
             </div>
 
-            <SectionLabel>Completar en el archivo</SectionLabel>
-            <p className="text-micro mb-2">Móvil y correo van siempre: sin ellos el contacto no entra al portafolio.</p>
-            <div className="enrich-checks mb-4 flex flex-wrap gap-x-4 gap-y-2">
-              {FILL_FIELDS.map((field) => (
-                <label key={field.id} className="enrich-check inline-flex items-center gap-1.5 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={fill.includes(field.id) || Boolean(field.required)}
-                    disabled={busy || field.required}
-                    onChange={() => toggleFill(field.id)}
-                  />
-                  {field.label}
-                </label>
-              ))}
-            </div>
+            <div className="enrich-output-summary"><div><p className="section-label">3. Archivo de salida</p><h2>Contactos enriquecidos</h2><p>Se agregan Nombre, Empresa, Cargo, País, Correo y Móvil. Los valores actuales nunca se reemplazan.</p></div><HelpTip label="Ayuda sobre el archivo de salida">Cuando una búsqueda amplia devuelve varios contactos, el archivo agrega una fila por cada resultado. Solo se incluyen contactos con correo y móvil para que puedan entrar al portafolio.</HelpTip></div>
 
+            <div className="enrich-progress" aria-live="polite">
+              <div className="enrich-progress__head"><span>{busy ? "Analizando filas" : "Filas analizadas"}</span><strong>{displayedProgress} de {sourceRows}</strong></div>
+              <div className="enrich-progress__track"><span style={{ width: `${progressPercent}%` }} /></div>
+            </div>
+            {nextBatchApproval && !busy ? (
+              <div className="enrich-next-batch"><div><strong>Quedan {pending} filas por analizar.</strong><p>Revisa el resultado actual antes de consumir créditos en el siguiente bloque de hasta 100 filas.</p></div><div className="flex gap-2"><button type="button" className="btn-secondary" onClick={() => void download()}>Descargar avance</button><button type="button" className="btn-primary" onClick={() => void enrichBatch()}>Aprobar siguiente bloque</button></div></div>
+            ) : (
             <div className="document-upload mt-4">
               <button type="button" className="btn-primary inline-flex items-center gap-2" disabled={busy || pending === 0} onClick={() => void enrichBatch()}>
                 <Sparkles size={16} strokeWidth={1.5} aria-hidden />
-                {busy ? progress ?? "Enriqueciendo…" : `Enriquecer ${Math.min(MAX_ENRICH_BATCH, pending)} de ${pending}`}
+                {busy ? progress ?? "Enriqueciendo…" : `Analizar hasta ${Math.min(MAX_ENRICH_BATCH, pending)} filas`}
               </button>
               <button type="button" className="btn-secondary inline-flex items-center gap-2" disabled={busy} onClick={() => void download()}>
                 <Download size={16} strokeWidth={1.5} aria-hidden />
                 Descargar archivo
               </button>
             </div>
-            <p className="text-micro mt-2">
-              {filled} completadas · {pending} pendientes
-              {credits ? ` · ~${credits} créditos` : ""}
-              {saved ? ` · ${saved} en portafolio` : ""}
-            </p>
+            )}
+            <p className="text-micro mt-2">{filled} contactos enriquecidos · {pending} por analizar{credits ? ` · ~${credits} créditos` : ""}{saved ? ` · ${saved} en portafolio` : ""}</p>
           </section>
 
           <section className="mt-4">

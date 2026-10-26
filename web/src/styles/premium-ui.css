@@ -598,6 +598,108 @@ body {
   font-size: 14px;
 }
 
+.enrich-section {
+  max-width: 860px;
+}
+
+.enrich-section__heading,
+.enrich-output-summary,
+.enrich-progress__head,
+.enrich-next-batch {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.enrich-section__heading {
+  margin-bottom: 18px;
+}
+
+.enrich-section__heading h2,
+.enrich-output-summary h2 {
+  color: var(--color-text-primary);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.enrich-section__heading .section-label,
+.enrich-output-summary .section-label {
+  margin-bottom: 4px;
+}
+
+.enrich-output-summary {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.enrich-output-summary p:not(.section-label) {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.enrich-progress {
+  margin-top: 18px;
+}
+
+.enrich-progress__head {
+  align-items: baseline;
+  margin-bottom: 7px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.enrich-progress__head strong {
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.enrich-progress__track {
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg-tertiary);
+}
+
+.enrich-progress__track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transition: width 180ms ease;
+}
+
+.enrich-next-batch {
+  align-items: center;
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-control);
+  background: var(--color-accent-subtle);
+}
+
+.enrich-next-batch strong {
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+.enrich-next-batch p {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+@media (max-width: 640px) {
+  .enrich-next-batch {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .credit-meter__fill {
     transition: none;
