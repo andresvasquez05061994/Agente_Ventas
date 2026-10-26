@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
     const actor = await requireUser(req);
     if (actor instanceof NextResponse) return actor;
     const body = (await req.json()) as Record<string, unknown>;
-    assertMistralRateLimit();
+    await assertMistralRateLimit(actor.id);
     const result = await generateOutreachMessage(
       {
         nombre: String(body.nombre ?? ""),

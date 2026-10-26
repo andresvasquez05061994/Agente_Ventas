@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     await ensureDb();
     const actor = await requireUser(req);
     if (actor instanceof NextResponse) return actor;
-    assertApolloRateLimit();
+    await assertApolloRateLimit(actor.id);
     await assertApolloBudget(actor.id);
     const body = await req.json();
     const input = validateSearchRequest(body);

@@ -86,6 +86,14 @@ export function obfuscatedTokenFits(token: string, masked: string): boolean {
   return value.startsWith(prefix) && (suffix.length === 0 || value.endsWith(suffix));
 }
 
+/** La máscara de Apollo puede cubrir un apellido o los dos juntos (Ca***l = Castelo Pichel). */
+export function obfuscatedSurnamesFit(surnames: string[], masked: string): boolean {
+  const tokens = surnames.map((token) => token.toLowerCase().replace(/[^a-z0-9]/g, "")).filter(Boolean);
+  if (!tokens.length || !masked.includes("*")) return false;
+  if (tokens.some((token) => obfuscatedTokenFits(token, masked))) return true;
+  return obfuscatedTokenFits(tokens.join(""), masked);
+}
+
 function employerDomain(raw: string): string {
   return raw
     .trim()
@@ -234,9 +242,7 @@ function searchRowWorthConfirming(raw: Record<string, unknown>, input: AttendeeM
 
   const masked = String(raw.last_name_obfuscated ?? "");
   if (masked.includes("*")) {
-    return nameTokens(input.name)
-      .slice(1)
-      .some((token) => obfuscatedTokenFits(token, masked));
+    return obfuscatedSurnamesFit(nameTokens(input.name).slice(1), masked);
   }
   if (raw.name || raw.last_name) return nameScore(input.name, personDisplayName(raw)) >= MIN_NAME_SCORE;
   return Boolean(company && org);
@@ -258,7 +264,7 @@ export async function matchAttendeeContact(
   const blocked = await getNoContestaContacts(ownerId);
 
   let identifyCredits = 0;
-  let seen: Record<string, unknown>[] = [];
+  const seen: Record<string, unknown>[] = [];
 
   const remember = async (detail: Record<string, unknown>) => {
     if (Date.now() >= deadlineMs) return;
@@ -280,7 +286,7 @@ export async function matchAttendeeContact(
         .map((org) => employerDomain(org.domain ?? ""))
         .find(Boolean);
       if (domain) {
-        const withDomain = { ...detail, domain };
+        const withDomain: Record<string, unknown> = { ...detail, domain };
         delete withDomain.organization_name;
         await remember(withDomain);
       }

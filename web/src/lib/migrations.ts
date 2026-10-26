@@ -281,6 +281,17 @@ async function migration006Ciclo(sql: Sql) {
   await sql`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS valid_until DATE`;
 }
 
+/** 007: tope de peticiones compartido entre instancias de Vercel, por usuario o IP. */
+async function migration007RateWindows(sql: Sql) {
+  await sql`
+    CREATE TABLE IF NOT EXISTS api_rate_windows (
+      bucket_key TEXT PRIMARY KEY,
+      hit_count INTEGER NOT NULL,
+      reset_at TIMESTAMPTZ NOT NULL
+    )
+  `;
+}
+
 const MIGRATIONS: Migration[] = [
   { id: "001_init", run: migration001Init },
   { id: "002_phone_search", run: migration002PhoneSearch },
@@ -288,6 +299,7 @@ const MIGRATIONS: Migration[] = [
   { id: "004_users", run: migration004Users },
   { id: "005_gestion", run: migration005Gestion },
   { id: "006_ciclo", run: migration006Ciclo },
+  { id: "007_rate_windows", run: migration007RateWindows },
 ];
 
 export async function applyMigrations(sql: Sql) {

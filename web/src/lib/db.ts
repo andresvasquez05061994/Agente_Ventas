@@ -975,19 +975,79 @@ export async function latestOwnerForApollo(apolloId: string): Promise<number | n
   return rows[0]?.owner_id ?? null;
 }
 
-export async function getLeadByPhone(telefono: string): Promise<Lead | null> {
+export async function listLeadsByPhone(telefono: string): Promise<Lead[]> {
   const candidates = phoneMatchCandidates(telefono);
-  if (!candidates.length) return null;
+  if (!candidates.length) return [];
 
   const sql = getSql();
-  const rows = (await sql`
+  return (await sql`
     SELECT * FROM leads
     WHERE telefono_e164 = ANY(${candidates})
        OR telefono = ANY(${candidates})
        OR regexp_replace(COALESCE(telefono, ''), '[^0-9]', '', 'g') = ANY(${candidates})
-    LIMIT 1
+    ORDER BY updated_at DESC
   `) as Lead[];
+}
+
+export async function getLeadByPhone(telefono: string): Promise<Lead | null> {
+  const rows = await listLeadsByPhone(telefono);
   return rows[0] ?? null;
+}
+
+/**
+ * Cuenta un intento dentro de la ventana. Si la ventana sigue abierta y ya llegó al tope,
+ * no suma otro golpe: el llamador debe rechazar la petición.
+ */
+export async function consumeRateWindow(
+  key: string,
+  max: number,
+  windowMs: number
+): Promise<{ limited: boolean; retrySec: number }> {
+  const sql = getSql();
+  const resetAt = new Date(Date.now() + windowMs);
+  const rows = (await sql`
+    WITH previous AS (
+      SELECT hit_count, reset_at
+      FROM api_rate_windows
+      WHERE bucket_key = ${key}
+    ),
+    upsert AS (
+      INSERT INTO api_rate_windows (bucket_key, hit_count, reset_at)
+      VALUES (${key}, 1, ${resetAt})
+      ON CONFLICT (bucket_key) DO UPDATE SET
+        hit_count = CASE
+          WHEN api_rate_windows.reset_at <= NOW() THEN 1
+          WHEN api_rate_windows.hit_count >= ${max} THEN api_rate_windows.hit_count
+          ELSE api_rate_windows.hit_count + 1
+        END,
+        reset_at = CASE
+          WHEN api_rate_windows.reset_at <= NOW() THEN EXCLUDED.reset_at
+          ELSE api_rate_windows.reset_at
+        END
+      RETURNING hit_count, reset_at
+    )
+    SELECT
+      upsert.reset_at,
+      CASE
+        WHEN previous.reset_at IS NOT NULL
+         AND previous.reset_at > NOW()
+         AND previous.hit_count >= ${max}
+        THEN TRUE
+        ELSE FALSE
+      END AS limited
+    FROM upsert
+    LEFT JOIN previous ON TRUE
+  `) as Array<{ reset_at: string; limited: boolean | string }>;
+  const row = rows[0];
+  const flag = String(row?.limited ?? "");
+  if (flag !== "true" && flag !== "t") return { limited: false, retrySec: 0 };
+  const retrySec = Math.max(1, Math.ceil((new Date(row.reset_at).getTime() - Date.now()) / 1000));
+  return { limited: true, retrySec };
+}
+
+export async function clearRateWindow(key: string): Promise<void> {
+  const sql = getSql();
+  await sql`DELETE FROM api_rate_windows WHERE bucket_key = ${key}`;
 }
 
 export async function getMessagesForLead(leadId: number): Promise<WhatsAppMessage[]> {

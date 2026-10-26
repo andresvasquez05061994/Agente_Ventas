@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   attachSessionCookie,
-  clearLoginAttempts,
   clientIp,
   isAuthConfigured,
-  loginRateLimited,
+  LOGIN_MAX_ATTEMPTS,
+  LOGIN_WINDOW_MS,
+  loginRateKey,
   safeNextPath,
 } from "@/lib/auth";
-import { ensureDb } from "@/lib/db";
+import { clearRateWindow, consumeRateWindow, ensureDb } from "@/lib/db";
 import { getUserByEmail, verifyPasswordHash } from "@/lib/users";
 
 export const dynamic = "force-dynamic";
@@ -21,12 +22,6 @@ export async function POST(req: NextRequest) {
   }
 
   const ip = clientIp(req);
-  if (loginRateLimited(ip)) {
-    return NextResponse.json(
-      { error: "Demasiados intentos. Espera unos minutos." },
-      { status: 429 }
-    );
-  }
 
   let email = "";
   let password = "";
@@ -41,6 +36,13 @@ export async function POST(req: NextRequest) {
   let user;
   try {
     await ensureDb();
+    const gate = await consumeRateWindow(loginRateKey(ip), LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
+    if (gate.limited) {
+      return NextResponse.json(
+        { error: `Demasiados intentos. Espera ${gate.retrySec}s.` },
+        { status: 429 }
+      );
+    }
     user = await getUserByEmail(email);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "No se pudo preparar el acceso";
@@ -62,7 +64,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Tu acceso fue dado de baja." }, { status: 403 });
   }
 
-  clearLoginAttempts(ip);
+  await clearRateWindow(loginRateKey(ip));
   const next = safeNextPath(req.nextUrl.searchParams.get("next"));
   const res = NextResponse.json({ ok: true, next });
   return attachSessionCookie(res, user.id);

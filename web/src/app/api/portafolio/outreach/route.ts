@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Contacto no encontrado en tu portafolio" }, { status: 404 });
     }
 
-    assertMistralRateLimit();
+    await assertMistralRateLimit(actor.id);
     const result = await generateOutreachMessage(
       {
         nombre: String(lead?.nombre ?? body.nombre ?? ""),
@@ -59,7 +59,10 @@ export async function POST(req: NextRequest) {
     );
 
     let message_id: number | null = null;
-    if (lead) {
+    let trace_warning: string | null = null;
+    if (!lead) {
+      trace_warning = "El contacto no está en el portafolio, así que este mensaje no queda en el historial.";
+    } else {
       try {
         const saved = await insertGeneratedMessage({
           leadId: Number(lead.id),
@@ -75,11 +78,11 @@ export async function POST(req: NextRequest) {
         });
         message_id = saved.id;
       } catch {
-        /* el mensaje se entrega igual; solo falla la trazabilidad */
+        trace_warning = "El mensaje se generó, pero no se pudo guardar en el historial del contacto.";
       }
     }
 
-    return NextResponse.json({ ...result, message_id });
+    return NextResponse.json({ ...result, message_id, trace_warning });
   } catch (e) {
     const message =
       e instanceof UsageLimitError || e instanceof OutreachError

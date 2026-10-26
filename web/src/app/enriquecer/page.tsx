@@ -214,10 +214,10 @@ export default function EnriquecerPage() {
     setBusy(true);
     clear();
     setSheet(prepared);
-    let nextRows = prepared.rows.map((row) => [...row]);
-    let nextStatuses = [...statuses];
+    const nextRows = prepared.rows.map((row) => [...row]);
+    const nextStatuses = [...statuses];
     let batchCredits = 0;
-    let foundPeople: ApolloPerson[] = [];
+    const foundPeople: ApolloPerson[] = [];
     let missing = 0;
     let failed = 0;
     let fatal: string | null = null;
@@ -277,6 +277,7 @@ export default function EnriquecerPage() {
     }
 
     let inserted = 0;
+    let saveError = "";
     if (foundPeople.length) {
       const unique = new Map(foundPeople.map((person) => [person.apollo_id, person]));
       const toSave = [...unique.values()].filter((person) => person.email?.trim() && person.telefono?.trim());
@@ -290,10 +291,14 @@ export default function EnriquecerPage() {
               fuente: `Enriquecer: ${prepared.fileLabel} | ${countriesCaption(allCountries, countries)}`,
             }),
           });
-          const data = await res.json();
-          if (!data.error) inserted = Number(data.inserted ?? 0) + Number(data.updated ?? 0);
-        } catch {
-          /* el archivo igual se puede descargar */
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data.error) {
+            saveError = String(data.error ?? `No se guardó en el portafolio (${res.status}). El Excel sí se puede descargar.`);
+          } else {
+            inserted = Number(data.inserted ?? 0) + Number(data.updated ?? 0);
+          }
+        } catch (e) {
+          saveError = e instanceof Error ? e.message : "No se guardó en el portafolio. El Excel sí se puede descargar.";
         }
       }
     }
@@ -304,9 +309,9 @@ export default function EnriquecerPage() {
     setCredits((current) => current + batchCredits);
     setSaved((current) => current + inserted);
     const left = nextStatuses.filter((status) => status === "pending").length;
-    const summary = `${foundPeople.length} con móvil y correo · ${missing} sin coincidencia completa${failed ? ` · ${failed} con error` : ""} · ${inserted} al portafolio${left ? ` · faltan ${left}` : ""}.`;
+    const summary = `${foundPeople.length} con móvil y correo · ${missing} sin coincidencia completa${failed ? ` · ${failed} con error` : ""} · ${inserted} al portafolio${left ? ` · faltan ${left}` : ""}${saveError ? `. ${saveError}` : "."}`;
     if (fatal) showWarning(`${summary} Se detuvo: ${fatal}`, "Tanda detenida");
-    else if (!foundPeople.length) showWarning(summary, "Tanda terminada");
+    else if (saveError || !foundPeople.length) showWarning(summary, "Tanda terminada");
     else showSuccess(summary, "Tanda terminada");
   }
 

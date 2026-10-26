@@ -1,4 +1,4 @@
-import { getApolloProspeccionCredits, getStoredApolloMonthlyBudget } from "./db";
+import { consumeRateWindow, getApolloProspeccionCredits, getStoredApolloMonthlyBudget } from "./db";
 import {
   APOLLO_RATE_MAX,
   APOLLO_RATE_WINDOW_MS,
@@ -20,44 +20,36 @@ export class UsageLimitError extends Error {
   }
 }
 
-const buckets = new Map<string, { count: number; resetAt: number }>();
-
-export function consumeRateLimit(
+async function assertStoredRateLimit(
   key: string,
   max: number,
-  windowMs: number
-): { ok: true } | { ok: false; retrySec: number } {
-  const now = Date.now();
-  const current = buckets.get(key);
-  if (!current || now >= current.resetAt) {
-    buckets.set(key, { count: 1, resetAt: now + windowMs });
-    return { ok: true };
-  }
-  if (current.count >= max) {
-    return { ok: false, retrySec: Math.max(1, Math.ceil((current.resetAt - now) / 1000)) };
-  }
-  current.count += 1;
-  return { ok: true };
+  windowMs: number,
+  message: (retrySec: number) => string,
+  code: UsageLimitError["code"]
+) {
+  const hit = await consumeRateWindow(key, max, windowMs);
+  if (hit.limited) throw new UsageLimitError(message(hit.retrySec), code);
 }
 
-export function assertApolloRateLimit() {
-  const hit = consumeRateLimit("apollo", APOLLO_RATE_MAX, APOLLO_RATE_WINDOW_MS);
-  if (!hit.ok) {
-    throw new UsageLimitError(
-      `Demasiadas búsquedas Apollo seguidas. Espera ${hit.retrySec}s para no gastar créditos de más.`,
-      "apollo_rate"
-    );
-  }
+export async function assertApolloRateLimit(userId: number) {
+  await assertStoredRateLimit(
+    `apollo:user:${userId}`,
+    APOLLO_RATE_MAX,
+    APOLLO_RATE_WINDOW_MS,
+    (retrySec) =>
+      `Demasiadas búsquedas Apollo seguidas. Espera ${retrySec}s para no gastar créditos de más.`,
+    "apollo_rate"
+  );
 }
 
-export function assertMistralRateLimit() {
-  const hit = consumeRateLimit("mistral", MISTRAL_RATE_MAX, MISTRAL_RATE_WINDOW_MS);
-  if (!hit.ok) {
-    throw new UsageLimitError(
-      `Límite de consultas IA alcanzado. Espera ${hit.retrySec}s e inténtalo de nuevo.`,
-      "mistral_rate"
-    );
-  }
+export async function assertMistralRateLimit(userId: number) {
+  await assertStoredRateLimit(
+    `mistral:user:${userId}`,
+    MISTRAL_RATE_MAX,
+    MISTRAL_RATE_WINDOW_MS,
+    (retrySec) => `Límite de consultas IA alcanzado. Espera ${retrySec}s e inténtalo de nuevo.`,
+    "mistral_rate"
+  );
 }
 
 export async function assertApolloBudget(userId: number, minRemaining = 1) {

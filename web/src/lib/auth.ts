@@ -6,10 +6,12 @@ export { WIPE_CONFIRM_PHRASE };
 export const SESSION_COOKIE = "iac_session";
 
 const SESSION_TTL_SEC = 60 * 60 * 24 * 7;
-const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-const LOGIN_MAX_ATTEMPTS = 8;
+export const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+export const LOGIN_MAX_ATTEMPTS = 8;
 
-const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+export function loginRateKey(ip: string): string {
+  return `login:ip:${ip.slice(0, 80)}`;
+}
 
 export function isAuthRequired(): boolean {
   if (process.env.ADMIN_EMAIL?.trim() || process.env.APP_PASSWORD?.trim()) return true;
@@ -142,21 +144,6 @@ export function unauthorizedJson(): NextResponse {
 export function clientIp(req: NextRequest): string {
   const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   return forwarded || req.headers.get("x-real-ip") || "local";
-}
-
-export function loginRateLimited(ip: string): boolean {
-  const now = Date.now();
-  const current = loginAttempts.get(ip);
-  if (!current || current.resetAt < now) {
-    loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
-    return false;
-  }
-  current.count += 1;
-  return current.count > LOGIN_MAX_ATTEMPTS;
-}
-
-export function clearLoginAttempts(ip: string) {
-  loginAttempts.delete(ip);
 }
 
 export function safeNextPath(value: string | null | undefined): string {

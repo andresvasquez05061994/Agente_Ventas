@@ -208,14 +208,22 @@ export function ProspeccionSessionProvider({
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    setHydrated(false);
-    if (!userId) {
-      setState(createInitialState());
+    let cancelled = false;
+    const restore = () => {
+      if (cancelled) return;
+      setHydrated(false);
+      if (!userId) {
+        setState(createInitialState());
+        setHydrated(true);
+        return;
+      }
+      setState(readStoredSession(userId) ?? createInitialState());
       setHydrated(true);
-      return;
-    }
-    setState(readStoredSession(userId) ?? createInitialState());
-    setHydrated(true);
+    };
+    queueMicrotask(restore);
+    return () => {
+      cancelled = true;
+    };
   }, [userId]);
 
   useEffect(() => {

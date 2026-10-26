@@ -13,7 +13,7 @@ import {
 import { ActionBanner } from "@/components/ui";
 
 /** La API añade el id del mensaje guardado para registrar su uso. */
-export type WithMessageId<T> = T & { message_id?: number | null };
+export type WithMessageId<T> = T & { message_id?: number | null; trace_warning?: string | null };
 
 type MessageIAPanelProps = {
   lead: Lead | null;
@@ -208,6 +208,12 @@ export function MessageIAPanel({
               {result.message_id ? (
                 <span className="cold-call-modal__badge">Guardado en el historial del contacto</span>
               ) : null}
+            </div>
+          )}
+
+          {result?.trace_warning && !loading && (
+            <div className="mb-3">
+              <ActionBanner tone="warning" title="Sin historial" message={result.trace_warning} />
             </div>
           )}
 

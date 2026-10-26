@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import type { EtapaComercial, GestionResultado, Lead, LeadStatus } from "@/lib/types";
 import { ETAPAS_COMERCIALES, GESTION_RESULTADOS, LEAD_STATUSES, etapaOf } from "@/lib/types";
 
@@ -47,12 +47,9 @@ export function ClientFicha({
   onEtapa,
   onOpenMessage,
 }: ClientFichaProps) {
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCloseRef.current();
+      if (event.key === "Escape") onClose();
     };
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", onKey);
@@ -60,7 +57,7 @@ export function ClientFicha({
       document.body.style.overflow = "";
       window.removeEventListener("keydown", onKey);
     };
-  }, []);
+  }, [onClose]);
 
   const opened = contacts.find((lead) => lead.id === openedId) ?? contacts[0];
   const empresa = opened?.empresa?.trim() || "Sin empresa";

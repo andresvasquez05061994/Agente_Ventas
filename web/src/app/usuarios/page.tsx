@@ -53,7 +53,8 @@ export default function UsuariosPage() {
 
   useEffect(() => {
     let cancelled = false;
-    load()
+    void Promise.resolve()
+      .then(load)
       .catch((e: unknown) => {
         if (!cancelled) showError(e instanceof Error ? e.message : "No se pudieron leer los usuarios");
       })

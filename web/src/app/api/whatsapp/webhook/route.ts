@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   ensureDb,
-  getLeadByPhone,
+  listLeadsByPhone,
   saveWhatsAppMessage,
   updateLeadConversationId,
   updateLeadWhatsAppStatus,
 } from "@/lib/db";
+import { resolveInboundLead } from "@/lib/inbound-lead";
 import { requestProvidesWebhookToken, unauthorizedJson } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -38,13 +39,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const lead = await getLeadByPhone(telefono);
-    if (!lead) {
+    const resolved = resolveInboundLead(await listLeadsByPhone(telefono));
+    if (resolved.status === "none") {
       return NextResponse.json(
         { error: "Número no asociado a ningún lead del portafolio" },
         { status: 404 }
       );
     }
+    if (resolved.status === "ambiguous") {
+      return NextResponse.json(
+        {
+          error:
+            "Ese móvil está en portafolios de más de un vendedor. El mensaje no se asignó para no mezclar conversaciones.",
+        },
+        { status: 409 }
+      );
+    }
+    const lead = resolved.lead;
 
     await saveWhatsAppMessage(lead.id, telefono, "inbound", mensaje);
     await updateLeadWhatsAppStatus(lead.id, "En conversación");

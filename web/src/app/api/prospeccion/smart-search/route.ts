@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     await ensureDb();
     const actor = await requireUser(req);
     if (actor instanceof NextResponse) return actor;
-    assertMistralRateLimit();
+    await assertMistralRateLimit(actor.id);
     const body = await req.json();
     const query = String(body.query ?? "").trim();
     const result = await interpretSmartSearch(query);

@@ -7,6 +7,7 @@ import {
   buildIdentifyDetail,
   foldPersonQuery,
   locationsOf,
+  obfuscatedSurnamesFit,
   obfuscatedTokenFits,
   parseMatchCountries,
   pickAttendeeCandidate,
@@ -79,6 +80,14 @@ check("match manda la marca corta", identify.organization_name === "APDTIC");
 check("la máscara Ca***o calza con Castelo", obfuscatedTokenFits("castelo", "Ca***o"));
 check("la máscara Ca***l no calza con Castelo", obfuscatedTokenFits("castelo", "Ca***l") === false);
 check("la máscara Pi***l calza con Pichel", obfuscatedTokenFits("pichel", "Pi***l"));
+check(
+  "la máscara del apellido compuesto Ca***l calza con Castelo Pichel",
+  obfuscatedSurnamesFit(["castelo", "pichel"], "Ca***l")
+);
+check(
+  "un apellido que no termina en esa letra no calza",
+  obfuscatedSurnamesFit(["castelo"], "Ca***l") === false
+);
 check(
   "APDTIC corto calza con el nombre largo",
   organizationMatchesLoose("APDTIC", "APDTIC - Profesionales del derecho TIC")

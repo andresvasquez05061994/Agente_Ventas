@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     await ensureDb();
     const actor = await requireUser(req);
     if (actor instanceof NextResponse) return actor;
-    assertMistralRateLimit();
+    await assertMistralRateLimit(actor.id);
     const count = await countKnowledgeDocuments(actor.id);
     if (count >= MAX_KNOWLEDGE_DOCS) {
       return NextResponse.json(

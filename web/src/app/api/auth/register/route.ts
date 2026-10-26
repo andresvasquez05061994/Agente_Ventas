@@ -1,21 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { clientIp, loginRateLimited } from "@/lib/auth";
-import { ensureDb } from "@/lib/db";
+import { clientIp, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, loginRateKey } from "@/lib/auth";
+import { consumeRateWindow, ensureDb } from "@/lib/db";
 import { registerUser } from "@/lib/users";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   const ip = clientIp(req);
-  if (loginRateLimited(ip)) {
-    return NextResponse.json(
-      { error: "Demasiados intentos. Espera unos minutos." },
-      { status: 429 }
-    );
-  }
 
   try {
     await ensureDb();
+    const gate = await consumeRateWindow(loginRateKey(ip), LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
+    if (gate.limited) {
+      return NextResponse.json(
+        { error: `Demasiados intentos. Espera ${gate.retrySec}s.` },
+        { status: 429 }
+      );
+    }
     const body = (await req.json()) as { email?: string; password?: string };
     const user = await registerUser(String(body.email ?? ""), String(body.password ?? ""));
     return NextResponse.json({
