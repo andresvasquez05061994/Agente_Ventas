@@ -5,7 +5,7 @@ import { Download, Sparkles } from "lucide-react";
 import { PageHeading } from "@/components/HelpTip";
 import { ActionBanner, FeedbackAnchor, FieldLabel, SectionLabel } from "@/components/ui";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
-import { APOLLO_COUNTRIES } from "@/lib/apollo-filters";
+import { APOLLO_COUNTRIES, APOLLO_EMPLOYEE_RANGES, APOLLO_KEYWORDS } from "@/lib/apollo-filters";
 import type { AttendeeMatchResult } from "@/lib/apollo-attendee-match";
 import {
   applyPersonToRow,
@@ -95,6 +95,10 @@ export default function EnriquecerPage() {
   const [credits, setCredits] = useState(0);
   const [saved, setSaved] = useState(0);
   const [page, setPage] = useState(1);
+  const [fallbackTitles, setFallbackTitles] = useState("");
+  const [fallbackIndustry, setFallbackIndustry] = useState("");
+  const [fallbackEmployeeRange, setFallbackEmployeeRange] = useState("");
+  const [contactsPerRow, setContactsPerRow] = useState(3);
 
   const mappedFields = useMemo(
     () => new Set((sheet?.columns ?? []).map((column) => column.field).filter(Boolean) as EnrichFieldId[]),
@@ -216,9 +220,26 @@ export default function EnriquecerPage() {
     return { all_countries: false, countries };
   }
 
+  function configuredTitles(): string[] {
+    return fallbackTitles
+      .split(/[,;\n]/)
+      .map((title) => title.trim())
+      .filter(Boolean)
+      .slice(0, 10);
+  }
+
   async function enrichBatch() {
     if (!sheet) return;
-    const fillFields = [...new Set([...suggestedFill(), ...fill, "nombre" as EnrichFieldId])];
+    const fillFields = [
+      ...new Set([
+        ...suggestedFill(),
+        ...fill,
+        "nombre" as EnrichFieldId,
+        "empresa" as EnrichFieldId,
+        "cargo" as EnrichFieldId,
+        "pais" as EnrichFieldId,
+      ]),
+    ];
     const prepared = ensureFillColumns(sheet, fillFields);
     const pendingIndexes = prepared.rows
       .map((_, index) => index)
@@ -253,28 +274,31 @@ export default function EnriquecerPage() {
         failed += 1;
         continue;
       }
-      const companyRoleSearch = !name && Boolean(company && title && rowCountries.countries.length === 1);
-      if (!name && !companyRoleSearch) {
+      const broadTitles = title ? [title] : configuredTitles();
+      const broadSearch = !name && Boolean(broadTitles.length && rowCountries.countries.length === 1);
+      if (!name && !broadSearch) {
         nextStatuses[rowIndex] = "insufficient_data";
         failed += 1;
         continue;
       }
-      setProgress(`Fila ${rowIndex + 1} de ${prepared.rows.length}: ${name || `${company} · ${title}`}`);
+      setProgress(`Fila ${rowIndex + 1} de ${prepared.rows.length}: ${name || `${company || "Sin empresa"} · ${broadTitles.join(", ")}`}`);
       try {
-        const request = companyRoleSearch
+        const request = broadSearch
           ? {
               url: "/api/apollo/search",
               body: {
                 country: rowCountries.countries[0],
-                titles: [title],
-                company,
-                keyword: searchBy.includes("industria")
+                titles: broadTitles,
+                company: company || undefined,
+                keyword: (searchBy.includes("industria")
                   ? resolveEnrichIndustry(searchIndustry(nextRows[rowIndex], prepared.columns))
-                  : "",
-                employeeRanges: searchBy.includes("tamano_empresa")
+                  : "") || fallbackIndustry,
+                employeeRanges: (searchBy.includes("tamano_empresa")
                   ? searchEmployeeRanges(nextRows[rowIndex], prepared.columns)
-                  : [],
-                per_page: 1,
+                  : []).length
+                  ? searchEmployeeRanges(nextRows[rowIndex], prepared.columns)
+                  : fallbackEmployeeRange ? [fallbackEmployeeRange] : [],
+                per_page: contactsPerRow,
               },
             }
           : {
@@ -305,15 +329,21 @@ export default function EnriquecerPage() {
         }
         const companyResult = data as CompanyRoleSearchResponse;
         const attendeeResult = data as AttendeeMatchResult & { error?: string };
-        const person = companyRoleSearch ? companyResult.results?.[0] ?? null : attendeeResult.person;
-        const consumed = companyRoleSearch ? companyResult.meta?.credits_consumed ?? 0 : attendeeResult.credits_consumed ?? 0;
+        const people = broadSearch ? companyResult.results ?? [] : attendeeResult.person ? [attendeeResult.person] : [];
+        const person = people[0] ?? null;
+        const consumed = broadSearch ? companyResult.meta?.credits_consumed ?? 0 : attendeeResult.credits_consumed ?? 0;
         batchCredits += consumed;
         if (person?.email && person.telefono) {
           nextRows[rowIndex] = applyPersonToRow(nextRows[rowIndex], prepared.columns, fillFields, person);
-          nextStatuses[rowIndex] = companyRoleSearch ? "filled" : attendeeResult.already_saved ? "already" : "filled";
-          foundPeople.push(person);
+          nextStatuses[rowIndex] = broadSearch ? "filled" : attendeeResult.already_saved ? "already" : "filled";
+          for (const extra of people.slice(1)) {
+            if (!extra.email || !extra.telefono) continue;
+            nextRows.push(applyPersonToRow([...prepared.rows[rowIndex]], prepared.columns, fillFields, extra));
+            nextStatuses.push("filled");
+          }
+          foundPeople.push(...people.filter((candidate) => candidate.email && candidate.telefono));
         } else {
-          nextStatuses[rowIndex] = companyRoleSearch ? "no_contacts" : attendeeResult.status === "not_found" ? "not_found" : "no_contacts";
+          nextStatuses[rowIndex] = broadSearch ? "no_contacts" : attendeeResult.status === "not_found" ? "not_found" : "no_contacts";
           missing += 1;
         }
         setStatuses([...nextStatuses]);
@@ -381,7 +411,7 @@ export default function EnriquecerPage() {
       <header className="page-header">
         <PageHeading
           title="Enriquecer archivo"
-          help="Carga un Excel o CSV de asistentes. El sistema detecta las columnas. Tú eliges por qué buscar (nombre, empresa, cargo) y qué completar (móvil, correo, LinkedIn…). Solo se rellena a las personas del archivo y solo viajan al portafolio quienes tienen móvil y correo. Cada tanda revisa 50 filas y gasta créditos de Apollo."
+          help="Carga un Excel o CSV. El sistema detecta las columnas y busca por persona o mediante filtros amplios cuando solo hay empresas o cargos. El archivo conserva sus filas y añade los contactos de Apollo con móvil y correo. Cada tanda revisa hasta 50 filas y gasta créditos de Apollo."
         />
       </header>
 
@@ -464,7 +494,7 @@ export default function EnriquecerPage() {
             </div>
 
             <SectionLabel>Buscar por</SectionLabel>
-            <p className="text-micro mb-2">Se busca por Nombre, o por Empresa + Cargo + País. Si faltan datos, la fila se marca sin gastar créditos. País por fila prevalece sobre el selector global.</p>
+            <p className="text-micro mb-2">Se busca por Nombre o, sin Nombre, con los filtros de búsqueda amplia. Si faltan datos, la fila se marca sin gastar créditos. País por fila prevalece sobre el selector global.</p>
             <div className="enrich-checks mb-4 flex flex-wrap gap-x-4 gap-y-2">
               {SEARCH_FIELDS.map((field) => (
                 <label key={field.id} className="enrich-check inline-flex items-center gap-1.5 text-sm">
@@ -477,6 +507,33 @@ export default function EnriquecerPage() {
                   {field.label}
                 </label>
               ))}
+            </div>
+
+            <SectionLabel>Búsqueda amplia sin nombre</SectionLabel>
+            <p className="text-micro mb-2">Para archivos con solo empresas o cargos, selecciona un país único y escribe uno o varios cargos separados por coma. El resultado añadirá una fila por contacto encontrado.</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="field-group">
+                <span className="field-label">Cargos si el archivo no los trae</span>
+                <input className="input-field" value={fallbackTitles} disabled={busy} onChange={(event) => setFallbackTitles(event.target.value)} placeholder="Ej.: CEO, Director de TI" />
+              </label>
+              <label className="field-group">
+                <span className="field-label">Industria opcional</span>
+                <select className="input-field" value={fallbackIndustry} disabled={busy} onChange={(event) => setFallbackIndustry(event.target.value)}>
+                  {APOLLO_KEYWORDS.map((industry) => <option key={industry.value} value={industry.value}>{industry.label}</option>)}
+                </select>
+              </label>
+              <label className="field-group">
+                <span className="field-label">Tamaño opcional</span>
+                <select className="input-field" value={fallbackEmployeeRange} disabled={busy} onChange={(event) => setFallbackEmployeeRange(event.target.value)}>
+                  {APOLLO_EMPLOYEE_RANGES.map((range) => <option key={range.value} value={range.value}>{range.label}</option>)}
+                </select>
+              </label>
+              <label className="field-group">
+                <span className="field-label">Máximo de contactos por fila</span>
+                <select className="input-field" value={contactsPerRow} disabled={busy} onChange={(event) => setContactsPerRow(Number(event.target.value))}>
+                  {[1, 2, 3, 5, 10].map((amount) => <option key={amount} value={amount}>{amount}</option>)}
+                </select>
+              </label>
             </div>
 
             <SectionLabel>Completar en el archivo</SectionLabel>
