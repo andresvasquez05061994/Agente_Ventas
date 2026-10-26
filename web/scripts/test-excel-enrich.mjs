@@ -8,7 +8,9 @@ import {
   ensureFillColumns,
   parseEnrichMatrix,
   searchCompany,
+  searchCountry,
   searchName,
+  resolveEnrichCountry,
   suggestedFill,
   suggestedSearchBy,
 } from "../src/lib/excel-enrich.ts";
@@ -50,6 +52,17 @@ check(
 );
 check("nombre de la fila 1", searchName(parsed.rows[0], parsed.columns) === "ANDRÉ CASTELO PICHEL");
 check("empresa de la fila 2", searchCompany(parsed.rows[1], parsed.columns).includes("Quobis"));
+check("país ausente queda vacío", searchCountry(parsed.rows[0], parsed.columns) === "");
+check("resuelve México con tilde", resolveEnrichCountry("México") === "Mexico");
+check("resuelve España", resolveEnrichCountry("España") === "Spain");
+check("resuelve Estados Unidos", resolveEnrichCountry("Estados Unidos") === "United States");
+check("rechaza país fuera de la lista", resolveEnrichCountry("Francia") === null);
+
+const withCountry = parseEnrichMatrix([
+  ["Nombre", "País"],
+  ["Ana Pérez", "Perú"],
+]);
+check("lee el país de la fila", searchCountry(withCountry.rows[0], withCountry.columns) === "Perú");
 
 const prepared = ensureFillColumns(
   { ...parsed, fileLabel: "andicom.csv" },

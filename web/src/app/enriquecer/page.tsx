@@ -16,8 +16,10 @@ import {
   parseEnrichMatrix,
   SEARCH_FIELDS,
   searchCompany,
+  searchCountry,
   searchName,
   searchTitle,
+  resolveEnrichCountry,
   suggestedFill,
   suggestedSearchBy,
   type EnrichFieldId,
@@ -188,7 +190,18 @@ export default function EnriquecerPage() {
     setCountries([...countries, value]);
   }
 
-  function countriesForRow(): { all_countries: boolean; countries: string[] } {
+  function countriesForRow(
+    row: string[],
+    columns: EnrichSheet["columns"]
+  ): { all_countries: boolean; countries: string[]; invalidCountry?: string } {
+    if (searchBy.includes("pais")) {
+      const rawCountry = searchCountry(row, columns);
+      if (rawCountry) {
+        const country = resolveEnrichCountry(rawCountry);
+        if (!country) return { all_countries: false, countries: [], invalidCountry: rawCountry };
+        return { all_countries: false, countries: [country] };
+      }
+    }
     if (allCountries) return { all_countries: true, countries: [] };
     return { all_countries: false, countries };
   }
@@ -231,6 +244,12 @@ export default function EnriquecerPage() {
         missing += 1;
         continue;
       }
+      const rowCountries = countriesForRow(nextRows[rowIndex], prepared.columns);
+      if (rowCountries.invalidCountry) {
+        nextStatuses[rowIndex] = "invalid_country";
+        failed += 1;
+        continue;
+      }
       setProgress(`Fila ${rowIndex + 1} de ${prepared.rows.length}: ${name}`);
       try {
         const res = await fetch("/api/apollo/attendee-match", {
@@ -240,7 +259,8 @@ export default function EnriquecerPage() {
             name,
             title: searchBy.includes("cargo") ? searchTitle(nextRows[rowIndex], prepared.columns) : undefined,
             company: searchBy.includes("empresa") ? searchCompany(nextRows[rowIndex], prepared.columns) : undefined,
-            ...countriesForRow(),
+            all_countries: rowCountries.all_countries,
+            countries: rowCountries.countries,
           }),
         });
         const { data, error } = await parseApiResponse<AttendeeMatchResult & { error?: string }>(res);
@@ -309,7 +329,8 @@ export default function EnriquecerPage() {
     setCredits((current) => current + batchCredits);
     setSaved((current) => current + inserted);
     const left = nextStatuses.filter((status) => status === "pending").length;
-    const summary = `${foundPeople.length} con móvil y correo · ${missing} sin coincidencia completa${failed ? ` · ${failed} con error` : ""} · ${inserted} al portafolio${left ? ` · faltan ${left}` : ""}${saveError ? `. ${saveError}` : "."}`;
+    const invalidCountries = nextStatuses.filter((status) => status === "invalid_country").length;
+    const summary = `${foundPeople.length} con móvil y correo · ${missing} sin coincidencia completa${invalidCountries ? ` · ${invalidCountries} con país no admitido` : ""}${failed ? ` · ${failed} con error` : ""} · ${inserted} al portafolio${left ? ` · faltan ${left}` : ""}${saveError ? `. ${saveError}` : "."}`;
     if (fatal) showWarning(`${summary} Se detuvo: ${fatal}`, "Tanda detenida");
     else if (saveError || !foundPeople.length) showWarning(summary, "Tanda terminada");
     else showSuccess(summary, "Tanda terminada");
@@ -410,7 +431,7 @@ export default function EnriquecerPage() {
             </div>
 
             <SectionLabel>Buscar por</SectionLabel>
-            <p className="text-micro mb-2">Nombre es obligatorio. Empresa evita homónimos. No se buscan extraños de la misma compañía.</p>
+            <p className="text-micro mb-2">Nombre es obligatorio. Empresa evita homónimos. Si el archivo trae País, se aplica en cada fila y prevalece sobre el selector global.</p>
             <div className="enrich-checks mb-4 flex flex-wrap gap-x-4 gap-y-2">
               {SEARCH_FIELDS.map((field) => (
                 <label key={field.id} className="enrich-check inline-flex items-center gap-1.5 text-sm">
@@ -508,6 +529,7 @@ function statusLabel(status: EnrichRowStatus): string {
   if (status === "already") return "Ya en portafolio";
   if (status === "no_contacts") return "Sin móvil y correo";
   if (status === "not_found") return "No coincide";
+  if (status === "invalid_country") return "País no admitido";
   return "Pendiente";
 }
 

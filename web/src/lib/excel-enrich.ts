@@ -1,5 +1,6 @@
 import { cleanCompanyName, sanitizeSpreadsheetText } from "./excel-companies";
 import { cleanPersonName } from "./excel-attendees";
+import { APOLLO_COUNTRIES } from "./apollo-filters";
 import type { ApolloPerson } from "./types";
 
 export const MAX_ENRICH_BATCH = 50;
@@ -59,6 +60,35 @@ function fold(value: string): string {
     .replace(/\p{M}/gu, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+const ENRICH_COUNTRY_ALIASES: Record<string, string> = {
+  colombia: "Colombia",
+  mexico: "Mexico",
+  brasil: "Brazil",
+  brazil: "Brazil",
+  argentina: "Argentina",
+  chile: "Chile",
+  peru: "Peru",
+  ecuador: "Ecuador",
+  panama: "Panama",
+  "estados unidos": "United States",
+  "united states": "United States",
+  usa: "United States",
+  eeuu: "United States",
+  espana: "Spain",
+  spain: "Spain",
+};
+
+/** Convierte el país escrito en la hoja a uno de los valores admitidos por Apollo. */
+export function resolveEnrichCountry(value: string): string | null {
+  const normalized = fold(value);
+  if (!normalized) return null;
+  return (
+    APOLLO_COUNTRIES.find((country) => fold(country.value) === normalized || fold(country.label) === normalized)?.value ??
+    ENRICH_COUNTRY_ALIASES[normalized] ??
+    null
+  );
 }
 
 export function cellText(value: unknown): string {
@@ -179,6 +209,10 @@ export function searchTitle(row: string[], columns: EnrichColumn[]): string {
   return cellText(valueOf(row, columns, "cargo")).replace(/[.…]+$/g, "").slice(0, 80);
 }
 
+export function searchCountry(row: string[], columns: EnrichColumn[]): string {
+  return cellText(valueOf(row, columns, "pais"));
+}
+
 export function personFieldValue(person: ApolloPerson, field: EnrichFieldId): string {
   switch (field) {
     case "nombre":
@@ -218,4 +252,4 @@ export function applyPersonToRow(
   return next;
 }
 
-export type EnrichRowStatus = "pending" | "filled" | "already" | "not_found" | "no_contacts";
+export type EnrichRowStatus = "pending" | "filled" | "already" | "not_found" | "no_contacts" | "invalid_country";
