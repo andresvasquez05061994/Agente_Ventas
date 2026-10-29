@@ -72,14 +72,40 @@ function isFatal(message: string): boolean {
   );
 }
 
-async function workbookBase64(headers: string[], rows: string[][]): Promise<{ filename: string; fileBase64: string }> {
+type DownloadFormat = {
+  extension: "xlsx" | "xls" | "csv";
+  bookType: "xlsx" | "biff8" | "csv";
+  mime: string;
+};
+
+function downloadFormat(filename: string): DownloadFormat {
+  if (/\.csv$/i.test(filename)) {
+    return { extension: "csv", bookType: "csv", mime: "text/csv;charset=utf-8" };
+  }
+  if (/\.xls$/i.test(filename)) {
+    return { extension: "xls", bookType: "biff8", mime: "application/vnd.ms-excel" };
+  }
+  return {
+    extension: "xlsx",
+    bookType: "xlsx",
+    mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  };
+}
+
+async function workbookBase64(
+  filename: string,
+  headers: string[],
+  rows: string[][]
+): Promise<{ filename: string; fileBase64: string; mime: string }> {
   const XLSX = await import("xlsx");
   const book = XLSX.utils.book_new();
   const sheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
   sheet["!cols"] = headers.map((header) => ({ wch: Math.min(48, Math.max(header.length + 2, 16)) }));
   XLSX.utils.book_append_sheet(book, sheet, "Enriquecido");
-  const buffer = XLSX.write(book, { type: "base64", bookType: "xlsx" }) as string;
-  return { filename: "enriquecido.xlsx", fileBase64: buffer };
+  const format = downloadFormat(filename);
+  const buffer = XLSX.write(book, { type: "base64", bookType: format.bookType }) as string;
+  const base = filename.replace(/\.(xlsx|xls|csv)$/i, "");
+  return { filename: `${base}_enriquecido.${format.extension}`, fileBase64: buffer, mime: format.mime };
 }
 
 function countryLabelOf(value: string): string {
@@ -91,13 +117,11 @@ function countriesCaption(allCountries: boolean, countries: string[]): string {
   return countries.map(countryLabelOf).join(", ");
 }
 
-function downloadBase64(filename: string, fileBase64: string) {
+function downloadBase64(filename: string, fileBase64: string, mime: string) {
   const binary = atob(fileBase64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  const blob = new Blob([bytes], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
+  const blob = new Blob([bytes], { type: mime });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -624,9 +648,8 @@ export default function EnriquecerPage() {
 
   async function download() {
     if (!sheet) return;
-    const { fileBase64 } = await workbookBase64(sheet.headers, sheet.rows);
-    const base = sheet.fileLabel.replace(/\.(xlsx|xls|csv)$/i, "");
-    downloadBase64(`${base}_enriquecido.xlsx`, fileBase64);
+    const result = await workbookBase64(sheet.fileLabel, sheet.headers, sheet.rows);
+    downloadBase64(result.filename, result.fileBase64, result.mime);
   }
 
   return (
@@ -752,7 +775,7 @@ export default function EnriquecerPage() {
               </label>
             </div>
 
-            <div className="enrich-output-summary"><div><p className="section-label">3. Archivo de salida</p><h2>Contactos enriquecidos</h2><p>Se priorizan Correo, Empresa, País y Móvil. Los valores existentes no se reemplazan.</p></div><HelpTip label="Ayuda sobre el archivo de salida">Los contactos completos del portafolio se usan antes que Apollo. Cuando una empresa o cargo devuelve varias personas, el archivo agrega una fila por contacto. Solo se agregan contactos con correo y móvil completos.</HelpTip></div>
+            <div className="enrich-output-summary"><div><p className="section-label">3. Archivo de salida</p><h2>Contactos enriquecidos</h2><p>Se priorizan Correo, Empresa, País y Móvil. Los valores existentes no se reemplazan.</p></div><HelpTip label="Ayuda sobre el archivo de salida">La descarga conserva el tipo del archivo cargado: Excel, XLS o CSV. Los contactos completos del portafolio se usan antes que Apollo. Cuando una empresa o cargo devuelve varias personas, el archivo agrega una fila por contacto.</HelpTip></div>
 
             <div className="enrich-progress" aria-live="polite">
               <div className="enrich-progress__head"><span>{busy ? "Analizando filas" : "Filas analizadas"}</span><strong>{displayedProgress} de {sourceRows} · {progressPercent}%</strong></div>
