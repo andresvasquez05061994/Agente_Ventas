@@ -4,7 +4,11 @@ import { cleanPersonName } from "@/lib/excel-attendees";
 import { cleanCompanyName } from "@/lib/excel-companies";
 import { requireUser } from "@/lib/current-user";
 import { ensureDb } from "@/lib/db";
-import { assertApolloBudget, assertApolloRateLimit, UsageLimitError } from "@/lib/usage-guard";
+import {
+  assertApolloBudget,
+  assertApolloEnrichmentRateLimit,
+  UsageLimitError,
+} from "@/lib/usage-guard";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -14,7 +18,7 @@ export async function POST(req: NextRequest) {
     await ensureDb();
     const actor = await requireUser(req);
     if (actor instanceof NextResponse) return actor;
-    await assertApolloRateLimit(actor.id);
+    await assertApolloEnrichmentRateLimit(actor.id);
     await assertApolloBudget(actor.id);
     const body = (await req.json()) as Record<string, unknown>;
 

@@ -12,6 +12,9 @@ export const PHONE_REQUEST_TTL_MS = 12 * 60 * 60 * 1000;
 export const APOLLO_RATE_MAX = 60;
 export const APOLLO_RATE_WINDOW_MS = 10 * 60 * 1000;
 
+/** El enriquecimiento procesa archivos completos y usa una ventana independiente. */
+export const APOLLO_ENRICHMENT_RATE_MAX = 600;
+
 export const MISTRAL_RATE_MAX = 40;
 export const MISTRAL_RATE_WINDOW_MS = 10 * 60 * 1000;
 

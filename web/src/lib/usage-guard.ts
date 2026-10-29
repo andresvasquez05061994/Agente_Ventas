@@ -1,5 +1,6 @@
 import { consumeRateWindow, getApolloProspeccionCredits, getStoredApolloMonthlyBudget } from "./db";
 import {
+  APOLLO_ENRICHMENT_RATE_MAX,
   APOLLO_RATE_MAX,
   APOLLO_RATE_WINDOW_MS,
   MISTRAL_RATE_MAX,
@@ -38,6 +39,18 @@ export async function assertApolloRateLimit(userId: number) {
     APOLLO_RATE_WINDOW_MS,
     (retrySec) =>
       `Demasiadas búsquedas Apollo seguidas. Espera ${retrySec}s para no gastar créditos de más.`,
+    "apollo_rate"
+  );
+}
+
+/** Límite exclusivo de carga masiva: conserva el presupuesto mensual y evita saturar Apollo. */
+export async function assertApolloEnrichmentRateLimit(userId: number) {
+  await assertStoredRateLimit(
+    `apollo:enrichment:user:${userId}`,
+    APOLLO_ENRICHMENT_RATE_MAX,
+    APOLLO_RATE_WINDOW_MS,
+    (retrySec) =>
+      `La carga masiva alcanzó 600 filas en 10 minutos. Espera ${retrySec}s antes de continuar.`,
     "apollo_rate"
   );
 }
