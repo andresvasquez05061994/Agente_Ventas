@@ -14,9 +14,12 @@ import {
   searchName,
   resolveEnrichCountry,
   resolveEnrichIndustry,
+  isPendingEnrichmentStatus,
   suggestedFill,
   suggestedSearchBy,
 } from "../src/lib/excel-enrich.ts";
+import { findPortfolioContacts, rowAlreadyComplete } from "../src/lib/portfolio-enrich.ts";
+import { restoreEnrichmentSession } from "../src/lib/enrichment-session.ts";
 import { decodeSpreadsheetBytes, sanitizeSpreadsheetText } from "../src/lib/excel-companies.ts";
 import { cleanPersonName } from "../src/lib/excel-attendees.ts";
 
@@ -119,6 +122,73 @@ const iago = {
 const iagoRow = applyPersonToRow(prepared.rows[1], prepared.columns, ["telefono", "email"], iago);
 check("la fila de Iago se rellena con Iago, no con alguien de APDTIC", iagoRow[emailCol] === "iago.soto@quobis.com");
 check("el nombre de Iago no cambia", searchName(iagoRow, prepared.columns) === "Iago Soto");
+
+const portfolio = [
+  {
+    nombre: "André Castelo Pichel",
+    cargo: "Socio Director",
+    empresa: "APDTIC",
+    email: "andre@apdtic.com",
+    telefono: "+34881805020",
+    telefono_e164: "+34881805020",
+    pais: "España",
+    linkedin_url: "https://www.linkedin.com/in/andre-castelo/",
+    lead_status: "Nuevo",
+    whatsapp_status: null,
+    notas: null,
+    fuente_busqueda: "Apollo",
+  },
+  {
+    nombre: "Ana Empresa",
+    cargo: "Gerente Comercial",
+    empresa: "APDTIC SAS",
+    email: "ana@apdtic.com",
+    telefono: "+573001112233",
+    telefono_e164: "+573001112233",
+    pais: "Colombia",
+    linkedin_url: null,
+    lead_status: "Nuevo",
+    whatsapp_status: null,
+    notas: null,
+    fuente_busqueda: "Apollo",
+  },
+];
+const fromPortfolio = findPortfolioContacts(parsed.rows[0], prepared.columns, portfolio, 3);
+check("prioriza persona existente del portafolio", fromPortfolio.kind === "identity" && fromPortfolio.people.length === 1);
+check("rellena móvil desde portafolio", fromPortfolio.people[0]?.telefono === "+34881805020");
+const wrongPerson = findPortfolioContacts(["Otra Persona", "", "APDTIC"], parsed.columns, portfolio, 3);
+check("no asigna otra persona de la misma empresa", wrongPerson.people.length === 0);
+const companyOnly = parseEnrichMatrix([["Empresa"], ["APDTIC"]]);
+const companyPortfolio = findPortfolioContacts(companyOnly.rows[0], companyOnly.columns, portfolio, 3);
+check("empresa reutiliza contactos completos del portafolio", companyPortfolio.kind === "company" && companyPortfolio.people.length === 2);
+const withCompleteInput = parseEnrichMatrix([["Nombre", "Correo", "Móvil"], ["Ana", "ana@ejemplo.com", "+573001112233"]]);
+check("fila completa no necesita consulta externa", rowAlreadyComplete(withCompleteInput.rows[0], withCompleteInput.columns));
+check("sin coincidencia es terminal y no se reintenta", !isPendingEnrichmentStatus("not_found"));
+check("solo pendiente entra a la siguiente tanda", isPendingEnrichmentStatus("pending"));
+
+const resumed = restoreEnrichmentSession(
+  { ...prepared, fileLabel: "andicom.csv" },
+  {
+    id: 1,
+    fingerprint: "a".repeat(64),
+    filename: "andicom.csv",
+    headers: prepared.headers,
+    columns: prepared.columns,
+    sourceRows: 2,
+    config: {},
+    outcomes: [
+      {
+        sourceIndex: 0,
+        status: "portfolio",
+        source: "portfolio",
+        rows: [["ANDRÉ CASTELO PICHEL", "Socio Director", "APDTIC", "+34881805020", "andre@apdtic.com"]],
+        credits: 0,
+      },
+    ],
+  }
+);
+check("reanudación conserva la fila ya resuelta", resumed.statuses[0] === "portfolio");
+check("reanudación continúa en la siguiente fila pendiente", resumed.statuses[1] === "pending");
 
 const win1252Andre = decodeSpreadsheetBytes(
   bytesOf(0x41, 0x4e, 0x44, 0x52, 0xc9, 0x20, 0x43, 0x41, 0x53, 0x54, 0x45, 0x4c, 0x4f)

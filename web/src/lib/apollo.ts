@@ -160,8 +160,12 @@ async function fetchSearchPage(
   return { data: lastData, industry_relaxed: false };
 }
 
-export async function searchApolloWithContacts(input: ValidatedSearchRequest, ownerId: number) {
-  const target = input.per_page;
+export async function searchApolloWithContacts(
+  input: ValidatedSearchRequest,
+  ownerId: number,
+  targetComplete = input.per_page
+) {
+  const target = Math.min(input.per_page, Math.max(1, Math.floor(targetComplete)));
   const countryFilter = input.person_locations[0] ?? "";
   const companyFilter = input.organization_name?.trim() ?? "";
   const portfolioIds = await getPortfolioApolloIds(ownerId);

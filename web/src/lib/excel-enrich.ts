@@ -277,4 +277,18 @@ export function applyPersonToRow(
   return next;
 }
 
-export type EnrichRowStatus = "pending" | "filled" | "already" | "not_found" | "no_contacts" | "invalid_country" | "insufficient_data";
+export type EnrichRowStatus =
+  | "pending"
+  | "filled"
+  | "already"
+  | "portfolio"
+  | "not_found"
+  | "no_contacts"
+  | "invalid_country"
+  | "insufficient_data"
+  | "error";
+
+/** Solo las filas nunca resueltas vuelven a entrar en una tanda. */
+export function isPendingEnrichmentStatus(status: EnrichRowStatus | undefined): boolean {
+  return status === "pending";
+}

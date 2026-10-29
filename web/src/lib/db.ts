@@ -3,6 +3,11 @@ import { decodeMonthlyBudget, encodeMonthlyBudget } from "./credit-policy";
 import { applyMigrations } from "./migrations";
 import { phoneMatchCandidates, toE164 } from "./phone";
 import type {
+  EnrichmentConfig,
+  EnrichmentOutcome,
+  EnrichmentSession,
+} from "./enrichment-session";
+import type {
   ConversationStats,
   ConversationThread,
   EtapaComercial,
@@ -164,6 +169,151 @@ export async function listPortfolioContacts(ownerId: number | null = null): Prom
     notas: string | null;
     fuente_busqueda: string | null;
   }>;
+}
+
+function parseJsonValue<T>(value: unknown, fallback: T): T {
+  if (value == null) return fallback;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return fallback;
+    }
+  }
+  return value as T;
+}
+
+type EnrichmentJobRow = {
+  id: number | string;
+  fingerprint: string;
+  filename: string;
+  headers: unknown;
+  columns: unknown;
+  source_rows: number | string;
+  config: unknown;
+};
+
+type EnrichmentStoredRow = {
+  source_index: number | string;
+  status: string;
+  source: string;
+  output_rows: unknown;
+  credits: number | string;
+};
+
+function asEnrichmentSession(job: EnrichmentJobRow, outcomes: EnrichmentStoredRow[]): EnrichmentSession {
+  return {
+    id: Number(job.id),
+    fingerprint: String(job.fingerprint),
+    filename: String(job.filename ?? ""),
+    headers: parseJsonValue<string[]>(job.headers, []),
+    columns: parseJsonValue(job.columns, []),
+    sourceRows: Number(job.source_rows),
+    config: parseJsonValue<Partial<EnrichmentConfig>>(job.config, {}),
+    outcomes: outcomes.map((row) => ({
+      sourceIndex: Number(row.source_index),
+      status: row.status as EnrichmentOutcome["status"],
+      source: row.source as EnrichmentOutcome["source"],
+      rows: parseJsonValue<string[][]>(row.output_rows, []),
+      credits: Number(row.credits) || 0,
+    })),
+  };
+}
+
+async function getEnrichmentSessionById(id: number, ownerId: number): Promise<EnrichmentSession | null> {
+  const sql = getSql();
+  const jobs = (await sql`
+    SELECT id, fingerprint, filename, headers, columns, source_rows, config
+    FROM enrichment_jobs
+    WHERE id = ${id} AND owner_id = ${ownerId}
+  `) as EnrichmentJobRow[];
+  const job = jobs[0];
+  if (!job) return null;
+  const outcomes = (await sql`
+    SELECT source_index, status, source, output_rows, credits
+    FROM enrichment_job_rows
+    WHERE job_id = ${id}
+    ORDER BY source_index ASC
+  `) as EnrichmentStoredRow[];
+  return asEnrichmentSession(job, outcomes);
+}
+
+export async function getOrCreateEnrichmentSession(input: {
+  ownerId: number;
+  fingerprint: string;
+  filename: string;
+  headers: string[];
+  columns: unknown[];
+  sourceRows: number;
+}): Promise<{ session: EnrichmentSession; resumed: boolean }> {
+  const sql = getSql();
+  const existing = (await sql`
+    SELECT id
+    FROM enrichment_jobs
+    WHERE owner_id = ${input.ownerId} AND fingerprint = ${input.fingerprint}
+  `) as Array<{ id: number | string }>;
+  if (existing[0]) {
+    const session = await getEnrichmentSessionById(Number(existing[0].id), input.ownerId);
+    if (session) return { session, resumed: true };
+  }
+
+  const created = (await sql`
+    INSERT INTO enrichment_jobs (owner_id, fingerprint, filename, headers, columns, source_rows)
+    VALUES (
+      ${input.ownerId}, ${input.fingerprint}, ${input.filename},
+      ${JSON.stringify(input.headers)}::jsonb, ${JSON.stringify(input.columns)}::jsonb,
+      ${input.sourceRows}
+    )
+    ON CONFLICT (owner_id, fingerprint) DO UPDATE
+      SET updated_at = enrichment_jobs.updated_at
+    RETURNING id
+  `) as Array<{ id: number | string }>;
+  const id = Number(created[0]?.id);
+  const session = await getEnrichmentSessionById(id, input.ownerId);
+  if (!session) throw new Error("No se pudo iniciar la sesión de enriquecimiento.");
+  return { session, resumed: Boolean(existing[0]) };
+}
+
+export async function saveEnrichmentOutcome(input: {
+  ownerId: number;
+  jobId: number;
+  headers: string[];
+  columns: unknown[];
+  config: Partial<EnrichmentConfig>;
+  outcome: EnrichmentOutcome;
+}): Promise<boolean> {
+  const sql = getSql();
+  const owners = (await sql`
+    SELECT source_rows
+    FROM enrichment_jobs
+    WHERE id = ${input.jobId} AND owner_id = ${input.ownerId}
+  `) as Array<{ source_rows: number | string }>;
+  const sourceRows = Number(owners[0]?.source_rows);
+  if (!sourceRows || input.outcome.sourceIndex < 0 || input.outcome.sourceIndex >= sourceRows) return false;
+
+  await sql`
+    UPDATE enrichment_jobs
+    SET headers = ${JSON.stringify(input.headers)}::jsonb,
+        columns = ${JSON.stringify(input.columns)}::jsonb,
+        config = ${JSON.stringify(input.config)}::jsonb,
+        updated_at = NOW()
+    WHERE id = ${input.jobId} AND owner_id = ${input.ownerId}
+  `;
+  await sql`
+    INSERT INTO enrichment_job_rows (
+      job_id, source_index, status, source, output_rows, credits, created_at, updated_at
+    ) VALUES (
+      ${input.jobId}, ${input.outcome.sourceIndex}, ${input.outcome.status}, ${input.outcome.source},
+      ${JSON.stringify(input.outcome.rows)}::jsonb, ${input.outcome.credits}, NOW(), NOW()
+    )
+    ON CONFLICT (job_id, source_index) DO UPDATE SET
+      status = EXCLUDED.status,
+      source = EXCLUDED.source,
+      output_rows = EXCLUDED.output_rows,
+      credits = EXCLUDED.credits,
+      updated_at = NOW()
+  `;
+  return true;
 }
 
 export async function getLeads(

@@ -95,6 +95,8 @@ export type CompanyContactsInput = {
   allRoles: boolean;
   seniority: string;
   perCompany: number;
+  /** Contactos finales deseados; Apollo puede pedir una página mayor para filtrar con seguridad. */
+  targetComplete?: number;
   organization?: ResolvedOrganization | null;
   /** Solo resuelve la empresa y cuenta personas; no gasta créditos de enriquecimiento. */
   dryRun?: boolean;
@@ -435,7 +437,7 @@ export async function searchCompanyContacts(
   const blocked = input.dryRun
     ? { phones: new Set<string>(), emails: new Set<string>() }
     : await getNoContestaContacts(ownerId);
-  const target = input.perCompany;
+  const target = Math.min(input.perCompany, Math.max(1, Math.floor(input.targetComplete ?? input.perCompany)));
   const wanted = candidateBudget(target);
   let candidatesToEnrich: Array<{ raw: Record<string, unknown>; via: string; employer: string }> = [];
   const seen = new Set<string>();

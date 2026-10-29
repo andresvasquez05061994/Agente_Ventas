@@ -7,11 +7,20 @@ import { ActionBanner, FeedbackAnchor, FieldLabel, SectionLabel } from "@/compon
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { APOLLO_COUNTRIES, APOLLO_EMPLOYEE_RANGES, APOLLO_KEYWORDS } from "@/lib/apollo-filters";
 import type { AttendeeMatchResult } from "@/lib/apollo-attendee-match";
+import type { PortfolioContact } from "@/lib/excel-document";
+import { findPortfolioContacts, rowAlreadyComplete } from "@/lib/portfolio-enrich";
+import type {
+  EnrichmentConfig,
+  EnrichmentOutcome,
+  EnrichmentSession,
+} from "@/lib/enrichment-session";
+import { restoreEnrichmentSession } from "@/lib/enrichment-session";
 import {
   applyPersonToRow,
   ENRICH_PAGE_SIZE,
   ensureFillColumns,
   FILL_FIELDS,
+  isPendingEnrichmentStatus,
   MAX_ENRICH_BATCH,
   parseEnrichMatrix,
   SEARCH_FIELDS,
@@ -33,6 +42,7 @@ import { parseApiResponse } from "@/lib/parse-api-response";
 import type { ApolloPerson } from "@/lib/types";
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const OUTPUT_FILL_FIELDS: EnrichFieldId[] = ["email", "empresa", "pais", "telefono", "nombre", "cargo"];
 
 type CompanyRoleSearchResponse = {
   results?: ApolloPerson[];
@@ -40,8 +50,24 @@ type CompanyRoleSearchResponse = {
   error?: string;
 };
 
+type CompanyContactsResponse = {
+  results?: ApolloPerson[];
+  credits_consumed?: number;
+  error?: string;
+};
+
+type EnrichmentSessionResponse = {
+  session: EnrichmentSession;
+  resumed: boolean;
+};
+
+type PortfolioResponse = {
+  contacts?: PortfolioContact[];
+  error?: string;
+};
+
 function isFatal(message: string): boolean {
-  return /cr[eé]dito|presupuesto|insufficient credits|rate limit|l[ií]mite de solicitudes|failed to fetch|networkerror|load failed/i.test(
+  return /cr[eé]dito|presupuesto|insufficient credits|rate limit|l[ií]mite de solicitudes|carga masiva alcanz|failed to fetch|networkerror|load failed/i.test(
     message
   );
 }
@@ -80,6 +106,15 @@ function downloadBase64(filename: string, fileBase64: string) {
   URL.revokeObjectURL(url);
 }
 
+async function fileFingerprint(buffer: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function paddedRow(row: string[], width: number): string[] {
+  return Array.from({ length: width }, (_, index) => row[index] ?? "");
+}
+
 export default function EnriquecerPage() {
   const { feedback, showError, showSuccess, showWarning, showInfo, clear } = useActionFeedback(0);
   const runId = useRef(0);
@@ -97,17 +132,23 @@ export default function EnriquecerPage() {
   const [fallbackIndustry, setFallbackIndustry] = useState("");
   const [fallbackEmployeeRange, setFallbackEmployeeRange] = useState("");
   const [contactsPerRow, setContactsPerRow] = useState(3);
-  const analyzedIndexes = useRef(new Set<number>());
-  const [analyzedRows, setAnalyzedRows] = useState(0);
   const [sourceRows, setSourceRows] = useState(0);
   const [nextBatchApproval, setNextBatchApproval] = useState(false);
+  const [jobId, setJobId] = useState<number | null>(null);
+  const [portfolioContacts, setPortfolioContacts] = useState<PortfolioContact[]>([]);
+  const [portfolioReady, setPortfolioReady] = useState(false);
 
   const mappedFields = useMemo(
     () => new Set((sheet?.columns ?? []).map((column) => column.field).filter(Boolean) as EnrichFieldId[]),
     [sheet]
   );
-  const pending = statuses.filter((status) => status === "pending" || status === "not_found").length;
-  const filled = statuses.filter((status) => status === "filled" || status === "already").length;
+  const sourceStatuses = statuses.slice(0, sourceRows);
+  const pending = sourceStatuses.filter(isPendingEnrichmentStatus).length;
+  const filled = sourceStatuses.filter(
+    (status) => status === "filled" || status === "already" || status === "portfolio"
+  ).length;
+  const portfolioFilled = sourceStatuses.filter((status) => status === "portfolio").length;
+  const analyzedRows = sourceStatuses.filter((status) => status !== "pending").length;
   const totalPages = Math.max(1, Math.ceil((sheet?.rows.length ?? 0) / ENRICH_PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const pageStart = (safePage - 1) * ENRICH_PAGE_SIZE;
@@ -117,16 +158,41 @@ export default function EnriquecerPage() {
     ? Math.round((displayedProgress / sourceRows) * 100)
     : 0;
 
+  function currentConfig(): EnrichmentConfig {
+    return {
+      searchBy,
+      allCountries,
+      countries,
+      fallbackTitles,
+      fallbackIndustry,
+      fallbackEmployeeRange,
+      contactsPerRow,
+    };
+  }
+
+  async function loadPortfolio(): Promise<PortfolioContact[]> {
+    const res = await fetch("/api/enrich/portfolio", { cache: "no-store" });
+    const { data, error } = await parseApiResponse<PortfolioResponse>(res);
+    const message = error ?? data?.error;
+    if (!res.ok || message || !data) throw new Error(message ?? "No se pudo consultar el portafolio.");
+    const contacts = Array.isArray(data.contacts) ? data.contacts : [];
+    setPortfolioContacts(contacts);
+    setPortfolioReady(true);
+    return contacts;
+  }
+
   async function onFile(file: File | undefined) {
     clear();
     setSheet(null);
     setStatuses([]);
     setCredits(0);
     setSaved(0);
-    analyzedIndexes.current.clear();
-    setAnalyzedRows(0);
     setSourceRows(0);
     setPage(1);
+    setNextBatchApproval(false);
+    setJobId(null);
+    setPortfolioContacts([]);
+    setPortfolioReady(false);
     if (!file) return;
     if (!/\.(xlsx|xls|csv)$/i.test(file.name)) {
       showError("Usa un Excel (.xlsx, .xls) o CSV.");
@@ -137,28 +203,71 @@ export default function EnriquecerPage() {
       return;
     }
     try {
-      const matrix = await readWorkbookMatrix(await file.arrayBuffer(), file.name);
+      setBusy(true);
+      setProgress("Leyendo el archivo y revisando el avance guardado…");
+      const bytes = await file.arrayBuffer();
+      const matrix = await readWorkbookMatrix(bytes, file.name);
       const parsed = parseEnrichMatrix(matrix);
       const next: EnrichSheet = { ...parsed, fileLabel: file.name };
-      setSheet(next);
+      const fingerprint = await fileFingerprint(bytes);
+      const sessionRequest = await fetch("/api/enrich/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fingerprint,
+          filename: file.name,
+          headers: next.headers,
+          columns: next.columns,
+          sourceRows: next.rows.length,
+        }),
+      });
+      const { data, error } = await parseApiResponse<EnrichmentSessionResponse>(sessionRequest);
+      const message = error ?? (data as { error?: string } | null)?.error;
+      if (!sessionRequest.ok || message || !data?.session) {
+        throw new Error(message ?? "No se pudo recuperar el avance del archivo.");
+      }
+
+      const restored = restoreEnrichmentSession(next, data.session);
+      const config = data.session.config;
+      const search = config.searchBy?.length ? config.searchBy : suggestedSearchBy(restored.sheet.columns);
+      setSheet(restored.sheet);
       setSourceRows(next.rows.length);
-      setStatuses(next.rows.map(() => "pending"));
-      const search = suggestedSearchBy(next.columns);
+      setStatuses(restored.statuses);
+      setJobId(data.session.id);
+      setCredits(data.session.outcomes.reduce((total, outcome) => total + outcome.credits, 0));
       setSearchBy(search);
+      if (typeof config.allCountries === "boolean") setAllCountries(config.allCountries);
+      if (config.countries?.length) setCountries(config.countries);
+      if (typeof config.fallbackTitles === "string") setFallbackTitles(config.fallbackTitles);
+      if (typeof config.fallbackIndustry === "string") setFallbackIndustry(config.fallbackIndustry);
+      if (typeof config.fallbackEmployeeRange === "string") setFallbackEmployeeRange(config.fallbackEmployeeRange);
+      if (typeof config.contactsPerRow === "number") setContactsPerRow(config.contactsPerRow);
+      await loadPortfolio();
+
+      const restoredAnalyzed = restored.statuses.slice(0, next.rows.length).filter((status) => status !== "pending").length;
+      const nextPending = restored.statuses.slice(0, next.rows.length).findIndex((status) => status === "pending");
       const canSearchByCompanyRole = search.includes("empresa") && search.includes("cargo") && search.includes("pais");
-      if (!search.includes("nombre") && !canSearchByCompanyRole) {
+      if (data.resumed && restoredAnalyzed > 0) {
+        showInfo(
+          `${restoredAnalyzed} de ${next.rows.length} filas ya estaban analizadas (${Math.round((restoredAnalyzed / next.rows.length) * 100)}%). ${nextPending >= 0 ? `La siguiente tanda comienza en la fila ${nextPending + 1}.` : "El archivo ya no tiene filas pendientes."}`,
+          "Archivo reanudado"
+        );
+      } else if (!search.includes("nombre") && !canSearchByCompanyRole) {
         showWarning(
-          "Asigna Nombre, o Empresa + Cargo + País. Las filas sin una de esas combinaciones se marcarán sin consultar Apollo.",
+          "El portafolio se revisará primero. Para consultar Apollo, usa Nombre, Empresa, o Cargo con un país seleccionado. Las filas sin datos suficientes se marcarán sin consumir créditos.",
           "Faltan datos de búsqueda"
         );
       } else {
         showInfo(
-          `${next.rows.length} fila(s) leídas. Elige por qué buscar y qué completar, luego Enriquecer.`,
+          `${next.rows.length} filas leídas. El portafolio se validará antes de Apollo; luego puedes analizar la primera tanda.`,
           "Archivo listo"
         );
       }
     } catch (e) {
       showError(e instanceof Error ? e.message : "No se pudo leer el archivo.");
+    } finally {
+      setBusy(false);
+      setProgress(null);
     }
   }
 
@@ -231,23 +340,47 @@ export default function EnriquecerPage() {
       .slice(0, 10);
   }
 
+  async function persistOutcome(
+    activeJobId: number,
+    prepared: EnrichSheet,
+    outcome: EnrichmentOutcome
+  ) {
+    const res = await fetch("/api/enrich/session/rows", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jobId: activeJobId,
+        headers: prepared.headers,
+        columns: prepared.columns,
+        config: currentConfig(),
+        outcome,
+      }),
+    });
+    const { data, error } = await parseApiResponse<{ ok?: boolean; error?: string }>(res);
+    const message = error ?? data?.error;
+    if (!res.ok || message || !data?.ok) throw new Error(message ?? "No se pudo guardar el avance.");
+  }
+
   async function enrichBatch() {
-    if (!sheet) return;
-    const fillFields = [
-      ...new Set([
-        "nombre" as EnrichFieldId,
-        "empresa" as EnrichFieldId,
-        "cargo" as EnrichFieldId,
-        "pais" as EnrichFieldId,
-      ]),
-    ];
-    const prepared = ensureFillColumns(sheet, fillFields);
-    const pendingIndexes = prepared.rows
-      .map((_, index) => index)
-      .filter((index) => statuses[index] === "pending" || statuses[index] === "not_found")
+    if (!sheet || !jobId) return;
+    let contacts = portfolioContacts;
+    if (!portfolioReady) {
+      try {
+        setProgress("Consultando el portafolio antes de Apollo…");
+        contacts = await loadPortfolio();
+      } catch (error) {
+        showError(error instanceof Error ? error.message : "No se pudo consultar el portafolio.", "Portafolio no disponible");
+        setProgress(null);
+        return;
+      }
+    }
+
+    const prepared = ensureFillColumns(sheet, OUTPUT_FILL_FIELDS);
+    const pendingIndexes = Array.from({ length: sourceRows }, (_, index) => index)
+      .filter((index) => isPendingEnrichmentStatus(statuses[index]))
       .slice(0, MAX_ENRICH_BATCH);
     if (!pendingIndexes.length) {
-      showInfo("No quedan filas por enriquecer.", "Listo");
+      showInfo("No quedan filas por analizar.", "Listo");
       return;
     }
 
@@ -260,69 +393,140 @@ export default function EnriquecerPage() {
     const nextStatuses = [...statuses];
     let batchCredits = 0;
     const foundPeople: ApolloPerson[] = [];
+    let portfolioMatches = 0;
     let missing = 0;
     let failed = 0;
     let fatal: string | null = null;
 
+    const applyAndPersist = async (outcome: EnrichmentOutcome) => {
+      await persistOutcome(jobId, prepared, outcome);
+      nextStatuses[outcome.sourceIndex] = outcome.status;
+      const [first, ...extras] = outcome.rows;
+      if (first) nextRows[outcome.sourceIndex] = paddedRow(first, prepared.headers.length);
+      for (const extra of extras) {
+        nextRows.push(paddedRow(extra, prepared.headers.length));
+        nextStatuses.push(outcome.status);
+      }
+      setStatuses([...nextStatuses]);
+      setSheet({ ...prepared, rows: nextRows.map((row) => [...row]) });
+    };
+
     for (let i = 0; i < pendingIndexes.length; i++) {
       if (runId.current !== thisRun) return;
       const rowIndex = pendingIndexes[i];
-      if (!analyzedIndexes.current.has(rowIndex)) {
-        analyzedIndexes.current.add(rowIndex);
-        setAnalyzedRows(analyzedIndexes.current.size);
-      }
-      const name = searchBy.includes("nombre") ? searchName(nextRows[rowIndex], prepared.columns) : "";
-      const company = searchBy.includes("empresa") ? searchCompany(nextRows[rowIndex], prepared.columns) : "";
-      const title = searchBy.includes("cargo") ? searchTitle(nextRows[rowIndex], prepared.columns) : "";
-      const rowCountries = countriesForRow(nextRows[rowIndex], prepared.columns);
-      if (rowCountries.invalidCountry) {
-        nextStatuses[rowIndex] = "invalid_country";
-        failed += 1;
-        continue;
-      }
-      const broadTitles = title ? [title] : configuredTitles();
-      const broadSearch = !name && Boolean(broadTitles.length && rowCountries.countries.length === 1);
-      if (!name && !broadSearch) {
-        nextStatuses[rowIndex] = "insufficient_data";
-        failed += 1;
-        continue;
-      }
-      setProgress(`Fila ${rowIndex + 1} de ${prepared.rows.length}: ${name || `${company || "Sin empresa"} · ${broadTitles.join(", ")}`}`);
+      const row = nextRows[rowIndex];
+      const name = searchBy.includes("nombre") ? searchName(row, prepared.columns) : "";
+      const company = searchBy.includes("empresa") ? searchCompany(row, prepared.columns) : "";
+      const title = searchBy.includes("cargo") ? searchTitle(row, prepared.columns) : "";
+      const rowCountries = countriesForRow(row, prepared.columns);
+      const rowTitle = name || company || title || "Sin datos de búsqueda";
+
       try {
-        const request = broadSearch
+        setProgress(`Fila ${rowIndex + 1} de ${sourceRows}: revisando portafolio para ${rowTitle}`);
+        if (rowAlreadyComplete(row, prepared.columns)) {
+          await applyAndPersist({
+            sourceIndex: rowIndex,
+            status: "filled",
+            source: "validation",
+            rows: [row],
+            credits: 0,
+          });
+          continue;
+        }
+
+        const portfolio = findPortfolioContacts(row, prepared.columns, contacts, contactsPerRow);
+        if (portfolio.people.length) {
+          const resultRows = portfolio.people.map((person) =>
+            applyPersonToRow([...row], prepared.columns, OUTPUT_FILL_FIELDS, person)
+          );
+          await applyAndPersist({
+            sourceIndex: rowIndex,
+            status: "portfolio",
+            source: "portfolio",
+            rows: resultRows,
+            credits: 0,
+          });
+          portfolioMatches += portfolio.people.length;
+          continue;
+        }
+
+        if (rowCountries.invalidCountry) {
+          await applyAndPersist({
+            sourceIndex: rowIndex,
+            status: "invalid_country",
+            source: "validation",
+            rows: [row],
+            credits: 0,
+          });
+          failed += 1;
+          continue;
+        }
+
+        const broadTitles = title ? [title] : configuredTitles();
+        const broadByCompany = !name && Boolean(company);
+        const broadByTitle = !name && !company && Boolean(broadTitles.length && rowCountries.countries.length === 1);
+        if (!name && !broadByCompany && !broadByTitle) {
+          await applyAndPersist({
+            sourceIndex: rowIndex,
+            status: "insufficient_data",
+            source: "validation",
+            rows: [row],
+            credits: 0,
+          });
+          failed += 1;
+          continue;
+        }
+
+        setProgress(`Fila ${rowIndex + 1} de ${sourceRows}: consultando Apollo para ${rowTitle}`);
+        const request = broadByCompany
           ? {
-              url: "/api/apollo/search",
+              url: "/api/apollo/enrich-company-contacts",
               body: {
-                country: rowCountries.countries[0],
+                company,
+                country: rowCountries.countries[0] ?? "",
                 titles: broadTitles,
-                company: company || undefined,
-                keyword: (searchBy.includes("industria")
-                  ? resolveEnrichIndustry(searchIndustry(nextRows[rowIndex], prepared.columns))
-                  : "") || fallbackIndustry,
-                employeeRanges: (searchBy.includes("tamano_empresa")
-                  ? searchEmployeeRanges(nextRows[rowIndex], prepared.columns)
-                  : []).length
-                  ? searchEmployeeRanges(nextRows[rowIndex], prepared.columns)
-                  : fallbackEmployeeRange ? [fallbackEmployeeRange] : [],
-                per_page: contactsPerRow,
+                all_roles: !broadTitles.length,
+                per_company: Math.max(5, contactsPerRow),
+                requested_count: contactsPerRow,
               },
             }
-          : {
-              url: "/api/apollo/attendee-match",
-              body: {
-                name,
-                title: title || undefined,
-                company: company || undefined,
-                all_countries: rowCountries.all_countries,
-                countries: rowCountries.countries,
-              },
-            };
+          : broadByTitle
+            ? {
+                url: "/api/apollo/enrich-search",
+                body: {
+                  country: rowCountries.countries[0],
+                  titles: broadTitles,
+                  company: company || undefined,
+                  keyword: (searchBy.includes("industria")
+                    ? resolveEnrichIndustry(searchIndustry(row, prepared.columns))
+                    : "") || fallbackIndustry,
+                  employeeRanges: (searchBy.includes("tamano_empresa")
+                    ? searchEmployeeRanges(row, prepared.columns)
+                    : []).length
+                    ? searchEmployeeRanges(row, prepared.columns)
+                    : fallbackEmployeeRange ? [fallbackEmployeeRange] : [],
+                  per_page: Math.max(5, contactsPerRow),
+                  requested_count: contactsPerRow,
+                },
+              }
+            : {
+                url: "/api/apollo/attendee-match",
+                body: {
+                  name,
+                  title: title || undefined,
+                  company: company || undefined,
+                  all_countries: rowCountries.all_countries,
+                  countries: rowCountries.countries,
+                },
+              };
         const res = await fetch(request.url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(request.body),
         });
-        const { data, error } = await parseApiResponse<(AttendeeMatchResult & { error?: string }) | CompanyRoleSearchResponse>(res);
+        const { data, error } = await parseApiResponse<
+          (AttendeeMatchResult & { error?: string }) | CompanyRoleSearchResponse | CompanyContactsResponse
+        >(res);
         if (runId.current !== thisRun) return;
         const message = error ?? (data && "error" in data ? data.error : undefined) ?? (!res.ok || !data ? `Error del servidor (${res.status})` : "");
         if (message || !data) {
@@ -330,38 +534,50 @@ export default function EnriquecerPage() {
             fatal = message;
             break;
           }
+          await applyAndPersist({
+            sourceIndex: rowIndex,
+            status: "error",
+            source: "error",
+            rows: [row],
+            credits: 0,
+          });
           failed += 1;
           continue;
         }
-        const companyResult = data as CompanyRoleSearchResponse;
+
         const attendeeResult = data as AttendeeMatchResult & { error?: string };
-        const people = broadSearch ? companyResult.results ?? [] : attendeeResult.person ? [attendeeResult.person] : [];
-        const person = people[0] ?? null;
-        const consumed = broadSearch ? companyResult.meta?.credits_consumed ?? 0 : attendeeResult.credits_consumed ?? 0;
+        const searchResult = data as CompanyRoleSearchResponse;
+        const companyResult = data as CompanyContactsResponse;
+        const rawPeople = broadByCompany
+          ? companyResult.results ?? []
+          : broadByTitle
+            ? searchResult.results ?? []
+            : attendeeResult.person ? [attendeeResult.person] : [];
+        const people = rawPeople.filter((person) => person.email?.trim() && person.telefono?.trim()).slice(0, contactsPerRow);
+        const consumed = broadByCompany
+          ? companyResult.credits_consumed ?? 0
+          : broadByTitle
+            ? searchResult.meta?.credits_consumed ?? 0
+            : attendeeResult.credits_consumed ?? 0;
         batchCredits += consumed;
-        if (person?.email && person.telefono) {
-          nextRows[rowIndex] = applyPersonToRow(nextRows[rowIndex], prepared.columns, fillFields, person);
-          nextStatuses[rowIndex] = broadSearch ? "filled" : attendeeResult.already_saved ? "already" : "filled";
-          for (const extra of people.slice(1)) {
-            if (!extra.email || !extra.telefono) continue;
-            nextRows.push(applyPersonToRow([...prepared.rows[rowIndex]], prepared.columns, fillFields, extra));
-            nextStatuses.push("filled");
-          }
-          foundPeople.push(...people.filter((candidate) => candidate.email && candidate.telefono));
+        if (people.length) {
+          const resultRows = people.map((person) =>
+            applyPersonToRow([...row], prepared.columns, OUTPUT_FILL_FIELDS, person)
+          );
+          const status: EnrichRowStatus = !broadByCompany && !broadByTitle && attendeeResult.already_saved ? "already" : "filled";
+          await applyAndPersist({ sourceIndex: rowIndex, status, source: "apollo", rows: resultRows, credits: consumed });
+          foundPeople.push(...people);
         } else {
-          nextStatuses[rowIndex] = broadSearch ? "no_contacts" : attendeeResult.status === "not_found" ? "not_found" : "no_contacts";
+          const status: EnrichRowStatus =
+            !broadByCompany && !broadByTitle && attendeeResult.status === "not_found" ? "not_found" : "no_contacts";
+          await applyAndPersist({ sourceIndex: rowIndex, status, source: "apollo", rows: [row], credits: consumed });
           missing += 1;
         }
-        setStatuses([...nextStatuses]);
-        setSheet({ ...prepared, rows: nextRows.map((row) => [...row]) });
-      } catch (e) {
+      } catch (error) {
         if (runId.current !== thisRun) return;
-        const raw = e instanceof Error ? e.message : "Error de red";
-        if (isFatal(raw)) {
-          fatal = raw;
-          break;
-        }
-        failed += 1;
+        const message = error instanceof Error ? error.message : "Error de red";
+        fatal = `No se pudo guardar el avance de la fila ${rowIndex + 1}: ${message}`;
+        break;
       }
     }
 
@@ -386,8 +602,8 @@ export default function EnriquecerPage() {
           } else {
             inserted = Number(data.inserted ?? 0) + Number(data.updated ?? 0);
           }
-        } catch (e) {
-          saveError = e instanceof Error ? e.message : "No se guardó en el portafolio. El Excel sí se puede descargar.";
+        } catch (error) {
+          saveError = error instanceof Error ? error.message : "No se guardó en el portafolio. El Excel sí se puede descargar.";
         }
       }
     }
@@ -397,11 +613,11 @@ export default function EnriquecerPage() {
     setProgress(null);
     setCredits((current) => current + batchCredits);
     setSaved((current) => current + inserted);
-    const left = nextStatuses.filter((status) => status === "pending").length;
-    const invalidCountries = nextStatuses.filter((status) => status === "invalid_country").length;
-    const summary = `${foundPeople.length} con móvil y correo · ${missing} sin coincidencia completa${invalidCountries ? ` · ${invalidCountries} con país no admitido` : ""}${failed ? ` · ${failed} con error` : ""} · ${inserted} al portafolio${left ? ` · faltan ${left}` : ""}${saveError ? `. ${saveError}` : "."}`;
+    const left = nextStatuses.slice(0, sourceRows).filter(isPendingEnrichmentStatus).length;
+    const invalidCountries = nextStatuses.slice(0, sourceRows).filter((status) => status === "invalid_country").length;
+    const summary = `${portfolioMatches} desde portafolio · ${foundPeople.length} desde Apollo con móvil y correo · ${missing} sin coincidencia completa${invalidCountries ? ` · ${invalidCountries} con país no admitido` : ""}${failed ? ` · ${failed} con error` : ""} · ${inserted} al portafolio${left ? ` · faltan ${left}` : ""}${saveError ? `. ${saveError}` : "."}`;
     if (fatal) showWarning(`${summary} Se detuvo: ${fatal}`, "Tanda detenida");
-    else if (saveError || !foundPeople.length) showWarning(summary, "Tanda terminada");
+    else if (saveError || (!foundPeople.length && !portfolioMatches)) showWarning(summary, "Tanda terminada");
     else showSuccess(summary, "Tanda terminada");
     if (!fatal && left > 0) setNextBatchApproval(true);
   }
@@ -418,7 +634,7 @@ export default function EnriquecerPage() {
       <header className="page-header">
         <PageHeading
           title="Enriquecer archivo"
-          help="Carga un Excel o CSV. El sistema detecta las columnas y busca por persona o mediante filtros amplios cuando solo hay empresas o cargos. El archivo conserva sus filas y añade los contactos de Apollo con móvil y correo. Cada tanda revisa hasta 100 filas y solicita tu aprobación antes de continuar."
+          help="Carga un Excel o CSV. Antes de consultar Apollo, cada fila se contrasta con tu portafolio para reutilizar correo, empresa, país y móvil sin créditos. El avance queda guardado por archivo: si recargas, vuelve a elegir el mismo archivo y se reanuda desde la primera fila pendiente."
         />
       </header>
 
@@ -429,7 +645,7 @@ export default function EnriquecerPage() {
       )}
 
       <section className="settings-panel enrich-section mt-6">
-        <div className="enrich-section__heading"><div><p className="section-label">1. Archivo</p><h2>Datos actuales</h2></div><HelpTip label="Ayuda sobre el archivo">Carga la primera hoja de un archivo Excel o CSV. El módulo mantiene sus columnas y filas; solo añade columnas de contacto cuando hacen falta.</HelpTip></div>
+        <div className="enrich-section__heading"><div><p className="section-label">1. Archivo</p><h2>Datos actuales</h2></div><HelpTip label="Ayuda sobre el archivo">Carga la primera hoja de un archivo Excel o CSV. El módulo calcula una huella del contenido para conservar el avance. Tras actualizar la página debes volver a elegir el mismo archivo: se leerá otra vez, se mostrará el avance recuperado y solo seguirán las filas pendientes.</HelpTip></div>
         <div className="document-upload">
           <input
             id="enrich-file"
@@ -475,7 +691,7 @@ export default function EnriquecerPage() {
           </section>
 
           <section className="settings-panel enrich-section mt-4">
-            <div className="enrich-section__heading"><div><p className="section-label">2. Búsqueda</p><h2>Define cómo encontrar contactos</h2></div><HelpTip label="Ayuda sobre la búsqueda">Si una fila tiene Nombre, se busca a esa persona. Sin nombre, el módulo utiliza Empresa, Cargo, País, Industria y Tamaño. Para búsqueda amplia sin nombre se requiere un único país y al menos un cargo.</HelpTip></div>
+            <div className="enrich-section__heading"><div><p className="section-label">2. Búsqueda</p><h2>Define cómo encontrar contactos</h2></div><HelpTip label="Ayuda sobre la búsqueda">Cada tanda revisa primero el portafolio. Para Apollo: Nombre puede buscarse sin país; Empresa puede traer contactos de esa empresa; Cargo requiere un país único para evitar resultados demasiado amplios. Si no hay datos suficientes, la fila se marca sin consumir créditos.</HelpTip></div>
             <FieldLabel>País de búsqueda</FieldLabel>
             <div className="enrich-checks mb-4 flex flex-wrap gap-x-4 gap-y-2">
               <label className="enrich-check inline-flex items-center gap-1.5 text-sm">
@@ -536,19 +752,19 @@ export default function EnriquecerPage() {
               </label>
             </div>
 
-            <div className="enrich-output-summary"><div><p className="section-label">3. Archivo de salida</p><h2>Contactos enriquecidos</h2><p>Se agregan Nombre, Empresa, Cargo, País, Correo y Móvil. Los valores actuales nunca se reemplazan.</p></div><HelpTip label="Ayuda sobre el archivo de salida">Cuando una búsqueda amplia devuelve varios contactos, el archivo agrega una fila por cada resultado. Solo se incluyen contactos con correo y móvil para que puedan entrar al portafolio.</HelpTip></div>
+            <div className="enrich-output-summary"><div><p className="section-label">3. Archivo de salida</p><h2>Contactos enriquecidos</h2><p>Se priorizan Correo, Empresa, País y Móvil. Los valores existentes no se reemplazan.</p></div><HelpTip label="Ayuda sobre el archivo de salida">Los contactos completos del portafolio se usan antes que Apollo. Cuando una empresa o cargo devuelve varias personas, el archivo agrega una fila por contacto. Solo se agregan contactos con correo y móvil completos.</HelpTip></div>
 
             <div className="enrich-progress" aria-live="polite">
-              <div className="enrich-progress__head"><span>{busy ? "Analizando filas" : "Filas analizadas"}</span><strong>{displayedProgress} de {sourceRows}</strong></div>
+              <div className="enrich-progress__head"><span>{busy ? "Analizando filas" : "Filas analizadas"}</span><strong>{displayedProgress} de {sourceRows} · {progressPercent}%</strong></div>
               <div className="enrich-progress__track"><span style={{ width: `${progressPercent}%` }} /></div>
             </div>
             {nextBatchApproval && !busy ? (
-              <div className="enrich-next-batch"><div><strong>Quedan {pending} filas por analizar.</strong><p>Revisa el resultado actual antes de consumir créditos en el siguiente bloque de hasta 100 filas.</p></div><div className="flex gap-2"><button type="button" className="btn-secondary" onClick={() => void download()}>Descargar avance</button><button type="button" className="btn-primary" onClick={() => void enrichBatch()}>Aprobar siguiente bloque</button></div></div>
+              <div className="enrich-next-batch"><div><strong>Quedan {pending} filas por analizar.</strong><p>El siguiente bloque revisará primero tu portafolio y solo consultará Apollo para las filas que sigan pendientes.</p></div><div className="flex gap-2"><button type="button" className="btn-secondary" onClick={() => void download()}>Descargar avance</button><button type="button" className="btn-primary" onClick={() => void enrichBatch()}>Aprobar siguiente bloque</button></div></div>
             ) : (
             <div className="document-upload mt-4">
               <button type="button" className="btn-primary inline-flex items-center gap-2" disabled={busy || pending === 0} onClick={() => void enrichBatch()}>
                 <Sparkles size={16} strokeWidth={1.5} aria-hidden />
-                {busy ? progress ?? "Enriqueciendo…" : `Analizar hasta ${Math.min(MAX_ENRICH_BATCH, pending)} filas`}
+                {busy ? progress ?? "Enriqueciendo…" : `Revisar hasta ${Math.min(MAX_ENRICH_BATCH, pending)} filas`}
               </button>
               <button type="button" className="btn-secondary inline-flex items-center gap-2" disabled={busy} onClick={() => void download()}>
                 <Download size={16} strokeWidth={1.5} aria-hidden />
@@ -556,7 +772,7 @@ export default function EnriquecerPage() {
               </button>
             </div>
             )}
-            <p className="text-micro mt-2">{filled} contactos enriquecidos · {pending} por analizar{credits ? ` · ~${credits} créditos` : ""}{saved ? ` · ${saved} en portafolio` : ""}</p>
+            <p className="text-micro mt-2">{portfolioFilled} desde portafolio · {filled - portfolioFilled} desde Apollo o archivo · {pending} por analizar{credits ? ` · ~${credits} créditos` : ""}{saved ? ` · ${saved} en portafolio` : ""}</p>
           </section>
 
           <section className="mt-4">
@@ -607,10 +823,12 @@ export default function EnriquecerPage() {
 function statusLabel(status: EnrichRowStatus): string {
   if (status === "filled") return "Completado";
   if (status === "already") return "Ya en portafolio";
+  if (status === "portfolio") return "Desde portafolio";
   if (status === "no_contacts") return "Sin móvil y correo";
   if (status === "not_found") return "No coincide";
   if (status === "invalid_country") return "País no admitido";
   if (status === "insufficient_data") return "Faltan datos: usa Nombre, o Empresa + Cargo + País";
+  if (status === "error") return "Error guardado, no se repetirá automáticamente";
   return "Pendiente";
 }
 

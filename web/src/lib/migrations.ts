@@ -292,6 +292,42 @@ async function migration007RateWindows(sql: Sql) {
   `;
 }
 
+/** 008: sesiones reanudables de enriquecimiento, aisladas por usuario y archivo. */
+async function migration008EnrichmentJobs(sql: Sql) {
+  await sql`
+    CREATE TABLE IF NOT EXISTS enrichment_jobs (
+      id BIGSERIAL PRIMARY KEY,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      fingerprint TEXT NOT NULL,
+      filename TEXT NOT NULL DEFAULT '',
+      headers JSONB NOT NULL DEFAULT '[]'::jsonb,
+      columns JSONB NOT NULL DEFAULT '[]'::jsonb,
+      source_rows INTEGER NOT NULL,
+      config JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (owner_id, fingerprint)
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS enrichment_job_rows (
+      job_id BIGINT NOT NULL REFERENCES enrichment_jobs(id) ON DELETE CASCADE,
+      source_index INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      source TEXT NOT NULL,
+      output_rows JSONB NOT NULL DEFAULT '[]'::jsonb,
+      credits INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (job_id, source_index)
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_enrichment_jobs_owner_updated
+    ON enrichment_jobs (owner_id, updated_at DESC)
+  `;
+}
+
 const MIGRATIONS: Migration[] = [
   { id: "001_init", run: migration001Init },
   { id: "002_phone_search", run: migration002PhoneSearch },
@@ -300,6 +336,7 @@ const MIGRATIONS: Migration[] = [
   { id: "005_gestion", run: migration005Gestion },
   { id: "006_ciclo", run: migration006Ciclo },
   { id: "007_rate_windows", run: migration007RateWindows },
+  { id: "008_enrichment_jobs", run: migration008EnrichmentJobs },
 ];
 
 export async function applyMigrations(sql: Sql) {
