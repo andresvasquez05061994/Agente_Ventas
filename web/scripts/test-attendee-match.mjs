@@ -10,6 +10,7 @@ import {
   obfuscatedSurnamesFit,
   obfuscatedTokenFits,
   parseMatchCountries,
+  personSearchVariants,
   pickAttendeeCandidate,
 } from "../src/lib/apollo-attendee-match.ts";
 import { nameScore } from "../src/lib/excel-attendees.ts";
@@ -37,6 +38,9 @@ check(
   "apellido recortado sigue coincidiendo",
   nameScore("ANTONIO CORREA", "Antonio Correa Arguello") >= 70
 );
+check("letra latina equivalente coincide", nameScore("Łukasz Kowalski", "Lukasz Kowalski") === 100);
+check("error de una letra en apellido largo coincide", nameScore("Andrés Zapata", "Andres Zpata") >= 70);
+check("dos apellidos generan la variante con el primero", personSearchVariants("Iago Soto Mata").includes("iago soto"));
 
 const andre = {
   id: "apollo-andre",
@@ -72,6 +76,8 @@ check("no manda el cargo en español a Apollo", payloads.every((p) => !p.person_
 check("keywords van sin tilde para que Apollo los encuentre", payloads[0].q_keywords === "ANDRE CASTELO PICHEL");
 check("también prueba el nombre con tilde", payloads.some((p) => p.q_keywords === "ANDRÉ CASTELO PICHEL"));
 check("no exige email verificado para aparecer", payloads.every((p) => !p.contact_email_status));
+const iagoPayloads = buildAttendeeSearchPayloads({ name: "Iago Soto Mata", company: "QUOBIS - seguridad voz", countries: [] });
+check("consulta Apollo con nombre y primer apellido", iagoPayloads.some((p) => p.q_keywords === "iago soto"));
 
 const identify = buildIdentifyDetail(input);
 check("match manda el nombre sin tilde", identify.name === "ANDRE CASTELO PICHEL");

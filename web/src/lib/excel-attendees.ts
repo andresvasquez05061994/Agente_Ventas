@@ -74,6 +74,14 @@ const HONORIFICS = new Set([
 function fold(value: string): string {
   return value
     .toLowerCase()
+    // Algunos caracteres latinos no se descomponen con NFD.
+    .replace(/ß/g, "ss")
+    .replace(/[æǽ]/g, "ae")
+    .replace(/œ/g, "oe")
+    .replace(/[øö]/g, "o")
+    .replace(/[ðđ]/g, "d")
+    .replace(/ł/g, "l")
+    .replace(/þ/g, "th")
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
     .replace(/\s+/g, " ")
@@ -141,7 +149,28 @@ function lastNames(tokens: string[]): string[] {
 function tokenLikelySame(left: string, right: string): boolean {
   if (left === right) return true;
   if (left.length >= 4 && right.length >= 4 && (right.startsWith(left) || left.startsWith(right))) return true;
-  return false;
+  if (left.length < 5 || right.length < 5) return false;
+  const limit = Math.max(left.length, right.length) >= 8 ? 2 : 1;
+  return editDistanceAtMost(left, right, limit);
+}
+
+/** Distancia de edición acotada para tolerar un error de digitación sin abrir coincidencias cortas. */
+function editDistanceAtMost(left: string, right: string, limit: number): boolean {
+  if (Math.abs(left.length - right.length) > limit) return false;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row++) {
+    const current = [row];
+    let minimum = current[0];
+    for (let column = 1; column <= right.length; column++) {
+      const cost = left[row - 1] === right[column - 1] ? 0 : 1;
+      const value = Math.min(previous[column] + 1, current[column - 1] + 1, previous[column - 1] + cost);
+      current.push(value);
+      minimum = Math.min(minimum, value);
+    }
+    if (minimum > limit) return false;
+    previous = current;
+  }
+  return previous[right.length] <= limit;
 }
 
 function allQueryTokensInCandidate(query: string[], candidate: string[]): boolean {

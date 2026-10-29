@@ -54,6 +54,26 @@ export function foldPersonQuery(name: string): string {
   return nameTokens(name).join(" ") || name;
 }
 
+/** Variantes conservadoras para nombres con dos apellidos o datos abreviados en Apollo. */
+export function personSearchVariants(name: string): string[] {
+  const tokens = nameTokens(name);
+  if (!tokens.length) return [];
+  const variants = new Set<string>();
+  const add = (parts: string[]) => {
+    const value = parts.filter(Boolean).join(" ").trim();
+    if (value) variants.add(value);
+  };
+
+  add(tokens);
+  if (tokens.length >= 3) {
+    add(tokens.slice(0, -1)); // Iago Soto Mata → Iago Soto
+    add([tokens[0], tokens[tokens.length - 1]]); // Iago Soto Mata → Iago Mata
+  }
+  if (tokens.length >= 2) add([tokens[0], tokens[1]]);
+  add(tokens.slice(1));
+  return [...variants].slice(0, 5);
+}
+
 export function apolloPlainName(name: string): string {
   return name
     .normalize("NFD")
@@ -165,11 +185,11 @@ export function buildAttendeeSearchPayloads(input: AttendeeMatchInput): Record<s
   const locationFilter = locations.length ? { person_locations: locations } : {};
   const payloads: Record<string, unknown>[] = [];
 
-  const push = (extra: Record<string, unknown>) => {
+  const push = (extra: Record<string, unknown>, query = original) => {
     payloads.push({
       page: 1,
       per_page: 25,
-      q_keywords: original,
+      q_keywords: query,
       ...locationFilter,
       ...extra,
     });
@@ -186,6 +206,11 @@ export function buildAttendeeSearchPayloads(input: AttendeeMatchInput): Record<s
       q_keywords: last,
       ...(brand ? { q_organization_name: brand } : {}),
     });
+  }
+  for (const variant of personSearchVariants(input.name)) {
+    if (variant !== original && variant !== folded && variant !== last) {
+      push(brand ? { q_organization_name: brand } : {}, variant);
+    }
   }
 
   const seen = new Set<string>();
