@@ -577,7 +577,8 @@ export default function EnriquecerPage() {
           : broadByTitle
             ? searchResult.results ?? []
             : attendeeResult.person ? [attendeeResult.person] : [];
-        const people = rawPeople.filter((person) => person.email?.trim() && person.telefono?.trim()).slice(0, contactsPerRow);
+        // El móvil es el requisito mínimo: un correo ausente no invalida un contacto llamable.
+        const people = rawPeople.filter((person) => person.telefono?.trim()).slice(0, contactsPerRow);
         const consumed = broadByCompany
           ? companyResult.credits_consumed ?? 0
           : broadByTitle
@@ -588,7 +589,9 @@ export default function EnriquecerPage() {
           const resultRows = people.map((person) =>
             applyPersonToRow([...row], prepared.columns, OUTPUT_FILL_FIELDS, person)
           );
-          const status: EnrichRowStatus = !broadByCompany && !broadByTitle && attendeeResult.already_saved ? "already" : "filled";
+          const status: EnrichRowStatus = !broadByCompany && !broadByTitle && attendeeResult.already_saved
+            ? "already"
+            : people.some((person) => !person.email?.trim()) ? "phone_only" : "filled";
           await applyAndPersist({ sourceIndex: rowIndex, status, source: "apollo", rows: resultRows, credits: consumed });
           foundPeople.push(...people);
         } else {
@@ -609,7 +612,7 @@ export default function EnriquecerPage() {
     let saveError = "";
     if (foundPeople.length) {
       const unique = new Map(foundPeople.map((person) => [person.apollo_id, person]));
-      const toSave = [...unique.values()].filter((person) => person.email?.trim() && person.telefono?.trim());
+      const toSave = [...unique.values()].filter((person) => person.telefono?.trim());
       if (toSave.length) {
         try {
           const res = await fetch("/api/leads", {
@@ -847,6 +850,7 @@ function statusLabel(status: EnrichRowStatus): string {
   if (status === "filled") return "Completado";
   if (status === "already") return "Ya en portafolio";
   if (status === "portfolio") return "Desde portafolio";
+  if (status === "phone_only") return "Solo móvil";
   if (status === "no_contacts") return "Sin móvil y correo";
   if (status === "not_found") return "No coincide";
   if (status === "invalid_country") return "País no admitido";

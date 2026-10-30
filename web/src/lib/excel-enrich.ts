@@ -282,6 +282,7 @@ export type EnrichRowStatus =
   | "filled"
   | "already"
   | "portfolio"
+  | "phone_only"
   | "not_found"
   | "no_contacts"
   | "invalid_country"

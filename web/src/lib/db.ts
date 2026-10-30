@@ -458,7 +458,7 @@ export async function saveLeads(
     const email = lead.email?.trim() || null;
     const telefonoE164 = toE164(lead.telefono, lead.pais);
     const telefono = telefonoE164 || lead.telefono?.trim() || null;
-    if (!email || !telefono) {
+    if (!telefono) {
       skipped++;
       continue;
     }
@@ -477,7 +477,7 @@ export async function saveLeads(
         nombre = EXCLUDED.nombre,
         cargo = EXCLUDED.cargo,
         empresa = EXCLUDED.empresa,
-        email = EXCLUDED.email,
+        email = COALESCE(NULLIF(EXCLUDED.email, ''), leads.email),
         telefono = EXCLUDED.telefono,
         telefono_e164 = EXCLUDED.telefono_e164,
         pais = EXCLUDED.pais,

@@ -3,7 +3,6 @@ import { searchApolloOrganizations } from "./apollo-organizations";
 import {
   enrichSinglePersonWithContacts,
   identifyPersonByAttributes,
-  isContactableInSearch,
   resolveApolloPersonId,
 } from "./apollo-enrich";
 import {
@@ -395,14 +394,10 @@ export async function matchAttendeeContact(
     return { status: "found", person, credits_consumed: identifyCredits, already_saved: true };
   }
 
-  if (!isContactableInSearch(candidate)) {
-    if (identifyCredits > 0) {
-      await recordProspeccionCredits(identifyCredits, 0, "search", ownerId);
-    }
-    return { status: "no_contacts", person: null, credits_consumed: identifyCredits };
-  }
-
-  const enriched = await enrichSinglePersonWithContacts(candidate, { deadlineMs });
+  const enriched = await enrichSinglePersonWithContacts(candidate, {
+    deadlineMs,
+    allowPhoneOnly: true,
+  });
   const creditsConsumed = identifyCredits + enriched.stats.credits_consumed;
   if (creditsConsumed > 0) {
     await recordProspeccionCredits(creditsConsumed, enriched.person ? 1 : 0, "search", ownerId);

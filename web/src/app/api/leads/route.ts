@@ -50,10 +50,10 @@ export async function POST(req: NextRequest) {
       linkedin_url?: string | null;
     }>;
 
-    const invalid = leads.filter((l) => !l.email?.trim() || !l.telefono?.trim());
+    const invalid = leads.filter((l) => !l.telefono?.trim());
     if (invalid.length) {
       return NextResponse.json(
-        { error: "Solo se pueden guardar contactos con email y teléfono." },
+        { error: "Solo se pueden guardar contactos con teléfono." },
         { status: 400 }
       );
     }
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
       nombre: l.nombre,
       cargo: l.cargo ?? null,
       empresa: l.empresa ?? null,
-      email: l.email!.trim(),
+      email: l.email?.trim() || null,
       telefono: l.telefono!.trim(),
       pais: l.pais ?? null,
       linkedin_url: l.linkedin_url ?? null,

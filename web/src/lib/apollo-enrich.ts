@@ -17,6 +17,8 @@ export interface EnrichOptions {
   maxCandidates?: number;
   targetComplete?: number;
   deadlineMs?: number;
+  /** En enriquecimiento de asistentes, un móvil por sí solo es un resultado útil. */
+  allowPhoneOnly?: boolean;
 }
 
 function hasTimeLeft(deadlineMs?: number): boolean {
@@ -433,9 +435,10 @@ function emptyEnrichStats(): EnrichStats {
 /** Enriquece un solo perfil (email + teléfono). Evita gastar créditos en lotes innecesarios. */
 export async function enrichSinglePersonWithContacts(
   raw: Record<string, unknown>,
-  options?: { deadlineMs?: number }
+  options?: Pick<EnrichOptions, "deadlineMs" | "allowPhoneOnly">
 ): Promise<{ person: ApolloPerson | null; stats: EnrichStats }> {
-  if (!isContactableInSearch(raw)) {
+  const allowPhoneOnly = options?.allowPhoneOnly === true;
+  if (!isContactableInSearch(raw) && !allowPhoneOnly) {
     const person = normalizePerson(raw);
     const complete = Boolean(person.email && person.telefono);
     return {
@@ -481,7 +484,7 @@ export async function enrichSinglePersonWithContacts(
     return { person: null, stats: emptyEnrichStats() };
   }
 
-  if (!extractEmail(merged)) {
+  if (!extractEmail(merged) && raw.has_email !== false) {
     const { byId, credits, error } = await bulkMatchPeople([detail], {
       revealEmail: true,
       revealPhone: false,
@@ -496,7 +499,7 @@ export async function enrichSinglePersonWithContacts(
   }
 
   if (
-    extractEmail(merged) &&
+    (extractEmail(merged) || allowPhoneOnly) &&
     !extractPhone(merged) &&
     hasTimeLeft(options?.deadlineMs)
   ) {
@@ -518,9 +521,10 @@ export async function enrichSinglePersonWithContacts(
   const withEmail = person.email ? 1 : 0;
   const withPhone = person.telefono ? 1 : 0;
   const withBoth = person.email && person.telefono ? 1 : 0;
+  const accepted = Boolean(person.telefono && (person.email || allowPhoneOnly));
 
   return {
-    person: withBoth ? person : null,
+    person: accepted ? person : null,
     stats: {
       candidates: 1,
       matched: apiMatched,
