@@ -12,8 +12,9 @@ import {
   parseMatchCountries,
   personSearchVariants,
   pickAttendeeCandidate,
+  pickEmployerUnknownCandidate,
 } from "../src/lib/apollo-attendee-match.ts";
-import { nameScore } from "../src/lib/excel-attendees.ts";
+import { cleanPersonName, nameScore } from "../src/lib/excel-attendees.ts";
 import { companySearchHint } from "../src/lib/excel-companies.ts";
 import { organizationMatchesLoose } from "../src/lib/apollo-filters.ts";
 
@@ -38,6 +39,10 @@ check(
   "apellido recortado sigue coincidiendo",
   nameScore("ANTONIO CORREA", "Antonio Correa Arguello") >= 70
 );
+check(
+  "tres puntos ASCII se tratan como recorte",
+  cleanPersonName("CARLOS ALBERTO ESCOBA...") === "CARLOS ALBERTO"
+);
 check("letra latina equivalente coincide", nameScore("Łukasz Kowalski", "Lukasz Kowalski") === 100);
 check("error de una letra en apellido largo coincide", nameScore("Andrés Zapata", "Andres Zpata") >= 70);
 check("dos apellidos generan la variante con el primero", personSearchVariants("Iago Soto Mata").includes("iago soto"));
@@ -58,6 +63,12 @@ const otherApdtic = {
   organization: { name: "APDTIC - Profesionales del derecho TIC" },
 };
 
+const carlosWithoutEmployer = {
+  id: "apollo-carlos",
+  name: "Carlos Escobar",
+  country: "Colombia",
+};
+
 const input = {
   name: "ANDRÉ CASTELO PICHEL",
   title: "Socio Director",
@@ -68,6 +79,14 @@ const input = {
 const picked = pickAttendeeCandidate([otherApdtic, andre], input);
 check("Colombia no elige a alguien de España", picked == null);
 check("no toma a otra persona de la misma empresa", pickAttendeeCandidate([otherApdtic], input) == null);
+check(
+  "un nombre sin empleador queda para validar después",
+  pickEmployerUnknownCandidate([carlosWithoutEmployer], {
+    name: "CARLOS ALBERTO ESCOBAR",
+    company: "PRONÓSTICA S.A.S.",
+    country: "Colombia",
+  })?.id === "apollo-carlos"
+);
 
 const payloads = buildAttendeeSearchPayloads(input);
 check("con país, todas las búsquedas filtran ubicación", payloads.every((p) => Array.isArray(p.person_locations) && p.person_locations.includes("Colombia")));

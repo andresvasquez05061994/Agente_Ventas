@@ -251,6 +251,31 @@ export function pickAttendeeCandidate(
   return best?.person ?? null;
 }
 
+/**
+ * Apollo puede identificar el nombre y omitir el empleador. Este resultado no
+ * se acepta todavía: se enriquece una vez y se comprueba la empresa resultante.
+ */
+export function pickEmployerUnknownCandidate(
+  people: Record<string, unknown>[],
+  input: AttendeeMatchInput
+): Record<string, unknown> | null {
+  if (!input.company?.trim()) return null;
+  const locations = locationsOf(input);
+  let best: { person: Record<string, unknown>; rank: number } | null = null;
+
+  for (const raw of people) {
+    if (!resolveApolloPersonId(raw) || personOrgName(raw).trim()) continue;
+    const score = nameScore(input.name, personDisplayName(raw));
+    // 90 exige que todos los tokens de uno de los nombres estén en el otro.
+    if (score < 90) continue;
+    const sameCountry = matchesSelectedCountry(raw, locations);
+    if (locations.length && !sameCountry) continue;
+    const rank = score + (sameCountry ? 3 : 0);
+    if (!best || rank > best.rank) best = { person: raw, rank };
+  }
+  return best?.person ?? null;
+}
+
 function searchRowWorthConfirming(raw: Record<string, unknown>, input: AttendeeMatchInput): boolean {
   if (!resolveApolloPersonId(raw)) return false;
   const wanted = nameTokens(input.name)[0];
@@ -367,6 +392,30 @@ export async function matchAttendeeContact(
 
   const candidate = pickAttendeeCandidate([...unique.values()], input);
   if (!candidate) {
+    const employerUnknown = pickEmployerUnknownCandidate([...unique.values()], input);
+    if (employerUnknown) {
+      const enriched = await enrichSinglePersonWithContacts(employerUnknown, {
+        deadlineMs,
+        allowPhoneOnly: true,
+      });
+      const creditsConsumed = identifyCredits + enriched.stats.credits_consumed;
+      const companyVerified = Boolean(
+        enriched.person && companyFits(enriched.person.empresa ?? "", input.company ?? "")
+      );
+      if (creditsConsumed > 0) {
+        await recordProspeccionCredits(creditsConsumed, companyVerified ? 1 : 0, "search", ownerId);
+      }
+      if (!enriched.person || !companyVerified) {
+        return { status: "not_found", person: null, credits_consumed: creditsConsumed };
+      }
+      if (isNoContestaContact(enriched.person, blocked)) {
+        return { status: "no_contacts", person: null, credits_consumed: creditsConsumed };
+      }
+      if (!enriched.person.email?.trim() || !enriched.person.telefono?.trim()) {
+        return { status: "no_contacts", person: null, credits_consumed: creditsConsumed };
+      }
+      return { status: "found", person: enriched.person, credits_consumed: creditsConsumed };
+    }
     if (identifyCredits > 0) {
       await recordProspeccionCredits(identifyCredits, 0, "search", ownerId);
     }

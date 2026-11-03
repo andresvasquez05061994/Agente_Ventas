@@ -117,8 +117,9 @@ function headerKind(label: string): "name" | "title" | "company" | null {
 export function cleanPersonName(raw: string): string {
   let text = cellText(raw);
   if (!text) return "";
-  const truncated = /[.…\uFFFD\u25C6\u2666]+$/.test(text) || text.includes("…");
-  text = text.replace(/[.…\uFFFD\u25C6\u2666]+/g, " ").replace(/\s+/g, " ").trim();
+  // Excel y las tablas web pueden recortar con «…» o con tres puntos ASCII.
+  const truncated = /(?:\.{3}|[.…\uFFFD\u25C6\u2666]+)$/.test(text) || text.includes("…");
+  text = text.replace(/(?:\.{3}|[.…\uFFFD\u25C6\u2666]+)/g, " ").replace(/\s+/g, " ").trim();
   const comma = text.split(",")[0]?.trim() ?? text;
   text = comma || text;
   const tokens = text.split(" ").filter(Boolean);
