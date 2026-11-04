@@ -21,8 +21,8 @@ type ApolloBudget = {
 const RESET_LABEL = DEFAULT_APOLLO_MONTHLY_BUDGET.toLocaleString("es-CO");
 
 const SOURCE_HINT: Record<BudgetSource, string> = {
-  guardado: `Ajuste solo de este mes. El día 1 (00:00 UTC, 7:00 p. m. de Colombia del día anterior) vuelve a ${RESET_LABEL}.`,
-  predeterminado: `Tope de este mes: ${RESET_LABEL}. Si lo cambias, el ajuste dura hasta el cierre del mes.`,
+  guardado: `Ajuste global solo de este mes. El día 1 UTC vuelve a ${RESET_LABEL}.`,
+  predeterminado: `Tope global de este mes: ${RESET_LABEL}. Si lo cambias, el ajuste dura hasta el cierre del mes.`,
 };
 
 function formatCredits(n: number) {
@@ -118,8 +118,8 @@ export default function ConfiguracionPage() {
     <main className="app-content flex-1 py-6 lg:py-8">
       <header className="page-header">
         <PageHeading
-          title="Configuración"
-          help={`Tope de créditos Apollo de tu cuenta. ${SOURCE_HINT[budget?.budget_source ?? "predeterminado"]} El ajuste no afecta a los demás usuarios. El consumo vuelve a cero con el mes, y los créditos reales se compran en Apollo.io.`}
+          title="Administración de Apollo"
+          help={`Tope global de créditos Apollo. ${SOURCE_HINT[budget?.budget_source ?? "predeterminado"]} El consumo vuelve a cero con el mes UTC.`}
         />
       </header>
 
@@ -143,7 +143,7 @@ export default function ConfiguracionPage() {
       {budget && (
         <div className="settings-panel mt-6">
           <p className="section-label">Apollo</p>
-          <h2 className="section-block__title">Uso del mes</h2>
+          <h2 className="section-block__title">Uso global del mes</h2>
 
           <div
             className="credit-meter"
@@ -151,7 +151,7 @@ export default function ConfiguracionPage() {
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={barWidth}
-            aria-label={`${percent}% del tope mensual de Apollo usado`}
+            aria-label={`${percent}% del tope mensual global de Apollo usado`}
           >
             <div className="credit-meter__head">
               <span>
@@ -176,7 +176,7 @@ export default function ConfiguracionPage() {
           </div>
 
           <form className="credit-meter__form" onSubmit={(event) => void save(event)}>
-            <FieldLabel htmlFor="apollo-budget">Tope mensual de créditos</FieldLabel>
+            <FieldLabel htmlFor="apollo-budget">Tope mensual global de créditos</FieldLabel>
             <div className="credit-meter__row">
               <input
                 id="apollo-budget"

@@ -14,6 +14,8 @@ const CSV_COLUMNS: (keyof Lead)[] = [
   "lead_status",
   "resultado_gestion",
   "etapa_comercial",
+  "tipo_contacto",
+  "solucion_origen",
   "whatsapp_status",
   "notas",
   "fuente_busqueda",

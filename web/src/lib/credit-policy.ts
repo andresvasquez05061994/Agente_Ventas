@@ -1,5 +1,5 @@
-/** Tope con el que empieza cada mes. Un ajuste en Configuración solo dura ese mes. */
-export const DEFAULT_APOLLO_MONTHLY_BUDGET = 2500;
+/** Tope global con el que empieza cada mes. Un ajuste administrativo dura ese mes. */
+export const DEFAULT_APOLLO_MONTHLY_BUDGET = 5000;
 
 export const APOLLO_BUDGET_MIN = 1;
 export const APOLLO_BUDGET_MAX = 1_000_000;
@@ -37,7 +37,7 @@ export function encodeMonthlyBudget(budget: number, now = new Date()): string {
   return `${utcMonthKey(now)}:${Math.floor(budget)}`;
 }
 
-/** Devuelve el tope solo si fue guardado para el mes UTC actual. Si no, el mes vuelve a 2500. */
+/** Devuelve el tope solo si fue guardado para el mes UTC actual. Si no, el mes vuelve a 5.000. */
 export function decodeMonthlyBudget(
   raw: string | null | undefined,
   now = new Date()
@@ -52,7 +52,7 @@ export function decodeMonthlyBudget(
   return amount;
 }
 
-/** El valor de este mes manda. Sin él, el tope es 2500 aunque Vercel tenga otra variable. */
+/** El valor de este mes manda. Sin él, el tope global es 5.000 aunque Vercel tenga otra variable. */
 export function resolveApolloMonthlyBudget(
   stored: number | null | undefined
 ): { budget: number; source: ApolloBudgetSource } {

@@ -189,11 +189,9 @@ export const APOLLO_PER_PAGE_OPTIONS = [5, 10, 15, 20, 25, 50] as const;
 export const APOLLO_EMPLOYEE_RANGES = [
   { label: "Cualquier tamaño", value: "" },
   { label: "Micro / pequeña (1-50)", value: "1,50" },
-  { label: "Mediana (51-200)", value: "51,200" },
-  { label: "Mediana (51-500)", value: "51,500" },
+  { label: "Mediana (50-200)", value: "51,200" },
   { label: "Más de 100 empleados", value: "101,10000" },
   { label: "Más de 200 empleados", value: "201,10000" },
-  { label: "Grande (501-5.000)", value: "501,5000" },
   { label: "Enterprise (5.000+)", value: "5001,10000" },
 ] as const;
 
@@ -356,10 +354,9 @@ export function inferEmployeeRangesFromText(text: string): string[] {
   if (numeric?.[1]) {
     const n = Number(numeric[1]);
     if (n >= 5000) return ["5001,10000"];
-    if (n >= 500) return ["501,5000"];
     if (n >= 200) return ["201,10000"];
     if (n >= 100) return ["101,10000"];
-    if (n >= 50) return ["51,500"];
+    if (n >= 50) return ["51,200", "201,10000"];
     if (n >= 1) return ["1,50"];
   }
 
@@ -369,13 +366,13 @@ export function inferEmployeeRangesFromText(text: string): string[] {
     q.includes("mid-market") ||
     q.includes("mid market")
   ) {
-    return q.includes("pequena") || q.includes("pequenas") ? ["1,50"] : ["51,500"];
+    return q.includes("pequena") || q.includes("pequenas") ? ["1,50"] : ["51,200"];
   }
   if (q.includes("pequena") || q.includes("pequenas") || q.includes("pyme") || q.includes("startup")) {
     return ["1,50"];
   }
   if (q.includes("grande") || q.includes("grandes") || q.includes("enterprise") || q.includes("corporativ")) {
-    return ["501,5000"];
+    return ["201,10000"];
   }
   return [];
 }

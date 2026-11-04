@@ -9,7 +9,12 @@ import { ApolloSearchFilters } from "@/components/ApolloSearchFilters";
 import { SmartSearchPanel } from "@/components/SmartSearchPanel";
 import { PageHeading } from "@/components/HelpTip";
 import { ActionBanner, FeedbackAnchor } from "@/components/ui";
-import { activeSearchIntent, useProspeccionSession } from "@/contexts/prospeccion-session";
+import {
+  activeSearchContactType,
+  activeSearchIntent,
+  activeSearchSolutionNames,
+  useProspeccionSession,
+} from "@/contexts/prospeccion-session";
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { explainEmptySearchMessage } from "@/lib/apollo-filters";
 import { parseApiResponse } from "@/lib/parse-api-response";
@@ -25,8 +30,11 @@ type SearchParams = {
   page?: number;
 };
 
-export default function ProspeccionPage() {
+export type ProspeccionWorkspaceMode = "manual" | "intelligent";
+
+export function ProspeccionWorkspace({ mode = "manual" }: { mode?: ProspeccionWorkspaceMode }) {
   const router = useRouter();
+  const isIntelligent = mode === "intelligent";
   const session = useProspeccionSession();
   const {
     country,
@@ -218,15 +226,23 @@ export default function ProspeccionPage() {
   }
 
   function rememberIntent(result: SmartSearchResult) {
-    const text = formatInsightForSource(result.insight);
-    setSearchIntent(text ? { text, titles: [...result.filters.titles] } : null);
-  }
-
-  /** «Ajustar filtros»: pasa los criterios al panel sin gastar créditos. */
-  function handleSmartApply(result: SmartSearchResult) {
-    applyInterpretedFilters(result.filters);
-    rememberIntent(result);
-    clear();
+    const solutionNames = result.selected_solutions.map((solution) => solution.name).filter(Boolean);
+    const text = [
+      formatInsightForSource(result.insight),
+      solutionNames.length ? `Solución activada: ${solutionNames.join(", ")}` : null,
+    ]
+      .filter(Boolean)
+      .join(" | ");
+    setSearchIntent(
+      text
+        ? {
+            text,
+            titles: [...result.filters.titles],
+            solutionNames,
+            contactType: result.insight.buying_role ?? "Usuario",
+          }
+        : null
+    );
   }
 
   /** «Buscar en Apollo»: el vendedor ya confirmó los criterios interpretados. */
@@ -254,6 +270,8 @@ export default function ProspeccionPage() {
     }
 
     const intent = activeSearchIntent(searchIntent, titles);
+    const solucionOrigen = activeSearchSolutionNames(searchIntent, titles).join(", ") || null;
+    const tipoContacto = activeSearchContactType(searchIntent, titles) ?? "Usuario";
     const fuente = [country, company.trim() || null, titles.join(", "), keyword || null, seniority || null, intent]
       .filter(Boolean)
       .join(" | ");
@@ -265,7 +283,12 @@ export default function ProspeccionPage() {
       const res = await fetch("/api/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leads: toSave, fuente }),
+        body: JSON.stringify({
+          leads: toSave,
+          fuente,
+          solucion_origen: solucionOrigen,
+          tipo_contacto: tipoContacto,
+        }),
       });
       const data = await res.json();
       if (data.error) {
@@ -337,15 +360,21 @@ export default function ProspeccionPage() {
   return (
     <div className="flex w-full flex-1">
       <aside className="filter-sidebar hidden w-full max-w-[400px] shrink-0 border-r lg:block lg:w-[min(40%,400px)]">
-        <SmartSearchPanel disabled={busy} onApply={handleSmartApply} onSearch={handleSmartSearch} />
-        <ApolloSearchFilters {...filterProps} />
+        {isIntelligent ? (
+          <SmartSearchPanel disabled={busy} onSearch={handleSmartSearch} />
+        ) : null}
+        {!isIntelligent ? <ApolloSearchFilters {...filterProps} /> : null}
       </aside>
 
       <main className="min-w-0 flex-1 p-5 lg:p-6">
         <div className="page-header flex flex-wrap items-center justify-between gap-3">
           <PageHeading
-            title="Prospección"
-            help="Busca en Apollo por país, empresa y cargo, o dicta la búsqueda. Solo se muestran contactos con email y teléfono. Para completar un listado de personas usa Enriquecer. Guardar no vuelve a cobrar: Apollo cobra al revelar esos datos. Cada lote nuevo gasta créditos de tu cuenta."
+            title={isIntelligent ? "Búsqueda inteligente" : "Prospección"}
+            help={
+              isIntelligent
+                ? "Activa una solución de tu Perfil del vendedor, revisa las cuentas de una base cargada y confirma los criterios antes de consultar Apollo. Solo se muestran contactos con email y teléfono."
+                : "Busca manualmente en Apollo por país, empresa y cargo. Solo se muestran contactos con email y teléfono. Para completar un listado de personas usa Enriquecer. Guardar no vuelve a cobrar: Apollo cobra al revelar esos datos."
+            }
           />
           {meta?.credits_consumed != null && status !== "loading" && (
             <span className="ui-badge ui-badge--accent">
@@ -360,8 +389,10 @@ export default function ProspeccionPage() {
         </div>
 
         <div className="mt-4 lg:hidden">
-          <SmartSearchPanel disabled={busy} onApply={handleSmartApply} onSearch={handleSmartSearch} />
-          <ApolloSearchFilters {...filterProps} />
+          {isIntelligent ? (
+            <SmartSearchPanel disabled={busy} onSearch={handleSmartSearch} />
+          ) : null}
+          {!isIntelligent ? <ApolloSearchFilters {...filterProps} /> : null}
         </div>
 
         {feedback && (
@@ -386,7 +417,11 @@ export default function ProspeccionPage() {
           <div className="empty-state mt-6">
             <Search className="empty-state__icon" size={48} strokeWidth={1.5} aria-hidden />
             <p className="empty-state__title">Sin resultados todavía</p>
-            <p className="empty-state__desc">Ajusta los filtros y ejecuta la búsqueda.</p>
+            <p className="empty-state__desc">
+              {isIntelligent
+                ? "Activa una solución, interpreta los criterios y confirma la consulta."
+                : "Ajusta los filtros y ejecuta la búsqueda."}
+            </p>
           </div>
         )}
 
@@ -490,4 +525,8 @@ export default function ProspeccionPage() {
       </main>
     </div>
   );
+}
+
+export default function ProspeccionPage() {
+  return <ProspeccionWorkspace mode="manual" />;
 }

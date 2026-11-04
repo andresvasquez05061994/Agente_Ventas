@@ -47,6 +47,7 @@ export async function POST(req: NextRequest) {
         email: lead ? lead.email : str(body.email),
         notas: lead ? lead.notas : str(body.notas),
         fuente: lead ? lead.fuente_busqueda : str(body.fuente),
+        solucion_origen: lead ? lead.solucion_origen : str(body.solucion_origen),
         linkedin_url: lead ? lead.linkedin_url : str(body.linkedin_url),
         lead_id: lead ? Number(lead.id) : null,
         lead_status: lead?.lead_status ?? null,

@@ -19,8 +19,8 @@ export type OutreachInput = ProspectInput;
 export const WHATSAPP_MAX_CHARS = 450;
 export const WHATSAPP_FOLLOW_UP_MAX_CHARS = 220;
 
-/** Base de la evidencia usada: documentos cargados (hechos) o catálogo en código (referencia). */
-export type KnowledgeBasis = "documentos" | "referencia interna";
+/** Base de la oferta usada para el borrador. */
+export type KnowledgeBasis = "documentos" | "perfil confirmado";
 
 export type OutreachPersonalization = {
   company_insight: string;
@@ -135,10 +135,8 @@ export function outreachPlainText(result: OutreachResult): string {
 }
 
 function knowledgeBasis(context: ProspectContext): KnowledgeBasis {
-  const fromDocs =
-    context.knowledge_from_documents ||
-    context.recommended_solutions.some((s) => solutionEvidence(s) === "documento");
-  return fromDocs ? "documentos" : "referencia interna";
+  const fromDocs = context.recommended_solutions.some((s) => solutionEvidence(s) === "documento");
+  return fromDocs ? "documentos" : "perfil confirmado";
 }
 
 /** Cómo puede citarse una métrica según su evidencia (hecho vs hipótesis). */
@@ -153,23 +151,17 @@ function metricLine(solution: ProspectContext["recommended_solutions"][number] |
 
 function commercialRules(context: ProspectContext): string {
   const firm = context.company_profile;
-  const demandRule = context.knowledge_from_documents
-    ? "- Ofrece SOLO servicios del portafolio activo y de los extractos de documentos. No inventes productos ni casos de clientes."
-    : "- NO mencionar «Predicción de Demanda» salvo que aparezca como solución principal o complementaria en el portafolio recomendado para este prospecto.";
+  const offerRule = "- Ofrece SOLO servicios confirmados en el Perfil del vendedor y listados en el portafolio recomendado. No inventes productos, casos de clientes ni capacidades.";
   const personaRule = context.buyer_persona?.value_for_client
     ? `- Este contacto encaja con el buyer persona «${context.buyer_persona.name}». El mensaje debe responder qué genera valor para él: ${context.buyer_persona.value_for_client}`
     : "- Conecta el dolor detectado (cargo, sector, web, intereses) con la solución principal recomendada.";
-  const erpRule = context.knowledge_from_documents
-    ? personaRule
-    : `${personaRule}
-- Si el contexto habla de ERP, software a medida, procesos o automatización → prioriza Centro de Automatización, no predicción de demanda.`;
   return `Reglas comerciales (obligatorias):
 - Español profesional, directo y cercano. Sin hype ni promesas irreales.
 - Personaliza con cargo, empresa, país y AL MENOS UNA observación concreta del sitio web, notas o contexto de prospección.
 - El eje del mensaje DEBE ser la SOLUCIÓN PRINCIPAL indicada en el portafolio recomendado (primera de la lista). No cambies de solución por iniciativa propia.
-${demandRule}
-- Menciona 1-2 soluciones SOLO de la lista recomendada. Las cifras marcadas como HECHOS pueden afirmarse citando su fuente; las de REFERENCIA INTERNA van en condicional u orientativo («en proyectos similares hemos visto hasta…»), nunca como garantía.
-${erpRule}
+- Menciona 1-2 soluciones SOLO de la lista recomendada. Las cifras marcadas como HECHOS pueden afirmarse citando su fuente; las cifras sin documento van en condicional u orientativo («en proyectos similares hemos visto hasta…»), nunca como garantía.
+${offerRule}
+${personaRule}
 - Si no hay datos web, sé específico con el rol, la empresa y el contexto de prospección; evita frases genéricas.
 - No inventes noticias, financieros ni proyectos internos del prospecto. No inventes respuestas previas del prospecto.
 ${approachRules(context.history)}
@@ -580,8 +572,8 @@ export async function generateOutreachMessage(
 
   const model = getMistralModel();
   const docsHint = context.knowledge_from_documents
-    ? "Usa la solución principal del portafolio activo y los documentos del proyecto. No inventes servicios."
-    : "Usa la solución principal del portafolio recomendado como eje. No ofrezcas Predicción de Demanda si no está en la lista recomendada.";
+    ? "Usa la solución principal confirmada en el Perfil del vendedor y los documentos de referencia. No inventes servicios."
+    : "Usa la solución principal confirmada en el Perfil del vendedor como eje. No ofrezcas servicios fuera de la lista recomendada.";
 
   if (channel === "email") {
     const content = await callMistral(buildEmailPrompt(input, context), `Escribes correos B2B. ${docsHint}`);

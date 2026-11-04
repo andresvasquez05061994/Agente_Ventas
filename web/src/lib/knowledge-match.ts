@@ -1,12 +1,9 @@
 import {
-  IAC_SOLUTIONS,
-  rankSolutionsForProspect,
   type IACSolution,
   type SolutionMatch,
 } from "./iac-portfolio-knowledge";
 import { ensureDb } from "./db";
 import {
-  collectDocumentServices,
   documentSourceLabel,
   getKnowledgeProfile,
   listActiveBuyerPersonas,
@@ -16,6 +13,7 @@ import {
   type KnowledgeDocumentRecord,
   type KnowledgeProfile,
 } from "./knowledge-store";
+import { listActiveSellerSolutions, sellerSolutionToIacSolution } from "./seller-solutions";
 
 const EXCERPT_BUDGET = 4500;
 const CHUNK_SIZE = 700;
@@ -138,7 +136,7 @@ export function rankCatalogForProspect(
   cargo: string | null | undefined,
   hints: string
 ): SolutionMatch[] {
-  if (!catalog.length) return rankSolutionsForProspect(cargo, hints);
+  if (!catalog.length) return [];
   const combined = `${cargo ?? ""} ${hints}`;
   const ranked = catalog
     .map((solution) => scoreCatalogSolution(solution, combined))
@@ -186,43 +184,31 @@ export type LiveKnowledge = {
   documents: KnowledgeDocumentRecord[];
   services: IACSolution[];
   personas: BuyerPersona[];
+  /** La búsqueda y los borradores solo pueden usar esta oferta confirmada. */
+  hasConfirmedSolutions: boolean;
   fromDocuments: boolean;
 };
 
 export async function loadLiveKnowledge(ownerId: number): Promise<LiveKnowledge> {
   await ensureDb();
   const profile = await getKnowledgeProfile(ownerId);
-  const [documents, personas] = await Promise.all([
+  const [documents, personas, sellerSolutions] = await Promise.all([
     listActiveKnowledgeDocuments(ownerId),
     listActiveBuyerPersonas(ownerId),
+    listActiveSellerSolutions(ownerId),
   ]);
-  const services = collectDocumentServices(documents);
+  const services = sellerSolutions.map(sellerSolutionToIacSolution);
   return {
     profile,
     company: profileToCompanyShape(profile),
     documents,
     services,
     personas,
+    hasConfirmedSolutions: services.length > 0,
     fromDocuments: documents.length > 0,
   };
 }
 
 export function solutionsForKnowledge(live: LiveKnowledge): IACSolution[] {
-  if (!live.fromDocuments) return IAC_SOLUTIONS;
-  if (live.services.length) return live.services;
-  const first = live.documents[0];
-  const excerpt = first?.extracted_text.slice(0, 500) ?? live.profile.notes;
-  return [
-    {
-      id: "project-knowledge",
-      name: live.company.tagline || "Oferta del proyecto",
-      summary: excerpt || "Servicios descritos en los documentos de conocimiento.",
-      metrics: [],
-      fit_roles: [],
-      industries: live.company.sectors.map((s) => s.toLowerCase()),
-      talking_points: live.profile.notes ? [live.profile.notes.slice(0, 180)] : [],
-      evidence: "documento",
-      source: first ? documentSourceLabel(first) : "documentos del proyecto",
-    },
-  ];
+  return live.services;
 }

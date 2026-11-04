@@ -53,6 +53,29 @@ export function etapaOf(value: string | null | undefined): EtapaComercial {
 
 export type MessageChannel = "call" | "email" | "whatsapp";
 
+/**
+ * Rol único y visible del contacto dentro del comité de compra. El vendedor
+ * puede corregir la propuesta de la plataforma desde el Portafolio.
+ */
+export type ContactBuyingRole =
+  | "Comprador económico"
+  | "Dueño funcional"
+  | "Patrocinador técnico"
+  | "Usuario";
+
+export const CONTACT_BUYING_ROLES: ContactBuyingRole[] = [
+  "Comprador económico",
+  "Dueño funcional",
+  "Patrocinador técnico",
+  "Usuario",
+];
+
+export const DEFAULT_CONTACT_BUYING_ROLE: ContactBuyingRole = "Usuario";
+
+export function isContactBuyingRole(value: unknown): value is ContactBuyingRole {
+  return typeof value === "string" && (CONTACT_BUYING_ROLES as string[]).includes(value);
+}
+
 export const MESSAGE_CHANNEL_LABELS: Record<MessageChannel, string> = {
   call: "Llamada",
   email: "Correo",
@@ -99,6 +122,8 @@ export interface Lead {
   lead_status: LeadStatus;
   resultado_gestion?: GestionResultado | null;
   etapa_comercial?: EtapaComercial | string | null;
+  tipo_contacto?: ContactBuyingRole | string | null;
+  solucion_origen?: string | null;
   whatsapp_status: WhatsAppStatus | string;
   mistral_conversation_id?: string | null;
   notas: string | null;

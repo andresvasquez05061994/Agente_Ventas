@@ -50,10 +50,10 @@ export async function POST(req: NextRequest) {
       linkedin_url?: string | null;
     }>;
 
-    const invalid = leads.filter((l) => !l.telefono?.trim());
+    const invalid = leads.filter((l) => !l.telefono?.trim() || !l.email?.trim());
     if (invalid.length) {
       return NextResponse.json(
-        { error: "Solo se pueden guardar contactos con teléfono." },
+        { error: "Solo se pueden guardar contactos con email y teléfono." },
         { status: 400 }
       );
     }
@@ -69,7 +69,14 @@ export async function POST(req: NextRequest) {
       linkedin_url: l.linkedin_url ?? null,
     }));
 
-    const result = await saveLeads(normalized, body.fuente ?? "Apollo", actor.id);
+    const solucionOrigen = String(body.solucion_origen ?? "").trim().slice(0, 320) || null;
+    const result = await saveLeads(
+      normalized,
+      body.fuente ?? "Apollo",
+      actor.id,
+      solucionOrigen,
+      body.tipo_contacto
+    );
     return NextResponse.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error al guardar leads";

@@ -67,8 +67,8 @@ export default function ResumenPage() {
     <main className="app-content flex-1 py-6 lg:py-8">
       <header className="page-header">
         <PageHeading
-          title="Resumen"
-          help="Actividad de tu portafolio y créditos Apollo de este mes. Cada cuenta tiene su propio tope, que vuelve a 2.500 al empezar el mes."
+          title="Vista 360"
+          help="Actividad del portafolio, pipeline y consumo global de Apollo del mes. El tope mensual compartido se reinicia al iniciar un nuevo mes UTC."
         />
       </header>
 
@@ -195,7 +195,7 @@ export default function ResumenPage() {
           <SectionBlock
             label="Apollo"
             title="Consumo de créditos"
-            description="Cada mes empieza en 2.500. Configuración puede subirlo solo hasta el cierre de este mes."
+            description="El presupuesto es global para la plataforma. Solo administración puede ajustarlo durante el mes."
           >
             <KpiGrid className="kpi-grid--4">
               <KpiCard
@@ -242,17 +242,17 @@ export default function ResumenPage() {
               />
             </KpiGrid>
             <p className="text-caption mt-3">
-              <Link href="/configuracion" className="btn-link">
-                Ajustar tope en Configuración
+              <Link href="/busqueda-inteligente" className="btn-link">
+                Abrir Búsqueda inteligente
               </Link>
             </p>
           </SectionBlock>
 
           {stats.total === 0 ? (
             <EmptyState
-              message="Tu portafolio está vacío. Comienza prospectando en la pestaña de búsqueda."
-              href="/prospeccion"
-              cta="Ir a Prospección"
+              message="Tu portafolio está vacío. Activa una solución y empieza una búsqueda inteligente."
+              href="/busqueda-inteligente"
+              cta="Ir a Búsqueda inteligente"
             />
           ) : (
             <p className="text-caption flex items-center gap-1">

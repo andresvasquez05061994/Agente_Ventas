@@ -10,7 +10,15 @@ import {
   normalizeEmployeeRanges,
   normalizeJobTitles,
 } from "./apollo-filters";
-import { rankSolutionsForProspect } from "./iac-portfolio-knowledge";
+import type { ContactBuyingRole } from "./types";
+export type ActivatedSolution = {
+  id: number;
+  name: string;
+  summary: string;
+  fit_roles: string[];
+  industries: string[];
+  talking_points: string[];
+};
 
 export type SmartSearchFilters = {
   country: string;
@@ -24,10 +32,15 @@ export type SmartSearchFilters = {
 
 const MAX_SMART_TITLES = 6;
 
-/** Rol en la decisión de compra que se infiere de la consulta (modelo clásico de centro de compras). */
-export type BuyingRole = "Decisor" | "Influenciador" | "Usuario" | "Comprador técnico";
+/** Tipo único de contacto que se infiere de la consulta. */
+export type BuyingRole = ContactBuyingRole;
 
-export const BUYING_ROLES: BuyingRole[] = ["Decisor", "Influenciador", "Usuario", "Comprador técnico"];
+export const BUYING_ROLES: BuyingRole[] = [
+  "Comprador económico",
+  "Dueño funcional",
+  "Patrocinador técnico",
+  "Usuario",
+];
 
 export function isBuyingRole(value: unknown): value is BuyingRole {
   return typeof value === "string" && (BUYING_ROLES as string[]).includes(value);
@@ -53,6 +66,8 @@ export type SmartSearchResult = {
   source: "mistral" | "rules";
   model?: string;
   insight: SmartSearchInsight;
+  /** Oferta que el vendedor activó antes de interpretar la búsqueda. */
+  selected_solutions: Array<{ id: number; name: string }>;
 };
 
 const DECISION_WORDS = /decisor|decide|decisi[oó]n|toma(n)? (la )?decisi|aprueba|presupuesto|sponsor/;
@@ -73,22 +88,25 @@ export function inferBuyingRole(
   const joined = titles.join(" | ").toLowerCase();
 
   if (DECISION_WORDS.test(q)) {
-    return { role: "Decisor", reason: "La consulta pide a quien decide o aprueba." };
+    return { role: "Comprador económico", reason: "La consulta pide a quien decide o aprueba." };
   }
   if (seniority === "c_suite" || seniority === "vp") {
-    return { role: "Decisor", reason: `Nivel ${seniority === "vp" ? "VP" : "C-Suite"} en los filtros.` };
+    return {
+      role: "Comprador económico",
+      reason: `Nivel ${seniority === "vp" ? "VP" : "C-Suite"} en los filtros.`,
+    };
   }
   if (TECH_BUYER_TITLES.test(joined) && /implement|integraci|tecnolog|sistema|erp|software|\bia\b|inteligencia artificial|datos|data/.test(q)) {
     return {
-      role: "Comprador técnico",
+      role: "Patrocinador técnico",
       reason: "Cargos de tecnología para evaluar una implementación.",
     };
   }
   if (DECISOR_TITLES.test(joined)) {
-    return { role: "Decisor", reason: "Cargos de dirección general o financiera." };
+    return { role: "Comprador económico", reason: "Cargos de dirección general o financiera." };
   }
   if (INFLUENCER_TITLES.test(joined) || seniority === "director" || seniority === "head") {
-    return { role: "Influenciador", reason: "Direcciones de área: recomiendan y patrocinan internamente." };
+    return { role: "Dueño funcional", reason: "Direcciones de área que operan y patrocinan internamente." };
   }
   if (USER_TITLES.test(joined) || seniority === "manager") {
     return { role: "Usuario", reason: "Gerencias y líderes operativos que usarían la solución." };
@@ -96,11 +114,65 @@ export function inferBuyingRole(
   return { role: null, reason: "Sin señal clara de rol de compra en la consulta." };
 }
 
-/** Construye la lectura comercial con el catálogo IAC (determinista, sin IA). */
+function foldSearchText(value: string): string {
+  return value
+    .toLocaleLowerCase("es")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function solutionTerms(value: string, minLength = 4): string[] {
+  return foldSearchText(value)
+    .split(" ")
+    .filter((part) => part.length >= minLength)
+    .filter((part, index, all) => all.indexOf(part) === index)
+    .slice(0, 12);
+}
+
+function rankActivatedSolutions(
+  solutions: ActivatedSolution[],
+  filters: SmartSearchFilters,
+  userQuery: string
+) {
+  const haystack = foldSearchText(`${filters.titles.join(" ")} ${userQuery}`);
+  return solutions
+    .map((solution) => {
+      let score = 0;
+      const reasons = new Set<string>();
+      for (const industry of solution.industries) {
+        const terms = solutionTerms(industry, 3);
+        if (terms.length && terms.some((term) => haystack.includes(term))) {
+          score += 7;
+          reasons.add(`sector ${industry}`);
+        }
+      }
+      for (const role of solution.fit_roles) {
+        const terms = solutionTerms(role, 3);
+        if (terms.length && terms.some((term) => haystack.includes(term))) {
+          score += 5;
+          reasons.add(`cargo ${role}`);
+        }
+      }
+      for (const term of solutionTerms(`${solution.name} ${solution.summary}`, 5)) {
+        if (haystack.includes(term)) {
+          score += 2;
+          reasons.add(`señal ${term}`);
+        }
+      }
+      return { solution, score, reasons: [...reasons] };
+    })
+    .sort((left, right) => right.score - left.score || left.solution.name.localeCompare(right.solution.name, "es"));
+}
+
+/** Construye la lectura comercial usando únicamente la oferta activada por el vendedor. */
 export function buildSmartInsight(
   filters: SmartSearchFilters,
   userQuery: string,
-  aiBuyingRole?: unknown
+  aiBuyingRole?: unknown,
+  activatedSolutions: ActivatedSolution[] = []
 ): SmartSearchInsight {
   const inferred = inferBuyingRole(filters.titles, filters.seniority, userQuery);
   const buying_role = isBuyingRole(aiBuyingRole) ? aiBuyingRole : inferred.role;
@@ -108,28 +180,29 @@ export function buildSmartInsight(
     ? "Interpretado por la IA a partir de la consulta."
     : inferred.reason;
 
-  const ranked = rankSolutionsForProspect(filters.titles.join(" "), userQuery);
+  const ranked = rankActivatedSolutions(activatedSolutions, filters, userQuery);
   const top = ranked[0];
-  const hasSignal = Boolean(top && top.score > 1);
-  const need_signals = hasSignal
-    ? top!.reasons.filter((reason) => !reason.startsWith("coincidencia por cargo"))
-    : [];
+  const hasSignal = Boolean(top && top.score > 0);
+  const need_signals = hasSignal ? top!.reasons : [];
+  const selectedFallback = activatedSolutions[0];
 
   return {
     buying_role,
     buying_role_reason,
     need_signals,
-    suggested_solution: hasSignal ? top!.solution.name : null,
+    suggested_solution: hasSignal ? top!.solution.name : selectedFallback?.name ?? null,
     suggested_solution_reason: hasSignal
       ? `Coincide con: ${need_signals.join(", ") || "perfil del cargo"}.`
-      : "La consulta no menciona una necesidad concreta; la solución se decide al conocer al cliente.",
+      : selectedFallback
+        ? "Es la solución activada por el vendedor; revisa los criterios antes de buscar."
+        : "No hay una solución activada.",
   };
 }
 
 /** Línea compacta para guardar junto al contacto (fuente de búsqueda) y alimentar el Mensaje IA. */
 export function formatInsightForSource(insight: SmartSearchInsight): string {
   const parts: string[] = [];
-  if (insight.buying_role) parts.push(`Rol de compra: ${insight.buying_role}`);
+  if (insight.buying_role) parts.push(`Tipo de contacto: ${insight.buying_role}`);
   if (insight.need_signals.length) parts.push(`Señal: ${insight.need_signals.join(", ")}`);
   if (insight.suggested_solution) parts.push(`Solución sugerida: ${insight.suggested_solution}`);
   return parts.join(" | ");
@@ -611,7 +684,8 @@ export function finalizeSmartFilters(
 function buildFiltersFromParsed(
   parsed: Record<string, unknown>,
   userQuery: string,
-  model: string
+  model: string,
+  activatedSolutions: ActivatedSolution[]
 ): SmartSearchResult {
   const rawTitles = Array.isArray(parsed.titles)
     ? parsed.titles.map(String)
@@ -652,16 +726,34 @@ function buildFiltersFromParsed(
     ? `Mistral IA: ${aiSummary}${sizeLabel ? ` · Tamaño: ${sizeLabel}` : ""} · ${filters.perPage} resultados`
     : `Mistral IA · ${filters.country} · ${filters.titles.join(", ")}${filters.company ? ` · ${filters.company}` : ""}${sizeLabel ? ` · ${sizeLabel}` : ""} · ${filters.perPage} resultados`;
 
-  const insight = buildSmartInsight(filters, userQuery, parsed.buying_role);
+  const insight = buildSmartInsight(filters, userQuery, parsed.buying_role, activatedSolutions);
   const aiNeed = String(parsed.need_signal ?? "").trim();
   if (aiNeed && !insight.need_signals.length) {
     insight.need_signals = [aiNeed.slice(0, 80)];
   }
 
-  return { filters, summary, source: "mistral", model, insight };
+  return {
+    filters,
+    summary,
+    source: "mistral",
+    model,
+    insight,
+    selected_solutions: activatedSolutions.map((solution) => ({ id: solution.id, name: solution.name })),
+  };
 }
 
-export function buildSmartSearchPrompt(userQuery: string): string {
+export function buildSmartSearchPrompt(
+  userQuery: string,
+  activatedSolutions: ActivatedSolution[] = []
+): string {
+  const activatedOffer = activatedSolutions.length
+    ? activatedSolutions
+        .map(
+          (solution) =>
+            `- ${solution.name}: ${solution.summary || "sin resumen"}. Cargos: ${solution.fit_roles.join(", ") || "sin definir"}. Sectores: ${solution.industries.join(", ") || "sin definir"}.`
+        )
+        .join("\n")
+    : "- No hay una solución activada.";
   return `Eres el asistente de prospección B2B de IAC SAS (Colombia/LATAM). El usuario describe su persona objetivo en español.
 Analiza la intención y devuelve SOLO un JSON válido (sin markdown) con esta forma exacta:
 {
@@ -673,17 +765,18 @@ Analiza la intención y devuelve SOLO un JSON válido (sin markdown) con esta fo
   "employee_ranges": ["uno o más rangos value de employeeRanges, o array vacío"],
   "per_page": número entre 5 y 25 (usa 5 salvo que el usuario pida otra cantidad explícita),
   "summary": "frase breve en español explicando qué buscará Apollo",
-  "buying_role": "Decisor | Influenciador | Usuario | Comprador técnico | cadena vacía si no se deduce",
+  "buying_role": "Comprador económico | Dueño funcional | Patrocinador técnico | Usuario | cadena vacía si no se deduce",
   "need_signal": "necesidad o dolor que el usuario menciona, en máx 8 palabras, o cadena vacía"
 }
 
 Reglas estrictas:
+- La oferta activada fue confirmada por el vendedor. Úsala solo para interpretar cargos, sectores y señales; no inventes otra solución.
 - buying_role y need_signal describen la consulta del usuario, no inventes necesidades que no mencione.
 - country, keyword, seniority y employee_ranges[].value deben ser valores "value" EXACTOS de las listas (copia literal).
 - Si el usuario pide un país específico (ej. Colombia), country DEBE ser ese país. Nunca otro.
 - employee_ranges: SOLO si el usuario menciona explícitamente tamaño (pequeña, mediana, grande, pyme, empleados, "más de N"). Si no lo menciona → [].
-- "más de 100 empleados" / "empresas de más de 100" → employee_ranges: ["101,10000"]. Más de 200 → ["201,10000"]. Más de 500 → ["501,5000"].
-- Si menciona "empresas medianas" → employee_ranges: ["51,500"]. Pequeñas → ["1,50"]. Grandes → ["501,5000"].
+- "más de 100 empleados" / "empresas de más de 100" → employee_ranges: ["101,10000"]. Más de 200 → ["201,10000"].
+- Si menciona "empresas medianas" → employee_ranges: ["51,200"]. Pequeñas → ["1,50"]. Grandes → ["201,10000"].
 - seniority: SOLO si pide nivel explícito (director, gerente, C-suite, VP). "Líder de X" NO implica seniority; se traduce a cargos titles.
 - Floricultura, agro, exportación agrícola → keyword: "agriculture".
 - IA, proyectos de IA, transformación digital, software → keyword: "software" salvo otra industria clara.
@@ -700,6 +793,9 @@ Consulta: "Líder de proyectos o líder de transformación digital o líderes de
 
 Listas permitidas:
 ${JSON.stringify(FILTER_CATALOG, null, 2)}
+
+Oferta activada por el vendedor:
+${activatedOffer}
 
 Consulta del usuario:
 ${userQuery}`;
@@ -814,14 +910,20 @@ export async function verifyMistralHealth(): Promise<MistralHealth> {
   }
 }
 
-async function interpretWithMistral(userQuery: string): Promise<SmartSearchResult> {
+async function interpretWithMistral(
+  userQuery: string,
+  activatedSolutions: ActivatedSolution[]
+): Promise<SmartSearchResult> {
   const model = getMistralModel();
-  const content = await callMistralChat(buildSmartSearchPrompt(userQuery));
+  const content = await callMistralChat(buildSmartSearchPrompt(userQuery, activatedSolutions));
   const parsed = parseMistralJsonContent(content);
-  return buildFiltersFromParsed(parsed, userQuery, model);
+  return buildFiltersFromParsed(parsed, userQuery, model, activatedSolutions);
 }
 
-function ruleBasedInterpret(userQuery: string): SmartSearchResult {
+function ruleBasedInterpret(
+  userQuery: string,
+  activatedSolutions: ActivatedSolution[]
+): SmartSearchResult {
   const q = userQuery.toLowerCase();
   let country = DEFAULT_SEARCH.country;
   let keyword = "";
@@ -905,11 +1007,15 @@ function ruleBasedInterpret(userQuery: string): SmartSearchResult {
     filters,
     summary: `Modo básico (sin IA): ${parts.join(" · ")}.`,
     source: "rules",
-    insight: buildSmartInsight(filters, userQuery),
+    insight: buildSmartInsight(filters, userQuery, undefined, activatedSolutions),
+    selected_solutions: activatedSolutions.map((solution) => ({ id: solution.id, name: solution.name })),
   };
 }
 
-export async function interpretSmartSearch(userQuery: string): Promise<SmartSearchResult> {
+export async function interpretSmartSearch(
+  userQuery: string,
+  activatedSolutions: ActivatedSolution[] = []
+): Promise<SmartSearchResult> {
   const trimmed = userQuery.trim();
   if (trimmed.length < 4) {
     throw new SmartSearchError("Describe tu persona objetivo con al menos 4 caracteres.");
@@ -917,12 +1023,15 @@ export async function interpretSmartSearch(userQuery: string): Promise<SmartSear
   if (trimmed.length > 800) {
     throw new SmartSearchError("La consulta es demasiado larga (máx. 800 caracteres).");
   }
-
-  if (isMistralConfigured()) {
-    return interpretWithMistral(trimmed);
+  if (!activatedSolutions.length) {
+    throw new SmartSearchError("Selecciona al menos un producto o servicio confirmado antes de interpretar.");
   }
 
-  return ruleBasedInterpret(trimmed);
+  if (isMistralConfigured()) {
+    return interpretWithMistral(trimmed, activatedSolutions);
+  }
+
+  return ruleBasedInterpret(trimmed, activatedSolutions);
 }
 
 export function normalizeSmartFilters(

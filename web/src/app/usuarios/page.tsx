@@ -103,7 +103,7 @@ export default function UsuariosPage() {
       <header className="page-header">
         <PageHeading
           title="Usuarios"
-          help="Aprueba o rechaza solicitudes y da de baja el acceso. Los datos se conservan. Cada usuario aprobado tiene su propio tope de 2.500 créditos Apollo al mes. Aquí ves sus contactos y el consumo del mes."
+          help="Aprueba o rechaza solicitudes y da de baja el acceso. Los datos se conservan. Apollo usa un tope global mensual de la plataforma. Aquí ves sus contactos y el consumo del mes."
         />
       </header>
 

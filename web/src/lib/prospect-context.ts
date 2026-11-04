@@ -3,7 +3,6 @@ import {
   formatMatchExplanation,
   formatSolutionNames,
   IAC_COMPANY_PROFILE,
-  rankSolutionsForProspect,
   type IACSolution,
 } from "./iac-portfolio-knowledge";
 import type { BuyerPersona } from "./knowledge-store";
@@ -25,6 +24,8 @@ export type ProspectInput = {
   email?: string | null;
   notas?: string | null;
   fuente?: string | null;
+  /** Producto(s) o servicio(s) activados cuando el contacto entró al portafolio. */
+  solucion_origen?: string | null;
   linkedin_url?: string | null;
   /** Si viene del portafolio: permite cargar historial y etapa reales desde la base. */
   lead_id?: number | null;
@@ -266,19 +267,31 @@ function guessDomainFromEmail(email: string | null | undefined): string | null {
   return normalizeDomain(domain);
 }
 
+function normalizedNames(value: string | null | undefined): string[] {
+  return String(value ?? "")
+    .split(",")
+    .map((name) => name.trim().toLocaleLowerCase("es"))
+    .filter(Boolean);
+}
+
 export async function gatherProspectContext(
   input: ProspectInput,
   ownerId: number
 ): Promise<ProspectContext> {
   const [live, history] = await Promise.all([loadLiveKnowledge(ownerId), loadHistory(input, ownerId)]);
-  const intel_sources: string[] = live.fromDocuments
-    ? ["documentos del proyecto"]
-    : ["catálogo IAC (referencia interna)"];
+  const catalog = solutionsForKnowledge(live);
+  if (!live.hasConfirmedSolutions || !catalog.length) {
+    throw new Error(
+      "No hay productos o servicios confirmados. Agrégalos en Perfil del vendedor antes de generar un borrador."
+    );
+  }
+  const intel_sources: string[] = ["perfil del vendedor"];
+  if (live.fromDocuments) intel_sources.push("documentos de referencia");
   if (history.generated.length || history.whatsapp.length) intel_sources.push("historial del contacto");
   let company_domain: string | null = null;
   let company_web_title: string | null = null;
   let company_web_summary: string | null = null;
-  let hints = [input.cargo, input.empresa, input.notas, input.fuente, input.pais]
+  let hints = [input.cargo, input.empresa, input.notas, input.fuente, input.solucion_origen, input.pais]
     .filter(Boolean)
     .join(" ");
 
@@ -317,13 +330,22 @@ export async function gatherProspectContext(
     intel_sources.push(`buyer persona: ${buyer_persona.name}`);
     query = `${query} ${buyer_persona.role} ${buyer_persona.sector} ${buyer_persona.characteristics} ${buyer_persona.value_for_client}`;
   }
-  const catalog = solutionsForKnowledge(live);
-  const ranked = live.fromDocuments
-    ? rankCatalogForProspect(catalog, input.cargo, query)
-    : rankSolutionsForProspect(input.cargo, query);
+  const ranked = rankCatalogForProspect(catalog, input.cargo, query);
   const matched = ranked.filter((m) => m.score > 0).slice(0, 2).map((m) => m.solution);
-  const recommended_solutions = matched.length ? matched : ranked[0] ? [ranked[0].solution] : [];
-  const solution_match_explanation = formatMatchExplanation(ranked);
+  const originNames = normalizedNames(input.solucion_origen);
+  const originSolutions = catalog.filter((solution) =>
+    originNames.some((name) => name === solution.name.toLocaleLowerCase("es"))
+  );
+  const recommended_solutions = originSolutions.length
+    ? originSolutions.slice(0, 2)
+    : matched.length
+      ? matched
+      : ranked[0]
+        ? [ranked[0].solution]
+        : [];
+  const solution_match_explanation = originSolutions.length
+    ? `Solución activada en la búsqueda: ${originSolutions.map((solution) => solution.name).join(", ")}.`
+    : formatMatchExplanation(ranked);
 
   let knowledge_excerpt = "";
   if (live.fromDocuments) {
@@ -350,7 +372,7 @@ export async function gatherProspectContext(
       experience: live.company.experience,
       scale: live.company.scale,
       sectors: live.company.sectors,
-      domains: IAC_COMPANY_PROFILE.domains,
+      domains: catalog.map((solution) => solution.name).slice(0, 6),
       contact: live.company.contact,
     },
     knowledge_excerpt,
@@ -448,7 +470,7 @@ export function formatProspectContextBlock(
 
   if (context.buyer_persona) {
     const persona = context.buyer_persona;
-    lines.push("", "### Buyer persona (configurado en Conocimiento)");
+    lines.push("", "### Buyer persona (configurado en Perfil del vendedor)");
     lines.push(`- Perfil: ${persona.name}`);
     if (persona.role) lines.push(`- Rol típico: ${persona.role}`);
     if (persona.sector) lines.push(`- Sector: ${persona.sector}`);

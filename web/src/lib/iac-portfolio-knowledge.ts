@@ -8,8 +8,12 @@
  * La IA las presenta como orientativas, nunca como hechos verificados.
  */
 
-/** De dónde sale una solución: documento cargado (hecho citable) o catálogo en código (referencia). */
-export type SolutionEvidence = "documento" | "referencia";
+/**
+ * De dónde sale una solución. Solo un documento con fuente permite tratar una
+ * métrica como hecho citable; una solución confirmada por el vendedor define
+ * la oferta, pero no convierte sus cifras en hechos externos verificables.
+ */
+export type SolutionEvidence = "documento" | "referencia" | "perfil";
 
 export const CATALOG_SOURCE_LABEL =
   "Catálogo IAC v3 en código (referencia interna, sin documento cargado)";
@@ -353,11 +357,14 @@ Web: ${company.contact.web}`;
       index === 0
         ? "SOLUCIÓN PRINCIPAL — eje obligatorio del mensaje"
         : "SOLUCIÓN COMPLEMENTARIA — mencionar solo brevemente si aporta valor";
-    const fromDocument = solutionEvidence(s) === "documento";
+    const evidence = solutionEvidence(s);
+    const fromDocument = evidence === "documento";
     const metrics = s.metrics.length
       ? fromDocument
         ? `HECHOS citables (vienen del documento «${solutionSource(s)}»): ${s.metrics.join("; ")}`
-        : `REFERENCIA INTERNA (hipótesis comercial, no verificada; preséntala como orientativa: «en proyectos similares hemos visto hasta…»): ${s.metrics.join("; ")}`
+        : evidence === "perfil"
+          ? `REFERENCIA DEL PERFIL DEL VENDEDOR (oferta confirmada, cifras no verificadas externamente; preséntalas como orientativas): ${s.metrics.join("; ")}`
+          : `REFERENCIA INTERNA (hipótesis comercial, no verificada; preséntala como orientativa: «en proyectos similares hemos visto hasta…»): ${s.metrics.join("; ")}`
       : "Sin métricas: no inventes cifras ni porcentajes.";
     const angles = s.talking_points.length
       ? `Ángulos de conversación: ${s.talking_points.join("; ")}`

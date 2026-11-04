@@ -7,6 +7,7 @@ import {
   updateLeadNotes,
   updateLeadResultado,
   updateLeadStatus,
+  updateLeadContactType,
 } from "@/lib/db";
 import { isEtapaComercial, isGestionResultado, isLeadStatus } from "@/lib/types";
 
@@ -47,6 +48,10 @@ export async function PATCH(
         return NextResponse.json({ error: "Estado de lead no válido" }, { status: 400 });
       }
       lead = await updateLeadStatus(leadId, body.lead_status, dataOwnerId(actor));
+    }
+
+    if (body.tipo_contacto !== undefined) {
+      lead = await updateLeadContactType(leadId, body.tipo_contacto, dataOwnerId(actor));
     }
 
     if (body.resultado_gestion !== undefined) {

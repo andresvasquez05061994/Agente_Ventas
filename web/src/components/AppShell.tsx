@@ -9,16 +9,14 @@ import {
   BarChart3,
   BookOpen,
   Coins,
-  FileSpreadsheet,
   Sparkles,
   LogOut,
-  MessageSquare,
   Moon,
   Plus,
   Search,
-  Settings,
   Shield,
   Sun,
+  Target,
   Users,
 } from "lucide-react";
 import { redirectToLoginIfUnauthorized } from "@/lib/parse-api-response";
@@ -26,17 +24,15 @@ import { useMounted } from "@/hooks/use-mounted";
 import { ProspeccionSessionProvider } from "@/contexts/prospeccion-session";
 
 const NAV = [
-  { href: "/resumen", label: "Resumen", icon: BarChart3 },
+  { href: "/resumen", label: "Vista 360", icon: BarChart3 },
   { href: "/prospeccion", label: "Prospección", icon: Search },
+  { href: "/enriquecer", label: "Enriquecimiento", mobile: "Enriquecer", icon: Sparkles },
+  { href: "/busqueda-inteligente", label: "Búsqueda inteligente", mobile: "Búsqueda IA", icon: Target },
   { href: "/portafolio", label: "Portafolio", icon: Users },
-  { href: "/documentar", label: "Documentar", mobile: "Excel", icon: FileSpreadsheet },
-  { href: "/enriquecer", label: "Enriquecer", mobile: "Enriquecer", icon: Sparkles },
-  { href: "/conocimiento", label: "Conocimiento", icon: BookOpen },
-  { href: "/conversaciones", label: "Conversaciones", icon: MessageSquare },
-  { href: "/configuracion", label: "Configuración", mobile: "Ajustes", icon: Settings },
+  { href: "/perfil-vendedor", label: "Perfil del vendedor", mobile: "Perfil", icon: BookOpen },
 ] as const;
 
-const ADMIN_NAV = { href: "/usuarios", label: "Usuarios", mobile: "Admin", icon: Shield } as const;
+const ADMIN_NAV = { href: "/usuarios", label: "Administración", mobile: "Admin", icon: Shield } as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -51,7 +47,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const isDark = theme === "dark";
   const logoSrc = isDark ? "/logos/logo-iac-white.png" : "/logos/logo-iac.png";
-  const isProspeccion = pathname.startsWith("/prospeccion");
+  const isProspeccion =
+    pathname.startsWith("/prospeccion") || pathname.startsWith("/busqueda-inteligente");
   const isWide =
     pathname.startsWith("/conversaciones") || pathname.startsWith("/portafolio");
 
@@ -142,7 +139,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="app-sidebar__footer space-y-3">
-          <Link href="/prospeccion" className="btn-primary w-full">
+          <Link href="/busqueda-inteligente" className="btn-primary w-full">
             <Plus size={16} strokeWidth={1.5} aria-hidden />
             Nueva búsqueda
           </Link>
@@ -168,7 +165,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
           )}
           <Link
-            href="/configuracion"
+            href={isAdmin ? "/configuracion" : "/perfil-vendedor"}
             className={`app-credits-pill${
               creditsMonth != null &&
               creditsBudget != null &&
@@ -177,7 +174,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 ? " app-credits-pill--warn"
                 : ""
             }`}
-            title="Créditos Apollo usados este mes. Abrir Configuración para cambiar el tope."
+            title="Créditos Apollo globales usados este mes. Solo administración puede ajustar el tope."
           >
             <Coins
               size={14}
@@ -187,7 +184,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             />
             <span>
               Apollo: <strong>{creditsMonth ?? "—"}</strong>
-              {creditsBudget != null ? ` / ${creditsBudget}` : ""} créd. / mes
+              {creditsBudget != null ? ` / ${creditsBudget}` : ""} créd. global / mes
             </span>
           </Link>
         </div>
@@ -216,8 +213,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         })}
       </nav>
 
-      {!pathname.startsWith("/prospeccion") && (
-        <Link href="/prospeccion" className="app-mobile-cta" aria-label="Nueva búsqueda">
+      {!isProspeccion && (
+        <Link href="/busqueda-inteligente" className="app-mobile-cta" aria-label="Nueva búsqueda">
           <Plus size={22} strokeWidth={2} />
         </Link>
       )}

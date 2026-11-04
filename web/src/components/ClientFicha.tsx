@@ -1,8 +1,16 @@
 "use client";
 
 import { useEffect } from "react";
-import type { EtapaComercial, GestionResultado, Lead, LeadStatus } from "@/lib/types";
-import { ETAPAS_COMERCIALES, GESTION_RESULTADOS, LEAD_STATUSES, etapaOf } from "@/lib/types";
+import type { ContactBuyingRole, EtapaComercial, GestionResultado, Lead, LeadStatus } from "@/lib/types";
+import {
+  CONTACT_BUYING_ROLES,
+  DEFAULT_CONTACT_BUYING_ROLE,
+  ETAPAS_COMERCIALES,
+  GESTION_RESULTADOS,
+  LEAD_STATUSES,
+  etapaOf,
+  isContactBuyingRole,
+} from "@/lib/types";
 
 type ClientFichaProps = {
   loading: boolean;
@@ -16,20 +24,23 @@ type ClientFichaProps = {
   onClose: () => void;
   onStatus: (id: number, status: LeadStatus) => void;
   onResultado: (id: number, resultado: GestionResultado | "") => void;
+  onContactType: (id: number, tipo: ContactBuyingRole) => void;
   onEtapa: (leadId: number, etapa: EtapaComercial) => void;
   onOpenMessage: (lead: Lead) => void;
 };
 
-export function whyLine(lead: Pick<Lead, "fuente_busqueda" | "cargo" | "pais">): string {
+export function whyLine(lead: Pick<Lead, "fuente_busqueda" | "cargo" | "pais" | "solucion_origen">): string {
   const raw = lead.fuente_busqueda?.trim();
+  const solution = lead.solucion_origen?.trim();
   if (raw && raw.toLowerCase() !== "apollo") {
-    return raw
+    const source = raw
       .split("|")
       .map((part) => part.trim())
       .filter(Boolean)
       .join(" · ");
+    return [source, solution ? `Solución: ${solution}` : null].filter(Boolean).join(" · ");
   }
-  return [lead.cargo, lead.pais].filter(Boolean).join(" · ");
+  return [lead.cargo, lead.pais, solution ? `Solución: ${solution}` : null].filter(Boolean).join(" · ");
 }
 
 export function ClientFicha({
@@ -44,6 +55,7 @@ export function ClientFicha({
   onClose,
   onStatus,
   onResultado,
+  onContactType,
   onEtapa,
   onOpenMessage,
 }: ClientFichaProps) {
@@ -166,6 +178,27 @@ export function ClientFicha({
                         {GESTION_RESULTADOS.map((resultado) => (
                           <option key={resultado} value={resultado}>
                             {resultado}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="client-ficha__field">
+                      <span className="text-micro">Tipo de contacto</span>
+                      <select
+                        className="input-field"
+                        value={
+                          isContactBuyingRole(lead.tipo_contacto)
+                            ? lead.tipo_contacto
+                            : DEFAULT_CONTACT_BUYING_ROLE
+                        }
+                        disabled={savingId === lead.id}
+                        onChange={(event) =>
+                          onContactType(lead.id, event.target.value as ContactBuyingRole)
+                        }
+                      >
+                        {CONTACT_BUYING_ROLES.map((type) => (
+                          <option key={type} value={type}>
+                            {type}
                           </option>
                         ))}
                       </select>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { Download, Sparkles } from "lucide-react";
 import { HelpTip, PageHeading } from "@/components/HelpTip";
 import { ActionBanner, FeedbackAnchor, FieldLabel, SectionLabel } from "@/components/ui";
@@ -40,6 +41,7 @@ import {
 import { readWorkbookMatrix } from "@/lib/excel-companies";
 import { parseApiResponse } from "@/lib/parse-api-response";
 import type { ApolloPerson } from "@/lib/types";
+import { OfficialCompanySources } from "@/components/OfficialCompanySources";
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const OUTPUT_FILL_FIELDS: EnrichFieldId[] = ["email", "empresa", "pais", "telefono", "nombre", "cargo"];
@@ -577,7 +579,7 @@ export default function EnriquecerPage() {
           : broadByTitle
             ? searchResult.results ?? []
             : attendeeResult.person ? [attendeeResult.person] : [];
-        // El móvil es el requisito mínimo: un correo ausente no invalida un contacto llamable.
+        // El archivo puede conservar un móvil sin correo, pero el Portafolio solo guarda contactos completos.
         const people = rawPeople.filter((person) => person.telefono?.trim()).slice(0, contactsPerRow);
         const consumed = broadByCompany
           ? companyResult.credits_consumed ?? 0
@@ -610,9 +612,11 @@ export default function EnriquecerPage() {
 
     let inserted = 0;
     let saveError = "";
-    if (foundPeople.length) {
-      const unique = new Map(foundPeople.map((person) => [person.apollo_id, person]));
-      const toSave = [...unique.values()].filter((person) => person.telefono?.trim());
+    const completeFoundPeople = foundPeople.filter((person) => person.telefono?.trim() && person.email?.trim());
+    const phoneOnlyFound = foundPeople.length - completeFoundPeople.length;
+    if (completeFoundPeople.length) {
+      const unique = new Map(completeFoundPeople.map((person) => [person.apollo_id, person]));
+      const toSave = [...unique.values()];
       if (toSave.length) {
         try {
           const res = await fetch("/api/leads", {
@@ -642,9 +646,9 @@ export default function EnriquecerPage() {
     setSaved((current) => current + inserted);
     const left = nextStatuses.slice(0, sourceRows).filter(isPendingEnrichmentStatus).length;
     const invalidCountries = nextStatuses.slice(0, sourceRows).filter((status) => status === "invalid_country").length;
-    const summary = `${portfolioMatches} desde portafolio · ${foundPeople.length} desde Apollo con móvil y correo · ${missing} sin coincidencia completa${invalidCountries ? ` · ${invalidCountries} con país no admitido` : ""}${failed ? ` · ${failed} con error` : ""} · ${inserted} al portafolio${left ? ` · faltan ${left}` : ""}${saveError ? `. ${saveError}` : "."}`;
+    const summary = `${portfolioMatches} desde portafolio · ${completeFoundPeople.length} desde Apollo con móvil y correo${phoneOnlyFound ? ` · ${phoneOnlyFound} solo con móvil, no guardado(s)` : ""} · ${missing} sin coincidencia completa${invalidCountries ? ` · ${invalidCountries} con país no admitido` : ""}${failed ? ` · ${failed} con error` : ""} · ${inserted} al portafolio${left ? ` · faltan ${left}` : ""}${saveError ? `. ${saveError}` : "."}`;
     if (fatal) showWarning(`${summary} Se detuvo: ${fatal}`, "Tanda detenida");
-    else if (saveError || (!foundPeople.length && !portfolioMatches)) showWarning(summary, "Tanda terminada");
+    else if (saveError || (!completeFoundPeople.length && !portfolioMatches)) showWarning(summary, "Tanda terminada");
     else showSuccess(summary, "Tanda terminada");
     if (!fatal && left > 0) setNextBatchApproval(true);
   }
@@ -659,10 +663,28 @@ export default function EnriquecerPage() {
     <main className="app-content flex-1 py-6 lg:py-8">
       <header className="page-header">
         <PageHeading
-          title="Enriquecer archivo"
-          help="Carga un Excel o CSV. Antes de consultar Apollo, cada fila se contrasta con tu portafolio para reutilizar correo, empresa, país y móvil sin créditos. El avance queda guardado por archivo: si recargas, vuelve a elegir el mismo archivo y se reanuda desde la primera fila pendiente."
+          title="Enriquecimiento"
+          help="Convierte fuentes comerciales y bases de empresas en datos útiles. Las propuestas de oferta se revisan en Perfil del vendedor; las listas de empresas o contactos se completan aquí antes de guardarse en el Portafolio."
         />
       </header>
+
+      <section className="enrichment-actions mt-6" aria-label="Acciones de enriquecimiento">
+        <article>
+          <p className="section-label">Analizar mi oferta</p>
+          <h2 className="section-block__title">Archivo o URL pública</h2>
+          <p className="text-caption">Extrae productos, servicios, sectores y argumentos desde PDF, Word, Excel o una página pública. La confirmación siempre ocurre en tu perfil.</p>
+          <Link className="btn-secondary mt-3 inline-flex" href="/perfil-vendedor">
+            Abrir Perfil del vendedor
+          </Link>
+        </article>
+        <article>
+          <p className="section-label">Completar una base</p>
+          <h2 className="section-block__title">Empresas o contactos</h2>
+          <p className="text-caption">Carga un Excel o CSV y completa campos con tu portafolio y Apollo. El resultado se revisa antes de convertirse en gestión comercial.</p>
+        </article>
+      </section>
+
+      <OfficialCompanySources />
 
       {feedback && (
         <FeedbackAnchor className="mt-6">

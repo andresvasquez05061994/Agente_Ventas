@@ -48,8 +48,8 @@ const APPROACH_LABEL: Record<OutreachPersonalization["approach"], string> = {
 function PersonalizationBlock({ personalization }: { personalization: OutreachPersonalization }) {
   const basis =
     personalization.knowledge_basis === "documentos"
-      ? "Documentos cargados en Conocimiento: las cifras son citables con su fuente."
-      : "Catálogo IAC de referencia interna: las cifras son orientativas, no hechos verificados.";
+      ? "Documentos de referencia: las cifras pueden citarse cuando conservan su fuente."
+      : "Oferta confirmada en el Perfil del vendedor: las cifras sin documento son orientativas, no hechos verificados.";
   return (
     <section className="cold-call-block cold-call-block--tip">
       <h3 className="cold-call-block__label">Contexto usado (IAC + prospecto)</h3>

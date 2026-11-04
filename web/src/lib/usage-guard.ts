@@ -70,17 +70,23 @@ export async function assertApolloBudget(userId: number, minRemaining = 1) {
   if (snapshot.remaining < minRemaining) {
     throw new UsageLimitError(
       `Presupuesto mensual de Apollo agotado (${snapshot.used}/${snapshot.budget} créditos). ` +
-        "Súbelo en Configuración para este mes, o espera al día 1: el tope vuelve a 2.500 y el consumo empieza de cero.",
+        "Un administrador puede ajustarlo para este mes, o espera al día 1 UTC: el tope global vuelve a 5.000 y el consumo empieza de cero.",
       "apollo_budget"
     );
   }
   return snapshot;
 }
 
-export async function getApolloBudgetSnapshot(userId: number) {
-  const stored = await getStoredApolloMonthlyBudget(userId);
+/**
+ * El presupuesto se comparte entre toda la plataforma interna. Se conserva el
+ * parámetro para no romper a los consumidores existentes, pero no se filtra el
+ * consumo por vendedor.
+ */
+export async function getApolloBudgetSnapshot(_userId?: number) {
+  void _userId;
+  const stored = await getStoredApolloMonthlyBudget();
   const resolved = resolveApolloMonthlyBudget(stored);
-  const credits = await getApolloProspeccionCredits(userId);
+  const credits = await getApolloProspeccionCredits();
   const used = credits.credits_this_month;
   const budget = resolved.budget;
   return {

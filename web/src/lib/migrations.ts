@@ -328,6 +328,126 @@ async function migration008EnrichmentJobs(sql: Sql) {
   `;
 }
 
+/**
+ * 009: Perfil comercial V1.
+ *
+ * El catálogo confirmado pertenece al vendedor. Los documentos y las URLs
+ * pueden proponer información, pero no pasan al catálogo ni a la búsqueda
+ * inteligente hasta que el vendedor los confirme aquí.
+ */
+async function migration009CommercialProfile(sql: Sql) {
+  await sql`
+    ALTER TABLE leads
+    ADD COLUMN IF NOT EXISTS tipo_contacto TEXT NOT NULL DEFAULT 'Usuario'
+  `;
+  await sql`
+    ALTER TABLE leads
+    ADD COLUMN IF NOT EXISTS solucion_origen TEXT
+  `;
+  await sql`
+    UPDATE leads
+    SET tipo_contacto = 'Usuario'
+    WHERE tipo_contacto IS NULL
+       OR tipo_contacto NOT IN ('Comprador económico', 'Dueño funcional', 'Patrocinador técnico', 'Usuario')
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_leads_owner_tipo_contacto
+    ON leads (owner_id, tipo_contacto)
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS seller_solutions (
+      id BIGSERIAL PRIMARY KEY,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      value_proposition TEXT NOT NULL DEFAULT '',
+      metrics JSONB NOT NULL DEFAULT '[]'::jsonb,
+      fit_roles JSONB NOT NULL DEFAULT '[]'::jsonb,
+      industries JSONB NOT NULL DEFAULT '[]'::jsonb,
+      talking_points JSONB NOT NULL DEFAULT '[]'::jsonb,
+      source_label TEXT NOT NULL DEFAULT 'Creado en Perfil del vendedor',
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_seller_solutions_owner_active
+    ON seller_solutions (owner_id, active, updated_at DESC)
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS seller_web_sources (
+      id BIGSERIAL PRIMARY KEY,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      source_url TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      summary TEXT NOT NULL DEFAULT '',
+      extracted_text TEXT NOT NULL DEFAULT '',
+      structured JSONB,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (owner_id, source_url)
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_seller_web_sources_owner_active
+    ON seller_web_sources (owner_id, active, updated_at DESC)
+  `;
+}
+
+/**
+ * 010: bases de empresas cargadas por el vendedor.
+ *
+ * Se conserva la fuente declarada para distinguir un archivo oficial cargado
+ * de una lista propia. No se infiere que un registro sea oficial solo por su
+ * contenido.
+ */
+async function migration010OfficialCompanySources(sql: Sql) {
+  await sql`
+    CREATE TABLE IF NOT EXISTS official_company_sources (
+      id BIGSERIAL PRIMARY KEY,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      declared_source TEXT NOT NULL DEFAULT 'Archivo cargado',
+      row_count INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_official_company_sources_owner_created
+    ON official_company_sources (owner_id, created_at DESC)
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS official_company_records (
+      id BIGSERIAL PRIMARY KEY,
+      source_id BIGINT NOT NULL REFERENCES official_company_sources(id) ON DELETE CASCADE,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      legal_name TEXT NOT NULL,
+      nit TEXT,
+      economic_activity TEXT,
+      ciiu TEXT,
+      employee_count INTEGER,
+      city TEXT,
+      department TEXT,
+      raw_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_official_company_records_owner_employees
+    ON official_company_records (owner_id, employee_count)
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_official_company_records_owner_name
+    ON official_company_records (owner_id, lower(legal_name))
+  `;
+}
+
 const MIGRATIONS: Migration[] = [
   { id: "001_init", run: migration001Init },
   { id: "002_phone_search", run: migration002PhoneSearch },
@@ -337,6 +457,8 @@ const MIGRATIONS: Migration[] = [
   { id: "006_ciclo", run: migration006Ciclo },
   { id: "007_rate_windows", run: migration007RateWindows },
   { id: "008_enrichment_jobs", run: migration008EnrichmentJobs },
+  { id: "009_commercial_profile", run: migration009CommercialProfile },
+  { id: "010_official_company_sources", run: migration010OfficialCompanySources },
 ];
 
 export async function applyMigrations(sql: Sql) {

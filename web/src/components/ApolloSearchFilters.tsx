@@ -123,7 +123,7 @@ export function ApolloSearchFilters({
       <div className="field-label-row">
         <SectionLabel>Filtros Apollo</SectionLabel>
         <HelpTip label="Filtros">
-          Cada resultado trae email y teléfono. Apollo cobra esos créditos en tu cuenta. Para completar un listado de
+          Cada resultado trae email y teléfono. Apollo cobra créditos del tope global. Para completar un listado de
           asistentes usa Enriquecer.
         </HelpTip>
       </div>

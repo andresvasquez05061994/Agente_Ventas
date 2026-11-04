@@ -10,6 +10,7 @@ import type {
 import type {
   ConversationStats,
   ConversationThread,
+  ContactBuyingRole,
   EtapaComercial,
   GeneratedMessageSummary,
   Lead,
@@ -19,7 +20,9 @@ import type {
   WhatsAppMessage,
 } from "./types";
 import {
+  DEFAULT_CONTACT_BUYING_ROLE,
   isEtapaComercial,
+  isContactBuyingRole,
   isGestionResultado,
   isLeadStatus,
   type GestionResultado,
@@ -447,9 +450,14 @@ export async function saveLeads(
     linkedin_url: string | null;
   }[],
   fuente: string,
-  ownerId: number
+  ownerId: number,
+  solucionOrigen?: string | null,
+  tipoContacto?: unknown
 ) {
   const sql = getSql();
+  const normalizedContactType: ContactBuyingRole = isContactBuyingRole(tipoContacto)
+    ? tipoContacto
+    : DEFAULT_CONTACT_BUYING_ROLE;
   let inserted = 0;
   let updated = 0;
   let skipped = 0;
@@ -458,7 +466,7 @@ export async function saveLeads(
     const email = lead.email?.trim() || null;
     const telefonoE164 = toE164(lead.telefono, lead.pais);
     const telefono = telefonoE164 || lead.telefono?.trim() || null;
-    if (!telefono) {
+    if (!telefono || !email) {
       skipped++;
       continue;
     }
@@ -467,11 +475,11 @@ export async function saveLeads(
     const rows = await sql`
       INSERT INTO leads (
         apollo_id, nombre, cargo, empresa, email, telefono, telefono_e164,
-        pais, linkedin_url, lead_status, fuente_busqueda, owner_id, created_at, updated_at
+        pais, linkedin_url, lead_status, tipo_contacto, fuente_busqueda, solucion_origen, owner_id, created_at, updated_at
       ) VALUES (
         ${lead.apollo_id}, ${lead.nombre}, ${lead.cargo}, ${lead.empresa},
         ${email}, ${telefono}, ${telefonoE164}, ${lead.pais}, ${lead.linkedin_url},
-        'Nuevo', ${fuente}, ${ownerId}, NOW(), NOW()
+        'Nuevo', ${normalizedContactType}, ${fuente}, ${solucionOrigen?.trim() || null}, ${ownerId}, NOW(), NOW()
       )
       ON CONFLICT (owner_id, apollo_id) DO UPDATE SET
         nombre = EXCLUDED.nombre,
@@ -483,6 +491,7 @@ export async function saveLeads(
         pais = EXCLUDED.pais,
         linkedin_url = EXCLUDED.linkedin_url,
         fuente_busqueda = EXCLUDED.fuente_busqueda,
+        solucion_origen = COALESCE(NULLIF(EXCLUDED.solucion_origen, ''), leads.solucion_origen),
         updated_at = NOW()
       RETURNING id, (xmax = 0) AS is_insert
     `;
@@ -570,25 +579,24 @@ export async function recordProspeccionCredits(
   `;
 }
 
-function budgetKey(userId: number): string {
-  return `apollo_monthly_budget:u${userId}`;
-}
+/** El presupuesto de Apollo pertenece a la plataforma interna, no a un vendedor. */
+const GLOBAL_APOLLO_BUDGET_KEY = "apollo_monthly_budget:global";
 
-export async function getStoredApolloMonthlyBudget(userId: number): Promise<number | null> {
+export async function getStoredApolloMonthlyBudget(_userId?: number): Promise<number | null> {
+  void _userId;
   const sql = getSql();
   const rows = (await sql`
-    SELECT value FROM app_settings WHERE key = ${budgetKey(userId)}
+    SELECT value FROM app_settings WHERE key = ${GLOBAL_APOLLO_BUDGET_KEY}
   `) as Array<{ value: string }>;
   return decodeMonthlyBudget(rows[0]?.value);
 }
 
-export async function setStoredApolloMonthlyBudget(userId: number, budget: number): Promise<void> {
+export async function setStoredApolloMonthlyBudget(_userId: number, budget: number): Promise<void> {
   const sql = getSql();
   const value = encodeMonthlyBudget(budget);
-  const key = budgetKey(userId);
   await sql`
     INSERT INTO app_settings (key, value, updated_at)
-    VALUES (${key}, ${value}, NOW())
+    VALUES (${GLOBAL_APOLLO_BUDGET_KEY}, ${value}, NOW())
     ON CONFLICT (key) DO UPDATE
       SET value = EXCLUDED.value, updated_at = NOW()
   `;
@@ -648,6 +656,33 @@ export async function updateLeadStatus(
   if (!lead) {
     throw new Error("Contacto no encontrado");
   }
+  return lead;
+}
+
+/** Normaliza cualquier categoría desconocida a Usuario para conservar un único campo simple. */
+export async function updateLeadContactType(
+  id: number,
+  contactType: unknown,
+  ownerId: number | null = null
+): Promise<Lead> {
+  const normalized: ContactBuyingRole = isContactBuyingRole(contactType)
+    ? contactType
+    : DEFAULT_CONTACT_BUYING_ROLE;
+  const sql = getSql();
+  const leadId = Number(id);
+  if (!Number.isFinite(leadId) || leadId <= 0) {
+    throw new Error("ID de contacto no válido");
+  }
+
+  const rows = (await sql`
+    UPDATE leads
+    SET tipo_contacto = ${normalized}, updated_at = NOW()
+    WHERE id = ${leadId}
+      AND (${ownerId}::int IS NULL OR owner_id = ${ownerId})
+    RETURNING *
+  `) as Lead[];
+  const lead = rows[0];
+  if (!lead) throw new Error("Contacto no encontrado");
   return lead;
 }
 

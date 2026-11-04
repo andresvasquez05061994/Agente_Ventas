@@ -1,12 +1,15 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { EtapaComercial, GestionResultado, Lead, LeadStatus } from "@/lib/types";
+import type { ContactBuyingRole, EtapaComercial, GestionResultado, Lead, LeadStatus } from "@/lib/types";
 import {
+  CONTACT_BUYING_ROLES,
+  DEFAULT_CONTACT_BUYING_ROLE,
   ETAPAS_COMERCIALES,
   GESTION_RESULTADOS,
   etapaOf,
+  isContactBuyingRole,
   isOpenGestion,
   LEAD_STATUSES,
 } from "@/lib/types";
@@ -297,11 +300,11 @@ function PortafolioContent() {
     markReloading();
   }
 
-  function clearLastPageParam() {
+  const clearLastPageParam = useCallback(() => {
     if (searchParamsRef.current.get("page") === "last") {
       router.replace("/portafolio", { scroll: false });
     }
-  }
+  }, [router]);
 
   function markReloading() {
     jumpedToLast.current = true;
@@ -311,7 +314,7 @@ function PortafolioContent() {
     setPage(1);
   }
 
-  function buildLeadsQuery(targetPage: number) {
+  const buildLeadsQuery = useCallback((targetPage: number) => {
     const q = new URLSearchParams({
       page: String(targetPage),
       per_page: String(PER_PAGE),
@@ -322,7 +325,7 @@ function PortafolioContent() {
     if (debouncedSearch) q.set("search", debouncedSearch);
     if (contact !== "Todos") q.set("contact", contact);
     return q;
-  }
+  }, [contact, debouncedSearch, etapa, resultado, status]);
 
   useEffect(() => {
     let cancelled = false;
@@ -368,7 +371,7 @@ function PortafolioContent() {
     return () => {
       cancelled = true;
     };
-  }, [status, resultado, etapa, debouncedSearch, contact, page, router]);
+  }, [buildLeadsQuery, clearLastPageParam, page, showError]);
 
   function leadStaysVisible(lead: Lead): boolean {
     if (status !== "Todos" && lead.lead_status !== status) return false;
@@ -398,7 +401,11 @@ function PortafolioContent() {
 
   async function patchLead(
     id: number,
-    body: { lead_status?: LeadStatus; resultado_gestion?: GestionResultado | "" },
+    body: {
+      lead_status?: LeadStatus;
+      resultado_gestion?: GestionResultado | "";
+      tipo_contacto?: ContactBuyingRole;
+    },
     success: string
   ) {
     const prev = leads;
@@ -441,6 +448,10 @@ function PortafolioContent() {
         ? `Resultado marcado como «${resultadoGestion}».`
         : "Resultado quitado."
     );
+  }
+
+  function updateContactType(id: number, tipoContacto: ContactBuyingRole) {
+    void patchLead(id, { tipo_contacto: tipoContacto }, `Tipo de contacto: «${tipoContacto}».`);
   }
 
   /** La etapa es de la empresa: el servidor devuelve todos los contactos actualizados. */
@@ -1019,8 +1030,8 @@ function PortafolioContent() {
             ) : (
               <EmptyState
                 message="Sin contactos en el portafolio"
-                href="/prospeccion"
-                cta="Ir a Prospección"
+                href="/busqueda-inteligente"
+                cta="Ir a Búsqueda inteligente"
               />
             )}
           </div>
@@ -1033,6 +1044,7 @@ function PortafolioContent() {
                 <col style={{ width: "11%" }} />
                 <col style={{ width: 180 }} />
                 <col style={{ width: "10%" }} />
+                <col style={{ width: 158 }} />
                 {isAdmin ? <col className="portfolio-table__owner" /> : null}
                 <col style={{ width: "17%" }} />
                 <col style={{ width: 108 }} />
@@ -1053,6 +1065,7 @@ function PortafolioContent() {
                   <th className="portfolio-table__name">Nombre</th>
                   <th className="portfolio-table__role">Cargo</th>
                   <th className="portfolio-table__company">Empresa</th>
+                  <th className="portfolio-table__contact-type">Tipo</th>
                   {isAdmin ? <th className="portfolio-table__owner">Dueño</th> : null}
                   <th className="portfolio-table__email">Email</th>
                   <th className="portfolio-table__phone">Teléfono</th>
@@ -1101,6 +1114,27 @@ function PortafolioContent() {
                           </span>
                         ) : null}
                       </span>
+                    </td>
+                    <td className="portfolio-table__contact-type">
+                      <select
+                        className="portfolio-status-select"
+                        value={
+                          isContactBuyingRole(l.tipo_contacto)
+                            ? l.tipo_contacto
+                            : DEFAULT_CONTACT_BUYING_ROLE
+                        }
+                        title="Tipo de contacto"
+                        disabled={statusSavingId === Number(l.id)}
+                        onChange={(event) =>
+                          updateContactType(Number(l.id), event.target.value as ContactBuyingRole)
+                        }
+                      >
+                        {CONTACT_BUYING_ROLES.map((type) => (
+                          <option key={type} value={type}>
+                            {type}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     {isAdmin ? (
                       <td className="portfolio-table__owner" title={l.owner_email ?? undefined}>
@@ -1225,6 +1259,7 @@ function PortafolioContent() {
           onClose={() => setFichaOpen(false)}
           onStatus={updateStatus}
           onResultado={updateResultado}
+          onContactType={updateContactType}
           onEtapa={(leadId, nextEtapa) => void updateEtapa(leadId, nextEtapa)}
           onOpenMessage={(lead) => openMessageIA(lead)}
         />

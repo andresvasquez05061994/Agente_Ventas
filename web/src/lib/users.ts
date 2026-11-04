@@ -193,11 +193,15 @@ export async function ensurePlatform(): Promise<void> {
   const legacy = (await sql`
     SELECT value FROM app_settings WHERE key = 'apollo_monthly_budget'
   `) as Array<{ value: string }>;
-  const adminKey = `apollo_monthly_budget:u${admin.id}`;
-  if (legacy[0]?.value) {
+  const legacyAdmin = (await sql`
+    SELECT value FROM app_settings WHERE key = ${`apollo_monthly_budget:u${admin.id}`}
+  `) as Array<{ value: string }>;
+  const globalKey = "apollo_monthly_budget:global";
+  const legacyValue = legacy[0]?.value ?? legacyAdmin[0]?.value;
+  if (legacyValue) {
     await sql`
       INSERT INTO app_settings (key, value, updated_at)
-      VALUES (${adminKey}, ${legacy[0].value}, NOW())
+      VALUES (${globalKey}, ${legacyValue}, NOW())
       ON CONFLICT (key) DO NOTHING
     `;
   }

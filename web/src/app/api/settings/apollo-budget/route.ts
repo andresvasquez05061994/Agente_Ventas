@@ -4,7 +4,7 @@ import {
   APOLLO_BUDGET_MIN,
   parsePositiveInt,
 } from "@/lib/credit-policy";
-import { requireUser } from "@/lib/current-user";
+import { requireAdmin, requireUser } from "@/lib/current-user";
 import { ensureDb, setStoredApolloMonthlyBudget } from "@/lib/db";
 import { getApolloBudgetSnapshot } from "@/lib/usage-guard";
 
@@ -15,6 +15,8 @@ export async function GET(req: NextRequest) {
     await ensureDb();
     const actor = await requireUser(req);
     if (actor instanceof NextResponse) return actor;
+    const denied = requireAdmin(actor);
+    if (denied) return denied;
     const snapshot = await getApolloBudgetSnapshot(actor.id);
     return NextResponse.json(snapshot);
   } catch (e) {
@@ -28,6 +30,8 @@ export async function PUT(req: NextRequest) {
     await ensureDb();
     const actor = await requireUser(req);
     if (actor instanceof NextResponse) return actor;
+    const denied = requireAdmin(actor);
+    if (denied) return denied;
     const body = (await req.json().catch(() => null)) as { budget?: unknown } | null;
     const budget = parsePositiveInt(
       body?.budget == null ? undefined : String(body.budget),

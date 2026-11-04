@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { ApolloPerson } from "@/lib/types";
+import type { ContactBuyingRole } from "@/lib/types";
 import { DEFAULT_SEARCH } from "@/lib/apollo-filters";
 
 export type ProspeccionSearchStatus = "idle" | "loading" | "success" | "empty" | "error";
@@ -64,6 +65,9 @@ type ProspeccionSessionState = {
 export type SearchIntent = {
   text: string;
   titles: string[];
+  /** Soluciones confirmadas que originaron esta búsqueda. */
+  solutionNames?: string[];
+  contactType?: ContactBuyingRole;
 };
 
 /**
@@ -73,6 +77,21 @@ export type SearchIntent = {
 export function activeSearchIntent(intent: SearchIntent | null, titles: string[]): string | null {
   if (!intent?.text.trim()) return null;
   return intent.titles.some((title) => titles.includes(title)) ? intent.text : null;
+}
+
+export function activeSearchSolutionNames(intent: SearchIntent | null, titles: string[]): string[] {
+  if (!intent || !intent.titles.some((title) => titles.includes(title))) return [];
+  return Array.isArray(intent.solutionNames)
+    ? intent.solutionNames.filter((name) => typeof name === "string" && name.trim())
+    : [];
+}
+
+export function activeSearchContactType(
+  intent: SearchIntent | null,
+  titles: string[]
+): ContactBuyingRole | null {
+  if (!intent || !intent.titles.some((title) => titles.includes(title))) return null;
+  return intent.contactType ?? null;
 }
 
 type ProspeccionSessionContextValue = ProspeccionSessionState & {
@@ -178,6 +197,16 @@ function readStoredSession(userId: number): ProspeccionSessionState | null {
           ? {
               text: parsed.searchIntent.text,
               titles: parsed.searchIntent.titles.filter((t) => typeof t === "string"),
+              solutionNames: Array.isArray(parsed.searchIntent.solutionNames)
+                ? parsed.searchIntent.solutionNames.filter((name) => typeof name === "string")
+                : [],
+              contactType:
+                parsed.searchIntent.contactType === "Comprador económico" ||
+                parsed.searchIntent.contactType === "Dueño funcional" ||
+                parsed.searchIntent.contactType === "Patrocinador técnico" ||
+                parsed.searchIntent.contactType === "Usuario"
+                  ? parsed.searchIntent.contactType
+                  : undefined,
             }
           : null,
     };

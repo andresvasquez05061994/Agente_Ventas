@@ -11,6 +11,7 @@ import {
 import { useActionFeedback } from "@/hooks/use-action-feedback";
 import { parseApiResponse } from "@/lib/parse-api-response";
 import type { BuyerPersona, KnowledgeDocument, KnowledgeProfile } from "@/lib/knowledge-store";
+import { SellerCatalog } from "@/components/SellerCatalog";
 
 type KnowledgePayload = {
   profile: KnowledgeProfile;
@@ -135,7 +136,7 @@ export default function ConocimientoPage() {
       })
       .catch((e) => {
         if (!cancelled) {
-          showError(e instanceof Error ? e.message : "Error al cargar conocimiento", "Conocimiento");
+          showError(e instanceof Error ? e.message : "Error al cargar el perfil", "Perfil del vendedor");
         }
       })
       .finally(() => {
@@ -163,7 +164,7 @@ export default function ConocimientoPage() {
       const { data, error } = await parseApiResponse<{ profile?: KnowledgeProfile; error?: string }>(res);
       if (error || data?.error) throw new Error(error ?? data?.error);
       if (data?.profile) setProfile(data.profile);
-      showSuccess("El Mensaje IA usará este perfil en la firma y el contexto comercial.", "Perfil guardado");
+      showSuccess("El perfil será la base de tus borradores y búsquedas.", "Perfil guardado");
     } catch (e) {
       showError(e instanceof Error ? e.message : "No se pudo guardar", "Perfil");
     } finally {
@@ -189,8 +190,8 @@ export default function ConocimientoPage() {
       const services = data?.document?.services_count ?? 0;
       showSuccess(
         services
-          ? `Se extrajo el texto y ${services} servicio(s) para el Mensaje IA.`
-          : "Se extrajo el texto. El Mensaje IA usará los fragmentos más relevantes según cargo, sector e investigación del cliente.",
+          ? `Se extrajo el texto y ${services} propuesta(s). Revísalas y confirma solo las que vendas.`
+          : "Se extrajo el texto. Puedes usarlo como referencia y confirmar tu oferta manualmente.",
         "Documento cargado"
       );
     } catch (e) {
@@ -251,7 +252,7 @@ export default function ConocimientoPage() {
   }
 
   async function removeDoc(doc: KnowledgeDocument) {
-    if (!window.confirm(`¿Eliminar «${doc.filename}» del conocimiento?`)) return;
+    if (!window.confirm(`¿Eliminar «${doc.filename}» de las fuentes de referencia?`)) return;
     try {
       const res = await fetch(`/api/conocimiento/documentos/${doc.id}`, { method: "DELETE" });
       const { error } = await parseApiResponse<{ error?: string }>(res);
@@ -364,8 +365,8 @@ export default function ConocimientoPage() {
       <header className="page-header">
         <div>
           <PageHeading
-            title="Conocimiento"
-            help="Lo que el Mensaje IA usa de tu cuenta: documentos, perfil comercial y buyer personas. No se comparte con otros usuarios."
+            title="Perfil del vendedor"
+            help="Define quién vende, qué vende y a quién quiere vender. Los productos confirmados aquí son la única oferta que usa Búsqueda inteligente y Mensaje IA."
           />
         </div>
       </header>
@@ -388,9 +389,9 @@ export default function ConocimientoPage() {
             <div className="knowledge-docs-head">
               <div>
                 <div className="page-heading">
-                  <p className="knowledge-card__title">Documentos del portafolio</p>
-                  <HelpTip label="Documentos del portafolio">
-                    El Mensaje IA usa el texto y los servicios de estos archivos según el cargo, el sector y la empresa del contacto.
+                  <p className="knowledge-card__title">Archivos de referencia</p>
+                  <HelpTip label="Archivos de referencia">
+                    Carga PDF, Word, Excel o texto para extraer propuestas. El archivo respalda la oferta, pero tú decides qué entra al catálogo confirmado.
                   </HelpTip>
                 </div>
               </div>
@@ -439,7 +440,7 @@ export default function ConocimientoPage() {
             >
               <Upload size={20} strokeWidth={1.5} aria-hidden />
               <span>
-                {uploading ? "Leyendo y estructurando…" : "Cargar PDF, Word o Excel"}
+                {uploading ? "Leyendo y estructurando…" : "Cargar archivo de referencia"}
                 <small>Máx. 4 MB</small>
               </span>
             </label>
@@ -458,8 +459,7 @@ export default function ConocimientoPage() {
 
             {documents.length === 0 ? (
               <p className="text-micro mt-4">
-                Sin documentos. Hasta que cargues uno, el Mensaje IA usa el catálogo IAC de referencia interna y
-                presenta sus cifras como orientativas, no como hechos.
+                Sin archivos. Puedes cargar uno o analizar una URL pública. El archivo no activa productos automáticamente: revísalos en el catálogo confirmado.
               </p>
             ) : (
               <ul className="knowledge-docs">
@@ -555,9 +555,14 @@ export default function ConocimientoPage() {
           </section>
 
           <div className="knowledge-side">
+            <SellerCatalog
+              referenceVersion={documents
+                .map((document) => `${document.id}:${document.active}:${document.updated_at ?? ""}`)
+                .join("|")}
+            />
             <KnowledgeFold
-              title="Perfil comercial"
-              hint="Firma, promesa y sectores. Se usa en cada mensaje."
+              title="Datos del vendedor y la empresa"
+              hint="Firma, promesa, sectores y mercados. Se usan como contexto del trabajo comercial."
               meta={profileMeta}
             >
               <div className="knowledge-grid">
