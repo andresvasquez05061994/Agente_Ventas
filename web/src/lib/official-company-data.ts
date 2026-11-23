@@ -4,6 +4,7 @@ import {
   DECLARED_COMPANY_SOURCES,
   type DeclaredCompanySource,
 } from "./company-source-types";
+import type { OfficialCompanyLookup } from "./official-company-lookup";
 
 export { DECLARED_COMPANY_SOURCES, type DeclaredCompanySource } from "./company-source-types";
 
@@ -30,9 +31,31 @@ export type OfficialCompanySource = {
   updated_at: string;
 };
 
-export type OfficialCompanyMatch = {
+export type OfficialCompanyVerification = {
   id: number;
-  source_id: number;
+  nit: string;
+  source_key: string;
+  source_label: string;
+  source_url: string;
+  dataset_id: string;
+  legal_name: string;
+  economic_activity: string | null;
+  ciiu: string | null;
+  macrosector: string | null;
+  employee_count: number | null;
+  city: string | null;
+  department: string | null;
+  reporting_period: string | null;
+  financial_data: Record<string, string>;
+  raw_data: Record<string, string>;
+  checked_at: string;
+  updated_at: string;
+};
+
+export type OfficialCompanyMatch = {
+  id: string;
+  source_id: number | null;
+  source_kind: "imported" | "verified";
   source_label: string;
   legal_name: string;
   nit: string | null;
@@ -204,6 +227,61 @@ function mapSource(row: Record<string, unknown>): OfficialCompanySource {
   };
 }
 
+function objectOf(value: unknown): Record<string, string> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .map(([key, item]) => [clean(key, 100), clean(item, 600)])
+        .filter(([key, item]) => Boolean(key) && Boolean(item))
+    );
+  }
+  if (typeof value === "string") {
+    try {
+      return objectOf(JSON.parse(value));
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function nullableText(value: unknown, max = 500): string | null {
+  return clean(value, max) || null;
+}
+
+function nullableInteger(value: unknown): number | null {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
+}
+
+function nitKey(value: unknown): string | null {
+  const nit = clean(value, 80).split("-", 1)[0].replace(/\D/g, "");
+  return nit.length >= 7 && nit.length <= 10 ? nit : null;
+}
+
+function mapVerification(row: Record<string, unknown>): OfficialCompanyVerification {
+  return {
+    id: Number(row.id),
+    nit: String(row.nit ?? ""),
+    source_key: String(row.source_key ?? ""),
+    source_label: String(row.source_label ?? "Datos oficiales"),
+    source_url: String(row.source_url ?? ""),
+    dataset_id: String(row.dataset_id ?? ""),
+    legal_name: String(row.legal_name ?? ""),
+    economic_activity: nullableText(row.economic_activity, 400),
+    ciiu: nullableText(row.ciiu, 50),
+    macrosector: nullableText(row.macrosector, 160),
+    employee_count: nullableInteger(row.employee_count),
+    city: nullableText(row.city, 100),
+    department: nullableText(row.department, 100),
+    reporting_period: nullableText(row.reporting_period, 60),
+    financial_data: objectOf(row.financial_data),
+    raw_data: objectOf(row.raw_data),
+    checked_at: asDate(row.checked_at),
+    updated_at: asDate(row.updated_at),
+  };
+}
+
 export async function saveCompanySource(input: {
   ownerId: number;
   filename: string;
@@ -270,6 +348,57 @@ export async function deleteCompanySource(ownerId: number, id: number): Promise<
   return Boolean(rows[0]);
 }
 
+export async function saveCompanyVerification(
+  ownerId: number,
+  record: OfficialCompanyLookup
+): Promise<OfficialCompanyVerification> {
+  const sql = getSql();
+  const rows = (await sql`
+    INSERT INTO official_company_verifications (
+      owner_id, nit, source_key, source_label, source_url, dataset_id, legal_name,
+      economic_activity, ciiu, macrosector, employee_count, city, department,
+      reporting_period, financial_data, raw_data, checked_at, updated_at
+    ) VALUES (
+      ${ownerId}, ${record.nit}, ${record.source_key}, ${record.source_label},
+      ${record.source_url}, ${record.dataset_id}, ${record.legal_name},
+      ${record.economic_activity}, ${record.ciiu}, ${record.macrosector},
+      ${record.employee_count}, ${record.city}, ${record.department},
+      ${record.reporting_period}, ${JSON.stringify(record.financial_data)}::jsonb,
+      ${JSON.stringify(record.raw_data)}::jsonb, NOW(), NOW()
+    )
+    ON CONFLICT (owner_id, nit, source_key) DO UPDATE
+    SET
+      source_label = EXCLUDED.source_label,
+      source_url = EXCLUDED.source_url,
+      dataset_id = EXCLUDED.dataset_id,
+      legal_name = EXCLUDED.legal_name,
+      economic_activity = EXCLUDED.economic_activity,
+      ciiu = EXCLUDED.ciiu,
+      macrosector = EXCLUDED.macrosector,
+      employee_count = EXCLUDED.employee_count,
+      city = EXCLUDED.city,
+      department = EXCLUDED.department,
+      reporting_period = EXCLUDED.reporting_period,
+      financial_data = EXCLUDED.financial_data,
+      raw_data = EXCLUDED.raw_data,
+      checked_at = NOW(),
+      updated_at = NOW()
+    RETURNING *
+  `) as Record<string, unknown>[];
+  return mapVerification(rows[0]);
+}
+
+export async function listCompanyVerifications(ownerId: number): Promise<OfficialCompanyVerification[]> {
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT * FROM official_company_verifications
+    WHERE owner_id = ${ownerId}
+    ORDER BY checked_at DESC, id DESC
+    LIMIT 100
+  `) as Record<string, unknown>[];
+  return rows.map(mapVerification);
+}
+
 function words(value: string): string[] {
   return normalize(value)
     .split(" ")
@@ -317,47 +446,111 @@ export async function findOfficialCompanyMatches(
 ): Promise<OfficialCompanyMatch[]> {
   if (!solutions.length) return [];
   const sql = getSql();
-  const rows = (await sql`
-    SELECT records.id, records.source_id, sources.declared_source, sources.filename,
-           records.legal_name, records.nit, records.economic_activity, records.ciiu,
-           records.employee_count, records.city, records.department
-    FROM official_company_records AS records
-    JOIN official_company_sources AS sources ON sources.id = records.source_id
-    WHERE records.owner_id = ${ownerId}
-      AND records.employee_count >= 50
-    ORDER BY records.employee_count DESC NULLS LAST, records.legal_name ASC
-    LIMIT 5000
-  `) as Array<Record<string, unknown>>;
+  const [importedRows, verifiedRows] = await Promise.all([
+    sql`
+      SELECT records.id, records.source_id, sources.declared_source, sources.filename,
+             records.legal_name, records.nit, records.economic_activity, records.ciiu,
+             records.employee_count, records.city, records.department
+      FROM official_company_records AS records
+      JOIN official_company_sources AS sources ON sources.id = records.source_id
+      WHERE records.owner_id = ${ownerId}
+        AND records.employee_count >= 50
+      ORDER BY records.employee_count DESC NULLS LAST, records.legal_name ASC
+      LIMIT 5000
+    `,
+    sql`
+      SELECT id, source_label, legal_name, nit, economic_activity, ciiu,
+             employee_count, city, department
+      FROM official_company_verifications
+      WHERE owner_id = ${ownerId}
+        AND employee_count >= 50
+      ORDER BY employee_count DESC NULLS LAST, legal_name ASC
+      LIMIT 1000
+    `,
+  ]) as [Array<Record<string, unknown>>, Array<Record<string, unknown>>];
 
-  return rows
-    .flatMap((row): OfficialCompanyMatch[] => {
-      const employees = Number(row.employee_count);
-      if (!Number.isFinite(employees) || employees < 50) return [];
-      const { score, reasons } = scoreCompany(
-        {
-          legal_name: String(row.legal_name ?? ""),
-          economic_activity: row.economic_activity ? String(row.economic_activity) : null,
-          ciiu: row.ciiu ? String(row.ciiu) : null,
-        },
-        solutions
-      );
-      if (score <= 0) return [];
-      return [{
-        id: Number(row.id),
-        source_id: Number(row.source_id),
-        source_label: `${String(row.declared_source ?? "Archivo cargado")} · ${String(row.filename ?? "")}`,
+  const verifiedByNit = new Map(
+    verifiedRows.flatMap((row) => {
+      const key = nitKey(row.nit);
+      if (!key) return [];
+      return [[key, row] as const];
+    })
+  );
+
+  const imported = importedRows.flatMap((row): OfficialCompanyMatch[] => {
+    const employees = Number(row.employee_count);
+    if (!Number.isFinite(employees) || employees < 50) return [];
+    // Se conserva el tamaño reportado por la base cargada. La validación por
+    // NIT solo complementa CIIU/actividad para evaluar el ajuste de la cuenta.
+    const importedNit = nitKey(row.nit);
+    const verification = importedNit ? verifiedByNit.get(importedNit) : undefined;
+    const economicActivity = verification?.economic_activity
+      ? String(verification.economic_activity)
+      : row.economic_activity
+        ? String(row.economic_activity)
+        : null;
+    const ciiu = verification?.ciiu ? String(verification.ciiu) : row.ciiu ? String(row.ciiu) : null;
+    const { score, reasons } = scoreCompany(
+      {
         legal_name: String(row.legal_name ?? ""),
-        nit: row.nit ? String(row.nit) : null,
+        economic_activity: economicActivity,
+        ciiu,
+      },
+      solutions
+    );
+    if (score <= 0) return [];
+    const importedSource = `${String(row.declared_source ?? "Archivo cargado")} · ${String(row.filename ?? "")}`;
+    return [{
+      id: `archivo-${Number(row.id)}`,
+      source_id: Number(row.source_id),
+      source_kind: "imported",
+      source_label: verification
+        ? `${importedSource} · actividad verificada en ${String(verification.source_label ?? "fuente oficial")}`
+        : importedSource,
+      legal_name: String(row.legal_name ?? ""),
+      nit: row.nit ? String(row.nit) : null,
+      economic_activity: economicActivity,
+      ciiu,
+      employee_count: employees,
+      size: employees <= 200 ? "Mediana" : "Grande",
+      city: row.city ? String(row.city) : null,
+      department: row.department ? String(row.department) : null,
+      score,
+      reasons,
+    }];
+  });
+
+  const verified = verifiedRows.flatMap((row): OfficialCompanyMatch[] => {
+    const employees = Number(row.employee_count);
+    if (!Number.isFinite(employees) || employees < 50) return [];
+    const { score, reasons } = scoreCompany(
+      {
+        legal_name: String(row.legal_name ?? ""),
         economic_activity: row.economic_activity ? String(row.economic_activity) : null,
         ciiu: row.ciiu ? String(row.ciiu) : null,
-        employee_count: employees,
-        size: employees <= 200 ? "Mediana" : "Grande",
-        city: row.city ? String(row.city) : null,
-        department: row.department ? String(row.department) : null,
-        score,
-        reasons,
-      }];
-    })
+      },
+      solutions
+    );
+    if (score <= 0) return [];
+    return [{
+      id: `consulta-${Number(row.id)}`,
+      source_id: null,
+      source_kind: "verified",
+      source_label: String(row.source_label ?? "Consulta oficial"),
+      legal_name: String(row.legal_name ?? ""),
+      nit: row.nit ? String(row.nit) : null,
+      economic_activity: row.economic_activity ? String(row.economic_activity) : null,
+      ciiu: row.ciiu ? String(row.ciiu) : null,
+      employee_count: employees,
+      size: employees <= 200 ? "Mediana" : "Grande",
+      city: row.city ? String(row.city) : null,
+      department: row.department ? String(row.department) : null,
+      score,
+      reasons,
+    }];
+  });
+
+  return [...imported, ...verified]
     .sort((left, right) => right.score - left.score || right.employee_count - left.employee_count)
     .slice(0, Math.max(1, Math.min(200, limit)));
 }

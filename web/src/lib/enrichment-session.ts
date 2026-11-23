@@ -10,6 +10,9 @@ export type EnrichmentConfig = {
   fallbackIndustry: string;
   fallbackEmployeeRange: string;
   contactsPerRow: number;
+  /** Producto seleccionado para que una base de empresas sea buscada con sus buyer personas. */
+  solutionId?: number | null;
+  solutionName?: string;
 };
 
 export type EnrichmentOutcome = {

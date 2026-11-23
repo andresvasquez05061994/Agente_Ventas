@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Download, Sparkles } from "lucide-react";
 import { HelpTip, PageHeading } from "@/components/HelpTip";
@@ -42,6 +42,7 @@ import { readWorkbookMatrix } from "@/lib/excel-companies";
 import { parseApiResponse } from "@/lib/parse-api-response";
 import type { ApolloPerson } from "@/lib/types";
 import { OfficialCompanySources } from "@/components/OfficialCompanySources";
+import type { SellerSolution } from "@/lib/seller-solutions";
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const OUTPUT_FILL_FIELDS: EnrichFieldId[] = ["email", "empresa", "pais", "telefono", "nombre", "cargo"];
@@ -65,6 +66,11 @@ type EnrichmentSessionResponse = {
 
 type PortfolioResponse = {
   contacts?: PortfolioContact[];
+  error?: string;
+};
+
+type SellerSolutionsResponse = {
+  solutions?: SellerSolution[];
   error?: string;
 };
 
@@ -163,6 +169,25 @@ export default function EnriquecerPage() {
   const [jobId, setJobId] = useState<number | null>(null);
   const [portfolioContacts, setPortfolioContacts] = useState<PortfolioContact[]>([]);
   const [portfolioReady, setPortfolioReady] = useState(false);
+  const [solutions, setSolutions] = useState<SellerSolution[]>([]);
+  const [selectedSolutionId, setSelectedSolutionId] = useState<number | null>(null);
+
+  const selectedSolution = useMemo(
+    () => solutions.find((solution) => solution.id === selectedSolutionId && solution.active) ?? null,
+    [solutions, selectedSolutionId]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/perfil-vendedor/soluciones", { cache: "no-store" })
+      .then((response) => parseApiResponse<SellerSolutionsResponse>(response))
+      .then(({ data, error }) => {
+        if (cancelled || error || data?.error) return;
+        setSolutions((data?.solutions ?? []).filter((solution) => solution.active));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   const mappedFields = useMemo(
     () => new Set((sheet?.columns ?? []).map((column) => column.field).filter(Boolean) as EnrichFieldId[]),
@@ -193,6 +218,8 @@ export default function EnriquecerPage() {
       fallbackIndustry,
       fallbackEmployeeRange,
       contactsPerRow,
+      solutionId: selectedSolutionId,
+      solutionName: selectedSolution?.name ?? "",
     };
   }
 
@@ -268,6 +295,7 @@ export default function EnriquecerPage() {
       if (typeof config.fallbackIndustry === "string") setFallbackIndustry(config.fallbackIndustry);
       if (typeof config.fallbackEmployeeRange === "string") setFallbackEmployeeRange(config.fallbackEmployeeRange);
       if (typeof config.contactsPerRow === "number") setContactsPerRow(config.contactsPerRow);
+      if (typeof config.solutionId === "number") setSelectedSolutionId(config.solutionId);
       await loadPortfolio();
 
       const restoredAnalyzed = restored.statuses.slice(0, next.rows.length).filter((status) => status !== "pending").length;
@@ -359,11 +387,19 @@ export default function EnriquecerPage() {
   }
 
   function configuredTitles(): string[] {
+    if (selectedSolution?.fit_roles.length) return selectedSolution.fit_roles;
     return fallbackTitles
       .split(/[,;\n]/)
       .map((title) => title.trim())
       .filter(Boolean)
       .slice(0, 10);
+  }
+
+  function selectSolution(value: string) {
+    const id = Number(value);
+    const solution = solutions.find((item) => item.id === id && item.active) ?? null;
+    setSelectedSolutionId(solution?.id ?? null);
+    if (solution?.fit_roles.length) setFallbackTitles(solution.fit_roles.join(", "));
   }
 
   async function persistOutcome(
@@ -407,6 +443,21 @@ export default function EnriquecerPage() {
       .slice(0, MAX_ENRICH_BATCH);
     if (!pendingIndexes.length) {
       showInfo("No quedan filas por analizar.", "Listo");
+      return;
+    }
+    const companyOnlySearch = searchBy.includes("empresa") && !searchBy.includes("nombre");
+    if (companyOnlySearch && !selectedSolution) {
+      showWarning(
+        "Selecciona el producto o servicio para que la base de empresas se consulte con sus buyer personas.",
+        "Producto requerido"
+      );
+      return;
+    }
+    if (companyOnlySearch && selectedSolution && !selectedSolution.fit_roles.length) {
+      showWarning(
+        `«${selectedSolution.name}» no tiene cargos objetivo. Agrégalos en Perfil del vendedor antes de buscar empresas.`,
+        "Producto incompleto"
+      );
       return;
     }
 
@@ -514,6 +565,7 @@ export default function EnriquecerPage() {
                 all_roles: !broadTitles.length,
                 per_company: Math.max(5, contactsPerRow),
                 requested_count: contactsPerRow,
+                solution_id: selectedSolution?.id,
               },
             }
           : broadByTitle
@@ -624,7 +676,8 @@ export default function EnriquecerPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               leads: toSave,
-              fuente: `Enriquecer: ${prepared.fileLabel} | ${countriesCaption(allCountries, countries)}`,
+              fuente: `Enriquecer: ${prepared.fileLabel} | ${countriesCaption(allCountries, countries)}${selectedSolution ? ` | Producto: ${selectedSolution.name}` : ""}`,
+              solucion_origen: selectedSolution?.name ?? null,
             }),
           });
           const data = await res.json().catch(() => ({}));
@@ -776,6 +829,18 @@ export default function EnriquecerPage() {
 
             <SectionLabel>Filtros de respaldo</SectionLabel>
             <div className="grid gap-3 md:grid-cols-2">
+              <label className="field-group">
+                <span className="field-label">Producto o servicio para esta base</span>
+                <select className="input-field" value={selectedSolutionId ?? ""} disabled={busy} onChange={(event) => selectSolution(event.target.value)}>
+                  <option value="">Sin producto seleccionado</option>
+                  {solutions.map((solution) => <option key={solution.id} value={solution.id}>{solution.name}</option>)}
+                </select>
+                {selectedSolution ? (
+                  <span className="text-micro">Cargos objetivo: {selectedSolution.fit_roles.length ? selectedSolution.fit_roles.join(", ") : "sin definir"}.</span>
+                ) : (
+                  <span className="text-micro">Para una base solo de empresas, selecciona un producto para usar sus buyer personas.</span>
+                )}
+              </label>
               <label className="field-group">
                 <span className="field-label">Cargos si el archivo no los trae</span>
                 <input className="input-field" value={fallbackTitles} disabled={busy} onChange={(event) => setFallbackTitles(event.target.value)} placeholder="Ej.: CEO, Director de TI" />

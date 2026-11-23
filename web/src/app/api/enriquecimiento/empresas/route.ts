@@ -3,12 +3,14 @@ import { requireUser } from "@/lib/current-user";
 import { ensureDb } from "@/lib/db";
 import {
   deleteCompanySource,
+  listCompanyVerifications,
   listCompanySources,
   MAX_COMPANY_SOURCE_BYTES,
   normalizeDeclaredSource,
   parseCompanySourceFile,
   saveCompanySource,
 } from "@/lib/official-company-data";
+import { isDatosGovConfigured } from "@/lib/official-company-lookup";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -18,8 +20,15 @@ export async function GET(req: NextRequest) {
     await ensureDb();
     const actor = await requireUser(req);
     if (actor instanceof NextResponse) return actor;
-    const sources = await listCompanySources(actor.id);
-    return NextResponse.json({ sources });
+    const [sources, verifications] = await Promise.all([
+      listCompanySources(actor.id),
+      listCompanyVerifications(actor.id),
+    ]);
+    return NextResponse.json({
+      sources,
+      verifications,
+      data_gov_configured: isDatosGovConfigured(),
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudieron cargar las bases de empresas";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -448,6 +448,48 @@ async function migration010OfficialCompanySources(sql: Sql) {
   `;
 }
 
+/**
+ * 011: verificaciones puntuales por NIT desde fuentes públicas configuradas.
+ *
+ * Las consultas se guardan separadas de los archivos importados para mantener
+ * trazabilidad de origen, período y vigencia de cada dato. Un dato financiero
+ * no se convierte en tamaño de empresa si la fuente no informó trabajadores.
+ */
+async function migration011OfficialCompanyVerifications(sql: Sql) {
+  await sql`
+    CREATE TABLE IF NOT EXISTS official_company_verifications (
+      id BIGSERIAL PRIMARY KEY,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      nit TEXT NOT NULL,
+      source_key TEXT NOT NULL,
+      source_label TEXT NOT NULL,
+      source_url TEXT NOT NULL DEFAULT '',
+      dataset_id TEXT NOT NULL DEFAULT '',
+      legal_name TEXT NOT NULL,
+      economic_activity TEXT,
+      ciiu TEXT,
+      macrosector TEXT,
+      employee_count INTEGER,
+      city TEXT,
+      department TEXT,
+      reporting_period TEXT,
+      financial_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      raw_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (owner_id, nit, source_key)
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_company_verifications_owner_checked
+    ON official_company_verifications (owner_id, checked_at DESC)
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_company_verifications_owner_employees
+    ON official_company_verifications (owner_id, employee_count)
+  `;
+}
+
 const MIGRATIONS: Migration[] = [
   { id: "001_init", run: migration001Init },
   { id: "002_phone_search", run: migration002PhoneSearch },
@@ -459,6 +501,7 @@ const MIGRATIONS: Migration[] = [
   { id: "008_enrichment_jobs", run: migration008EnrichmentJobs },
   { id: "009_commercial_profile", run: migration009CommercialProfile },
   { id: "010_official_company_sources", run: migration010OfficialCompanySources },
+  { id: "011_official_company_verifications", run: migration011OfficialCompanyVerifications },
 ];
 
 export async function applyMigrations(sql: Sql) {

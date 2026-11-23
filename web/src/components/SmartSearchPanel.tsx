@@ -27,7 +27,7 @@ type SellerSolutionBrief = {
 };
 
 type CompanyMatch = {
-  id: number;
+  id: string;
   legal_name: string;
   source_label: string;
   employee_count: number;
@@ -476,7 +476,7 @@ export function SmartSearchPanel({ disabled, onSearch }: SmartSearchPanelProps) 
 
       {selectedIds.length ? (
         <section className="smart-search-solutions smart-search-solutions--accounts" aria-label="Cuentas compatibles">
-          <p className="text-caption">2. Opcional: elige una cuenta compatible de una base cargada.</p>
+          <p className="text-caption">2. Opcional: elige una cuenta compatible de una base importada o verificada.</p>
           {loadingMatches ? (
             <p className="text-micro">Buscando cuentas compatibles…</p>
           ) : matches.length ? (
@@ -512,7 +512,7 @@ export function SmartSearchPanel({ disabled, onSearch }: SmartSearchPanelProps) 
             </div>
           ) : (
             <p className="text-micro">
-              No hay cuentas compatibles en las bases cargadas. <Link className="btn-link" href="/enriquecer">Importa una base declarada</Link> para compararlas.
+              No hay cuentas compatibles con número de empleados. <Link className="btn-link" href="/enriquecer">Importa una base o verifica una cuenta</Link> para compararlas.
             </p>
           )}
         </section>

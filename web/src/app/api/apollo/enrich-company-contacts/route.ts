@@ -5,6 +5,7 @@ import { APOLLO_COUNTRIES, APOLLO_PER_PAGE_OPTIONS, normalizeJobTitles } from "@
 import { cleanCompanyName, parseCompanyCell } from "@/lib/excel-companies";
 import { requireUser } from "@/lib/current-user";
 import { ensureDb } from "@/lib/db";
+import { getActiveSellerSolutionsByIds } from "@/lib/seller-solutions";
 import { assertApolloBudget, assertApolloEnrichmentRateLimit, UsageLimitError } from "@/lib/usage-guard";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +27,23 @@ export async function POST(req: NextRequest) {
 
     const country = String(body.country ?? "").trim();
     if (country && !COUNTRIES.has(country)) return NextResponse.json({ error: "País no válido." }, { status: 400 });
-    const titles = normalizeJobTitles(Array.isArray(body.titles) ? body.titles.map(String) : []);
+    const requestedTitles = normalizeJobTitles(Array.isArray(body.titles) ? body.titles.map(String) : []);
+    const solutionId = Number(body.solution_id);
+    const solution = Number.isInteger(solutionId) && solutionId > 0
+      ? (await getActiveSellerSolutionsByIds(actor.id, [solutionId]))[0]
+      : null;
+    if (Number.isInteger(solutionId) && solutionId > 0 && !solution) {
+      return NextResponse.json({ error: "El producto seleccionado ya no está activo en tu perfil." }, { status: 400 });
+    }
+    const titles = solution
+      ? normalizeJobTitles(solution.fit_roles)
+      : requestedTitles;
+    if (solution && !titles.length) {
+      return NextResponse.json(
+        { error: `El producto «${solution.name}» no tiene cargos objetivo. Agrégalos en Perfil del vendedor antes de buscar.` },
+        { status: 400 }
+      );
+    }
     const allRoles = body.all_roles === true || !titles.length;
     const perCompany = Number(body.per_company ?? 5);
     if (!APOLLO_PER_PAGE_OPTIONS.includes(perCompany as (typeof APOLLO_PER_PAGE_OPTIONS)[number])) {

@@ -1847,6 +1847,25 @@ button {
   width: min(220px, 100%);
 }
 
+.enrichment-source-card__lookup,
+.enrichment-source-card__verified {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-bg-primary, #fff);
+}
+
+.enrichment-source-card__lookup .input-field {
+  width: min(280px, 100%);
+}
+
+.dark .enrichment-source-card__lookup,
+.dark .enrichment-source-card__verified {
+  background: transparent;
+}
+
 .enrichment-source-card__list {
   display: grid;
   gap: 6px;

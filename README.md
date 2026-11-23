@@ -22,8 +22,9 @@ Plataforma de prospección y gestión de leads (Fase 1).
    - `ADMIN_PASSWORD` — contraseña de ese administrador (mínimo 8). Si se define, se actualiza en cada arranque
    - `APP_PASSWORD` — solo se usa como contraseña inicial del admin si `ADMIN_PASSWORD` no está
    - `AUTH_SECRET` — cadena larga aleatoria para firmar la sesión
+   - `DATOS_GOV_APP_TOKEN` — token privado de Datos Abiertos Colombia para validar empresas por NIT. Es opcional: sin él, siguen disponibles las importaciones Excel/CSV.
 
-El tope Apollo de la app es 2.500 créditos al mes y vuelve a ese número cada mes (UTC). En Configuración se puede subir solo para el mes en curso.
+El tope Apollo de la app es 5.000 créditos globales al mes y vuelve a ese número cada mes (UTC). En Configuración se puede ajustar solo para el mes en curso.
 5. Deploy. La tabla `leads` se crea automáticamente en el primer request.
 6. Verifica: `https://agente-ventas-three.vercel.app/api/health` debe responder `{"status":"ok"}`.
 7. Entra en `/login` con `ADMIN_EMAIL` y `ADMIN_PASSWORD`. Cada persona crea su cuenta y queda pendiente hasta que el administrador la apruebe en Usuarios. Sin sesión, las APIs responden 401.
